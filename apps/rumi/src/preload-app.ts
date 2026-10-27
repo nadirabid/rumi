@@ -82,6 +82,11 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
   contextBridge.exposeInMainWorld('__DSH_HOST_PATHS__', {
     pathFor: (file: File) => webUtils.getPathForFile(file),
   })
+  // Rumi keeps the sidebar to New Session plus the More menu: the Plugins and
+  // Automation task panels still exist, they just start unpinned and are
+  // reached through More. A browser build leaves this undefined and shows
+  // every registered launcher.
+  contextBridge.exposeInMainWorld('__DSH_HIDDEN_PANELS__', ['plugins', 'schedules'])
   contextBridge.exposeInMainWorld('dshDesktopBoot', {
     ready: () => ipcRenderer.invoke(DESKTOP_IPC.boot) as Promise<unknown>,
     failed: (message: string) => ipcRenderer.invoke(DESKTOP_IPC.bootFailed, message) as Promise<void>,

@@ -1,7 +1,8 @@
 # Rumi
 
-A DeepSeek Harness app built from this fork. `apps/rumi` is a copy of `apps/desktop`
-rebranded as its own product; everything else is upstream, unmodified.
+A DeepSeek Harness app built for my kids — somewhere to play, make things, and learn
+alongside an agent. `apps/rumi` is a copy of `apps/desktop` rebranded as its own
+product; everything else is upstream, unmodified.
 
 ## What differs from upstream
 

@@ -1,0 +1,6 @@
+# Rumi's own brand occupants. The stock official brand package is disabled in
+# the profile patch so these single slots stay free.
+- insert:
+    - id: rumi-brand
+      name: '@rumi/brand'
+      config: {}

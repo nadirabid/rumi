@@ -20,7 +20,7 @@ export type AccountMenuProps = PropsRuntime<'settings.launcher'> & PropsLocale<'
  * @returns account menu launcher.
  */
 export function AccountMenu({
-  subscribeSessionExpired, subscribeModelSignInRequired, wide, settingsShortcut, openSettings, openOnboarding, settingsOpen,
+  subscribeSessionExpired, subscribeModelSignInRequired, wide, settingsShortcut, openSettings, openOnboarding, settingsOpen, openPanel,
   useAccount, useTheme, signOut, hasRunningAccountTasks, refreshAccount, bonusNoticeShown, bonusNoticeDismissed,
   contactUs, showLogin, start, cancel, avatarFailed, t,
 }: AccountMenuProps) {
@@ -53,6 +53,14 @@ export function AccountMenu({
     finally { setBusy(false) }
   }
   // The plugin's start publishes `loginFailed` before it rejects, so the dialog owns the report.
+  // A deployment that hides the sidebar's panel launchers (Rumi) reaches those
+  // panels from this menu instead of a second launcher row.
+  const seeded = (globalThis as { __DSH_HIDDEN_PANELS__?: unknown }).__DSH_HIDDEN_PANELS__
+  const hidden = Array.isArray(seeded) ? seeded.filter((id): id is string => typeof id === 'string') : []
+  const panelItems = [
+    ...(hidden.includes('plugins') ? [{ id: 'panel:plugins', label: t('plugins') }] : []),
+    ...(hidden.includes('schedules') ? [{ id: 'panel:schedules', label: t('automationTasks') }] : []),
+  ]
   const beginSignIn = (): void => { setOpen(false); void start().catch(() => undefined) }
   return <div ref={anchor} className={css.root}>
     {signInNotice > 0 && <Toast key={signInNotice} text={t('modelSignInRequired')} onDone={() => { setSignInNotice(0) }} />}
@@ -72,6 +80,7 @@ export function AccountMenu({
         {wide && <span className={css.label}>{signedIn ? label : t('more')}</span>}
       </button>}
       items={[
+        ...panelItems,
         { id: 'settings', label: t('settings'), icon: <IconSettingsOutlineMedium size={16} />,
           ...(settingsShortcut === undefined ? {} : { shortcut: settingsShortcut }) },
         { id: 'contact', label: t('contactUs'), icon: <IconPaperPlaneOutlineMedium size={16} /> },
@@ -80,7 +89,8 @@ export function AccountMenu({
       ]}
       onClose={() => { setOpen(false) }}
       onSelect={(id) => {
-        if (id === 'settings') { setOpen(false); trigger.current?.focus(); openSettings() }
+        if (id.startsWith('panel:') && openPanel !== undefined) { setOpen(false); openPanel(id.slice('panel:'.length)) }
+        else if (id === 'settings') { setOpen(false); trigger.current?.focus(); openSettings() }
         else if (id === 'contact') { setOpen(false); contactUs() }
         else if (id === 'signin') beginSignIn()
         else void requestSignOut()

@@ -36,8 +36,9 @@ editing it changes DeepSeek Harness as well as Rumi.
 | root `package.json` (only the `*:rumi` scripts) | build entry points |
 | `scripts/client-build-environment.ts` (only `DSH_CLIENT_TITLE`) | window title |
 | `packages/client/web/src/boot-page.ts` (only the wordmark text) | boot splash — no slot for it |
-| `packages/client/{ui-settings-account,ui-settings-models,ui-sidebar-documentpreview,ui-plugin-manager}/` locale copy | product name in visible text; no locale-override seam exists |
-| `packages/client/ui-sidebar/` (launcher pinning only) | Rumi hides the Plugins and Automation rows behind More; stock renders every launcher unless the app preload seeds a hidden list |
+| `packages/client/ui-settings-account/` | locale copy, plus the Plugins and Automation task rows in the account menu — the single bottom More control Rumi keeps |
+| `packages/client/{ui-settings-models,ui-sidebar-documentpreview,ui-plugin-manager}/` locale copy | product name in visible text; no locale-override seam exists |
+| `packages/client/ui-sidebar/` (launcher pinning only) | Rumi hides the Plugins and Automation rows by seeding `__DSH_HIDDEN_PANELS__`; a build that seeds nothing renders exactly as stock |
 | `RUMI.md`, `AGENTS.md` | documentation |
 
 ### Forbidden
@@ -93,6 +94,32 @@ Environment traps, all of them real:
   silence. This costs an hour if forgotten.
 - **Commit hooks** — upstream lefthook checks translation pairing and fails on a fork.
   `git commit --no-verify` is expected here.
+
+### Verifying UI changes
+
+Screen recording is denied to the agent shell, so `screencapture` fails. Verify the
+rendered DOM instead:
+
+```sh
+env -u ELECTRON_RUN_AS_NODE "/Applications/Rumi.app/Contents/MacOS/Rumi" \
+  --remote-debugging-port=9222 &
+curl -s http://127.0.0.1:9222/json/list   # webSocketDebuggerUrl
+```
+
+Then drive `Runtime.evaluate` over that socket (`ws` lives in
+`node_modules/.pnpm/ws@*/node_modules/ws`) and read `document.querySelector…`. This is
+how the sidebar layout was confirmed: the More button's ancestry ends in
+`footArea`, no `nav` renders, and its menu reads "Plugins | Automation tasks".
+
+Two traps that produced false confidence here:
+
+- `pkill -f "MacOS/Rumi$"` does not match an instance launched with extra argv.
+  Kill with `pkill -9 -f "Rumi.app/Contents"` and confirm `pgrep` is empty, or you
+  will keep looking at the old build.
+- The packaged app bundles `apps/rumi/lib` and the workspace packages as sealed
+  tarballs. Editing `apps/rumi/src/preload-app.ts` or any `packages/client/*` source
+  requires `pnpm --filter dsh-rumi run build` and `pnpm run build:official`
+  respectively before packaging; the root `pnpm build` rebuilds neither.
 
 ### Verify before claiming done
 

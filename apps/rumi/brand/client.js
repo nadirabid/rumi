@@ -10,7 +10,6 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react');
     const h = React.createElement;
-    const { MenuItemButton } = require('@deepseek-ai/dsh-client-ui-primitives');
 
     /**
      * The wordmark, not a glyph: the app icon is the word "rumi" set in Arial,
@@ -43,22 +42,6 @@ window.__ModuleLoader__.load({
       return null;
     }
 
-    /**
-     * The sidebar's More menu. Its launcher rows are hidden from the sidebar by
-     * the app preload, so this is where Plugins and Automation tasks surface.
-     */
-    function MoreMenu({ entries, onOpen, onDismiss }) {
-      if (!Array.isArray(entries) || entries.length === 0) return null;
-      return h(React.Fragment, null, entries.map(entry => h(MenuItemButton, {
-        key: entry.id,
-        current: entry.active === true,
-        onSelect: () => {
-          onDismiss();
-          onOpen(entry.id);
-        },
-      }, entry.label)));
-    }
-
     return {
       inject: ['slots'],
       apply(ctx) {
@@ -74,10 +57,6 @@ window.__ModuleLoader__.load({
           name: 'conversation.hero.brand.mark',
           id: 'rumi-brand',
         }, Wordmark));
-        ctx.slots.inject('sidebar.panellist.actions', () => ctx.slots.register({
-          name: 'sidebar.panellist.actions',
-          id: 'rumi-more',
-        }, MoreMenu));
       },
     };
   },

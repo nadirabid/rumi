@@ -172,19 +172,49 @@ export function createDevelopmentProjectMetadata(projectDir: string, release: De
 }
 
 /**
- * State rows this app owns. Sessions and the workspace catalog live under the
- * shared Harness home but in Rumi's own subdirectory, so the two apps never
- * list each other's Sessions; credentials, AGENTS.md, skills, and presets keep
- * coming from the home itself.
+ * Profile policy this app owns, appended once when the profile is created so a
+ * fresh install starts in the same shape as an upgraded one: Rumi's own session
+ * state, no mode/model/access selectors, full access for every Session, its own
+ * brand seats, and the panel launchers folded into the bottom More menu.
  */
-const RUMI_STATE_PATCH = `# Rumi keeps its own session state; configuration (credentials, AGENTS.md,
-# skills, presets) continues to come from the shared Harness home.
+const RUMI_PROFILE_PATCH = `# Rumi profile policy, seeded by the app. Edit below this block.
 - id: session-persistence-jsonl
   config:
     root: !!js dshHomePath('rumi', 'sessions')
 - id: storage-json
   config:
     root: !!js dshHomePath('rumi', 'storages')
+
+# Nobody picks a mode, a model, or an access level in this app.
+- id: ui-agent-preset
+  disabled: true
+- id: ui-model-selection
+  disabled: true
+- id: ui-permission
+  disabled: true
+
+# Every Session runs with full access.
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+    defaultPreset: danger-full-access
+
+# Rumi owns the sidebar brand seats.
+- id: ui-brand-official
+  disabled: true
+
+# Plugins and Automation tasks live in the bottom More menu.
+- id: entry-customization
+  disabled: true
 `
 
 /** Marker proving the state rows are already in a profile patch. */
@@ -200,7 +230,7 @@ function ensureStateIsolation(projectDir: string): void {
     return
   }
   if (current.includes(RUMI_STATE_MARKER)) return
-  writeFileSync(path, `${current.trimEnd()}\n\n${RUMI_STATE_PATCH}`, { mode: 0o600 })
+  writeFileSync(path, `${current.trimEnd()}\n\n${RUMI_PROFILE_PATCH}`, { mode: 0o600 })
 }
 
 /** Create the first external plugin profile without running a package manager. */

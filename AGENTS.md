@@ -7,6 +7,23 @@ fork of `deepseek-ai/deepseek-harness` (tag `dsh-v0.2.1-rc.3`). Upstream is the
 `upstream` remote. `apps/rumi` is the only product surface we own, and the stock app in
 `apps/desktop` must keep building unchanged from the same tree.
 
+### Why it exists
+
+Rumi is built **for my kids** — a place for them to play, make things, and learn by
+working alongside an agent. That is the product goal, and it should decide arguments
+that would otherwise be close calls:
+
+- Prefer the simpler, safer default. A child should not have to reason about modes,
+  permissions, or plugin state to get something done.
+- Assume the person at the keyboard will click things to see what happens. Destructive
+  actions deserve confirmation; recoverable ones should not be buried.
+- The interface should be legible to someone who has never used a terminal. Where the
+  stock UI assumes a developer's mental model, the Rumi version can assume less.
+- Fun is part of the point, but never at the cost of the two rules above.
+
+Do not let a general-purpose improvement in without asking whether it helps a kid use
+the app. When in doubt, the answer is the smaller change.
+
 The table below is the whole allowed-change set. Anything outside it is shared code:
 editing it changes DeepSeek Harness as well as Rumi.
 

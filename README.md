@@ -1,3 +1,37 @@
+# Rumi
+
+Rumi is a DeepSeek Harness app built for my kids — a place for them to play, make
+things, and learn by working alongside an agent. It is the same harness underneath:
+same agent, same tools, same Sessions format. What differs is the product around it —
+its own app, its own name and icon, its own profile and state, and eventually its own
+interface, aimed at how children actually use a computer.
+
+Rumi runs **alongside** DeepSeek Harness on the same machine. The two share credentials,
+`AGENTS.md`, and skills, but never share Sessions, workspaces, or profiles.
+
+```sh
+# build
+export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk
+pnpm install --no-frozen-lockfile && pnpm build
+pnpm --filter dsh-rumi run build
+
+# package (unsigned, local)
+export DSH_DESKTOP_APP_ID=com.nadirmuzaffar.rumi
+export npm_execpath="$PWD/node_modules/pnpm/bin/pnpm.mjs"
+node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64 --unsigned
+```
+
+Then copy `apps/rumi/.desktop-build/targets/mac-arm64/unsigned-artifacts/mac-arm64/Rumi.app`
+to `/Applications` and open it.
+
+- [`AGENTS.md`](AGENTS.md) — the fork's goals, the exact paths we may change, and the
+  build traps. Read this before touching anything.
+- [`RUMI.md`](RUMI.md) — what differs from upstream, and where the pieces live.
+
+Everything below is the upstream project Rumi is built on.
+
+---
+
 # DeepSeek Harness
 
 English | [中文](README.zh.md)

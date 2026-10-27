@@ -37,6 +37,7 @@ editing it changes DeepSeek Harness as well as Rumi.
 | `scripts/client-build-environment.ts` (only `DSH_CLIENT_TITLE`) | window title |
 | `packages/client/web/src/boot-page.ts` (only the wordmark text) | boot splash — no slot for it |
 | `packages/client/{ui-settings-account,ui-settings-models,ui-sidebar-documentpreview,ui-plugin-manager}/` locale copy | product name in visible text; no locale-override seam exists |
+| `packages/client/ui-sidebar/` (launcher pinning only) | Rumi hides the Plugins and Automation rows behind More; stock renders every launcher unless the app preload seeds a hidden list |
 | `RUMI.md`, `AGENTS.md` | documentation |
 
 ### Forbidden

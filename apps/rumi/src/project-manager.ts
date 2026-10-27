@@ -23,7 +23,8 @@ import type { DesktopPaths } from './paths.ts'
 import type { DesktopRelease } from './release.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
 import {
-  initProfile, PROFILE_TEMPLATES, removeLinkProjections, sanitizeProfile, type ProfileTemplate,
+  initProfile, PROFILE_PATCH_FILENAME, PROFILE_TEMPLATES, removeLinkProjections, sanitizeProfile,
+  type ProfileTemplate,
 } from '@deepseek-ai/dsh-app-boot'
 
 const PROJECT_NAME = '@deepseek-ai/dsh-desktop-runtime'
@@ -170,7 +171,40 @@ export function createDevelopmentProjectMetadata(projectDir: string, release: De
   writeFileSync(join(projectDir, 'pnpm-workspace.yaml'), workspaceFile(), { mode: 0o600 })
 }
 
+/**
+ * State rows this app owns. Sessions and the workspace catalog live under the
+ * shared Harness home but in Rumi's own subdirectory, so the two apps never
+ * list each other's Sessions; credentials, AGENTS.md, skills, and presets keep
+ * coming from the home itself.
+ */
+const RUMI_STATE_PATCH = `# Rumi keeps its own session state; configuration (credentials, AGENTS.md,
+# skills, presets) continues to come from the shared Harness home.
+- id: session-persistence-jsonl
+  config:
+    root: !!js dshHomePath('rumi', 'sessions')
+- id: storage-json
+  config:
+    root: !!js dshHomePath('rumi', 'storages')
+`
+
+/** Marker proving the state rows are already in a profile patch. */
+const RUMI_STATE_MARKER = "dshHomePath('rumi', 'sessions')"
+
+/** Append the state rows to a profile patch once, leaving user rows alone. */
+function ensureStateIsolation(projectDir: string): void {
+  const path = join(projectDir, PROFILE_PATCH_FILENAME)
+  let current: string
+  try {
+    current = readFileSync(path, 'utf8')
+  } catch {
+    return
+  }
+  if (current.includes(RUMI_STATE_MARKER)) return
+  writeFileSync(path, `${current.trimEnd()}\n\n${RUMI_STATE_PATCH}`, { mode: 0o600 })
+}
+
 /** Create the first external plugin profile without running a package manager. */
 export function createPluginProfile(projectDir: string): void {
   initProfile(projectDir, WEB_PROFILE.bundles)
+  ensureStateIsolation(projectDir)
 }

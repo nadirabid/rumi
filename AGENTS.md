@@ -1,5 +1,94 @@
 # AGENTS.md
 
+## This checkout is the Rumi fork
+
+Rumi is a **separate installable macOS app** built on DeepSeek Harness. This repo is a
+fork of `deepseek-ai/deepseek-harness` (tag `dsh-v0.2.1-rc.3`). Upstream is the
+`upstream` remote. `apps/rumi` is the only product surface we own, and the stock app in
+`apps/desktop` must keep building unchanged from the same tree.
+
+The table below is the whole allowed-change set. Anything outside it is shared code:
+editing it changes DeepSeek Harness as well as Rumi.
+
+### Allowed to modify
+
+| Path | Why |
+|---|---|
+| `apps/rumi/**` | the app: identity, profile bootstrap, icons, welcome window |
+| `apps/rumi/brand/**` | **new** plugin packages we add — brand now, the custom UI bundles later |
+| root `package.json` (only the `*:rumi` scripts) | build entry points |
+| `scripts/client-build-environment.ts` (only `DSH_CLIENT_TITLE`) | window title |
+| `packages/client/web/src/boot-page.ts` (only the wordmark text) | boot splash — no slot for it |
+| `packages/client/{ui-settings-account,ui-settings-models,ui-sidebar-documentpreview,ui-plugin-manager}/` locale copy | product name in visible text; no locale-override seam exists |
+| `RUMI.md`, `AGENTS.md` | documentation |
+
+### Forbidden
+
+- `apps/desktop/**` — the stock app must build unmodified.
+- `apps/cli/**`, `apps/web/**`, `apps/desktop-host/**` — shared runtime.
+- `packages/**` except the boot-page wordmark line above — published upstream packages.
+- Renaming or deleting upstream files, or gating upstream behaviour behind a fork flag.
+
+If a change seems to need one of these, build it as a package under `apps/rumi/brand/`-style
+directories and compose it into Rumi's profile. The slot system exists for this: `ctx.slots` replaces UI,
+a bundle patch replaces loader rows, and neither needs a fork.
+
+### Product facts
+
+| | |
+|---|---|
+| package | `dsh-rumi` (`apps/rumi`) |
+| bundle id | `com.nadirmuzaffar.rumi` |
+| URL scheme | `rumi` |
+| profile | `$DSH_HOME/profiles/rumi` |
+| state | `$DSH_HOME/rumi/sessions`, `$DSH_HOME/rumi/storages` |
+| config | shared from `$DSH_HOME`: credentials, `AGENTS.md`, skills, presets |
+| window title | `Rumi` |
+| icon | `apps/rumi/resources/icon*.png` — the word "rumi" |
+
+Rumi and DeepSeek Harness run at the same time. They share the Harness home for
+configuration but never share Sessions, workspaces, or profiles.
+
+### Build
+
+```sh
+export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk
+pnpm install --no-frozen-lockfile
+pnpm build
+pnpm --filter dsh-rumi run build
+
+export DSH_DESKTOP_APP_ID=com.nadirmuzaffar.rumi
+export npm_execpath="$PWD/node_modules/pnpm/bin/pnpm.mjs"
+node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64 --unsigned
+```
+
+Then copy `apps/rumi/.desktop-build/targets/mac-arm64/unsigned-artifacts/mac-arm64/Rumi.app`
+to `/Applications/` and open it.
+
+Environment traps, all of them real:
+
+- **macOS 27 SDK** — the native addon fails to link; pin `MacOSX15.sdk`.
+- **`npm_execpath`** — `package-target` spawns `node $npm_execpath`, and a standalone pnpm
+  binary is not a JS file. Point it at `node_modules/pnpm/bin/pnpm.mjs`.
+- **`ELECTRON_RUN_AS_NODE=1`** — every DSH shell sets it. Launch with
+  `env -u ELECTRON_RUN_AS_NODE open -a …`, or Electron runs as plain Node and exits 0 in
+  silence. This costs an hour if forgotten.
+- **Commit hooks** — upstream lefthook checks translation pairing and fails on a fork.
+  `git commit --no-verify` is expected here.
+
+### Verify before claiming done
+
+1. `Rumi.app` is in `/Applications` and `codesign -v` passes.
+2. It launches and stays running (`pgrep -f "MacOS/Rumi$"`).
+3. `~/Library/Application Support/dsh-rumi` and `~/.dsh/profiles/rumi` exist, and the
+   profile patch carries the state-isolation rows.
+4. `~/.dsh/rumi/sessions` grows when Rumi runs; `~/.dsh/sessions` does not.
+5. The stock app still builds: `pnpm --filter @deepseek-ai/dsh-desktop run build`.
+
+---
+
+Everything below is upstream's contributor guide and still applies to upstream code.
+
 DeepSeek Harness is an all-plugin Cordis agent harness. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
 
 ## Pre-stable APIs and released Session data

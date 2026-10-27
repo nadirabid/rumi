@@ -1,0 +1,29 @@
+{
+  "name": "@rumi/brand",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Rumi brand occupants for the DeepSeek Harness web client",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}

@@ -865,6 +865,115 @@ importers:
         specifier: ^4.22.4
         version: 4.23.13
 
+  apps/rumi:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../vendor/cordis
+      '@deepseek-ai/dsh-api-gateway':
+        specifier: workspace:*
+        version: link:../../packages/api/gateway
+      electron-updater:
+        specifier: ^6.8.9
+        version: 6.8.9(supports-color@9.4.0)
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
+    devDependencies:
+      '@deepseek-ai/dsh-app-boot':
+        specifier: workspace:*
+        version: link:../../packages/boot/app-boot
+      '@deepseek-ai/dsh-atomic-write':
+        specifier: workspace:*
+        version: link:../../packages/util/atomic-write
+      '@deepseek-ai/dsh-client-product-analytics':
+        specifier: workspace:*
+        version: link:../../packages/client/product-analytics
+      '@deepseek-ai/dsh-client-shortcuts':
+        specifier: workspace:*
+        version: link:../../packages/client/shortcuts
+      '@deepseek-ai/dsh-client-ui-primitives':
+        specifier: workspace:*
+        version: link:../../packages/client/ui-primitives
+      '@deepseek-ai/dsh-client-ui-settings-general':
+        specifier: workspace:*
+        version: link:../../packages/client/ui-settings-general
+      '@deepseek-ai/dsh-client-ui-sidebar-browser':
+        specifier: workspace:*
+        version: link:../../packages/client/ui-sidebar-browser
+      '@deepseek-ai/dsh-client-ui-theme':
+        specifier: workspace:*
+        version: link:../../packages/client/ui-theme
+      '@deepseek-ai/dsh-deepseek-account':
+        specifier: workspace:*
+        version: link:../../packages/credentials/deepseek-account
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:*
+        version: link:../../packages/util/home-paths
+      '@deepseek-ai/node-addon-system':
+        specifier: workspace:~
+        version: link:../../native/system/packages/entry
+      '@electron/get':
+        specifier: ^5.1.0
+        version: 5.1.0(supports-color@9.4.0)
+      '@electron/notarize':
+        specifier: 2.5.0
+        version: 2.5.0(supports-color@9.4.0)
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      '@types/semver':
+        specifier: ^7.8.0
+        version: 7.8.0
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      app-builder-lib:
+        specifier: 26.17.0
+        version: 26.17.0(patch_hash=b70dc2a2a78ffabb80a4f14fafc7c103237f2b0a207e1f296fa1c1387ea29348)(dmg-builder@26.17.0)(electron-builder-squirrel-windows@26.17.0)(supports-color@9.4.0)
+      cos-nodejs-sdk-v5:
+        specifier: 3.0.0
+        version: 3.0.0
+      electron:
+        specifier: ^44.7.0
+        version: 44.7.0(supports-color@9.4.0)
+      electron-builder:
+        specifier: ^26.17.0
+        version: 26.17.0(electron-builder-squirrel-windows@26.17.0)(supports-color@9.4.0)
+      extract-zip:
+        specifier: ^2.0.1
+        version: 2.0.1(supports-color@9.4.0)
+      js-yaml:
+        specifier: ^4.3.2
+        version: 4.3.2
+      koffi:
+        specifier: 3.1.1
+        version: 3.1.1
+      pnpm:
+        specifier: 11.28.5
+        version: 11.28.5
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
+      sharp:
+        specifier: 0.35.5
+        version: 0.35.5(@types/node@22.20.1)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vite:
+        specifier: ^6.4.3
+        version: 6.4.3(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.0)
+
   apps/web:
     devDependencies:
       '@deepseek-ai/cordis-plugin-group':
@@ -17843,10 +17952,12 @@ packages:
 
   '@modelcontextprotocol/server-everything@2026.8.31':
     resolution: {integrity: sha512-5U3OZh8Xq0Li4nA26l6uNvV9/1suMDuWSn+NjLZIhzinhMY6N3A4DCrxVecBGPf2PsNFKTEv5krxGPRwzxc7jQ==}
+    deprecated: 'Date-based versions are no longer published. This package has resumed semantic versioning at 1.0.0: install the latest version.'
     hasBin: true
 
   '@modelcontextprotocol/server-filesystem@2026.8.31':
     resolution: {integrity: sha512-kKaFkyAh6oipvc9+EAbJ552JafnMnOq5nzmzWkp1jJdBhTAAGpmIpWihUG1+rfNhmEFM98gUZDdCHCDD4v6a7Q==}
+    deprecated: 'Date-based versions are no longer published. This package has resumed semantic versioning at 1.0.0: install the latest version.'
     hasBin: true
 
   '@modelcontextprotocol/server@2.2.0':
@@ -26168,7 +26279,7 @@ snapshots:
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
-      '@types/node': 22.20.1
+      '@types/node': 26.4.1
 
   '@types/cacheable-request@6.0.3':
     dependencies:
@@ -26185,11 +26296,11 @@ snapshots:
   '@types/compression@1.8.1':
     dependencies:
       '@types/express': 5.0.6
-      '@types/node': 22.20.1
+      '@types/node': 26.4.1
 
   '@types/connect@3.4.38':
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 26.4.1
 
   '@types/d3-array@3.2.2': {}
 
@@ -26320,7 +26431,7 @@ snapshots:
 
   '@types/express-serve-static-core@5.1.3':
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 26.4.1
       '@types/qs': 6.15.1
       '@types/range-parser': 1.2.7
       '@types/send': 1.2.1
@@ -26387,7 +26498,7 @@ snapshots:
 
   '@types/node-fetch@2.6.13':
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 26.4.1
       form-data: 4.0.6
 
   '@types/node@14.18.63': {}
@@ -26437,7 +26548,7 @@ snapshots:
 
   '@types/readable-stream@4.0.24':
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 26.4.1
 
   '@types/regenerator-runtime@0.13.8': {}
 
@@ -26451,12 +26562,12 @@ snapshots:
 
   '@types/send@1.2.1':
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 26.4.1
 
   '@types/serve-static@2.2.0':
     dependencies:
       '@types/http-errors': 2.0.5
-      '@types/node': 22.20.1
+      '@types/node': 26.4.1
 
   '@types/spdx-expression-parse@4.0.0': {}
 
@@ -30167,7 +30278,7 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.1
-      '@types/node': 22.20.1
+      '@types/node': 26.4.1
       long: 5.3.2
 
   proxy-addr@2.0.8:

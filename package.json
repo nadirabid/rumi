@@ -216,7 +216,13 @@
     "verify-official-bundle-catalog": "tsx scripts/gen-official-bundle-catalog.ts --check",
     "gen-provider-data": "tsx packages/llm/llm-pi-ai/scripts/gen-provider-data.ts",
     "verify-provider-data": "tsx packages/llm/llm-pi-ai/scripts/gen-provider-data.ts --check",
-    "verify-product-use": "tsx scripts/verify-product-use.ts"
+    "verify-product-use": "tsx scripts/verify-product-use.ts",
+    "build:rumi": "pnpm --filter dsh-rumi run build",
+    "dev:rumi": "pnpm --filter dsh-rumi run dev",
+    "package:rumi": "pnpm --filter dsh-rumi run package",
+    "package:rumi:mac:arm64": "pnpm --filter dsh-rumi run package:mac:arm64",
+    "package:rumi:mac:arm64:unsigned": "pnpm --filter dsh-rumi run package:mac:arm64:unsigned",
+    "package:rumi:mac:arm64:dir": "pnpm --filter dsh-rumi run package:mac:arm64:dir"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-hooks-claude-code": "workspace:*",

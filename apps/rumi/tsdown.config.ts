@@ -90,9 +90,9 @@ export default defineConfig([
     clean: false,
     deps: { neverBundle: ['electron'] },
   },
-  ...(['preload-app', 'preload-welcome', 'preload-platform-account', 'preload-mandatory', 'preload-update-dialog'] as const).map(name => ({
+  ...(['preload-bambu', 'preload-app', 'preload-welcome', 'preload-platform-account', 'preload-mandatory', 'preload-update-dialog'] as const).map(name => ({
     // Sandboxed Electron preloads run as CommonJS even though the application package is ESM.
-    entry: { [name]: `lib/types/${name}.js` },
+    entry: { [name]: name === 'preload-bambu' ? 'brand/print-studio/lib/desktop/preload-bambu.js' : `lib/types/${name}.js` },
     plugins: [packagedImportsPlugin(preloadImports)],
     outDir: 'lib',
     format: 'cjs' as const,

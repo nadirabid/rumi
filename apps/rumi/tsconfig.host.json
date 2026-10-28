@@ -31,6 +31,9 @@
     },
     {
       "path": "../../packages/client/product-analytics/tsconfig.host.json"
+    },
+    {
+      "path": "./brand/print-studio/tsconfig.desktop.json"
     }
   ],
   "exclude": [

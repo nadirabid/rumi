@@ -23,9 +23,10 @@ import type { DesktopPaths } from './paths.ts'
 import type { DesktopRelease } from './release.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
 import {
-  initProfile, PROFILE_PATCH_FILENAME, PROFILE_TEMPLATES, removeLinkProjections, sanitizeProfile,
-  type ProfileTemplate,
+  initProfile, PROFILE_PATCH_FILENAME, PROFILE_TEMPLATES, readProfileManifest, removeLinkProjections,
+  sanitizeProfile, writeProfileBundles, type ProfileTemplate,
 } from '@deepseek-ai/dsh-app-boot'
+import { RUMI_APP_BUNDLE_NAMES } from './app-bundles.ts'
 
 const PROJECT_NAME = '@deepseek-ai/dsh-desktop-runtime'
 const DSH_PACKAGE = '@deepseek-ai/dsh'
@@ -131,15 +132,33 @@ export class DesktopProjectManager {
   }
 }
 
-/** Create build-only project metadata for materializing the signed runtime. */
-export function createRuntimeProjectMetadata(projectDir: string, release: DesktopRelease): void {
+/** One app-owned plugin package staged beside the core set for the signed runtime. */
+export interface RuntimeBundledPackage {
+  /** Exact package name. */
+  readonly name: string
+  /** Project-relative `file:` spec pnpm installs. */
+  readonly spec: string
+}
+
+/**
+ * Create build-only project metadata for materializing the signed runtime.
+ * @param projectDir - Build directory containing the verified core package set.
+ * @param release - Release identity shared by the packaged runtime.
+ * @param bundledPackages - App-owned plugin packages staged under the build directory.
+ */
+export function createRuntimeProjectMetadata(
+  projectDir: string, release: DesktopRelease, bundledPackages: readonly RuntimeBundledPackage[] = [],
+): void {
   mkdirSync(projectDir, { recursive: true, mode: 0o700 })
   const packageSet = verifyDesktopCorePackageSet(projectDir, release.version)
   const manifest = {
     name: PROJECT_NAME,
     private: true,
     version: '0.0.0',
-    dependencies: desktopCorePackageOverrides(packageSet),
+    dependencies: {
+      ...desktopCorePackageOverrides(packageSet),
+      ...Object.fromEntries(bundledPackages.map(entry => [entry.name, entry.spec])),
+    },
     dsh: { profile: { bundles: [...WEB_PROFILE.bundles] } },
   }
   writeJson(join(projectDir, 'package.json'), manifest)
@@ -230,11 +249,52 @@ function ensureStateIsolation(projectDir: string): void {
     return
   }
   if (current.includes(RUMI_STATE_MARKER)) return
-  writeFileSync(path, `${current.trimEnd()}\n\n${RUMI_PROFILE_PATCH}`, { mode: 0o600 })
+  // The template's lone `[]` is an empty layer; replacing it keeps the seeded rows parseable.
+  const body = current.replace(/(?:^|\n)\[\]\s*$/u, '').trimEnd()
+  writeFileSync(path, `${body === '' ? '' : `${body}\n\n`}${RUMI_PROFILE_PATCH}`, { mode: 0o600 })
+}
+
+/** Profile file listing the app bundle defaults this profile has already been offered. */
+const APP_BUNDLE_LEDGER = '.rumi-app-bundles.json'
+
+/** Bundle names already offered to this profile, or none when the ledger is absent or unreadable. */
+function readAppBundleLedger(projectDir: string): Set<string> {
+  let value: unknown
+  try {
+    value = JSON.parse(readFileSync(join(projectDir, APP_BUNDLE_LEDGER), 'utf8'))
+  } catch { return new Set() /* A profile without a ledger has not been offered any app bundle. */ }
+  if (!Array.isArray(value)) return new Set()
+  return new Set(value.filter((name): name is string => typeof name === 'string'))
+}
+
+function writeAppBundleLedger(projectDir: string, names: ReadonlySet<string>): void {
+  writeFileSync(join(projectDir, APP_BUNDLE_LEDGER), `${JSON.stringify([...names].sort(), undefined, 2)}\n`, { mode: 0o600 })
+}
+
+/**
+ * Offer each app bundle default once. A fresh profile already lists them; an
+ * upgraded one gains the bundles added since it was created. Recording the
+ * offer keeps a bundle the person later turns off from coming back.
+ */
+function ensureAppBundleDefaults(projectDir: string): void {
+  const offered = readAppBundleLedger(projectDir)
+  const pending = RUMI_APP_BUNDLE_NAMES.filter(name => !offered.has(name))
+  if (pending.length === 0) return
+  const manifest = readProfileManifest('dsh', projectDir)
+  const bundles = [...manifest.dsh?.profile?.bundles ?? []]
+  let changed = false
+  for (const name of pending) {
+    if (bundles.includes(name)) continue
+    bundles.push(name)
+    changed = true
+  }
+  if (changed) writeProfileBundles(projectDir, manifest, bundles)
+  writeAppBundleLedger(projectDir, new Set([...offered, ...RUMI_APP_BUNDLE_NAMES]))
 }
 
 /** Create the first external plugin profile without running a package manager. */
 export function createPluginProfile(projectDir: string): void {
-  initProfile(projectDir, WEB_PROFILE.bundles)
+  initProfile(projectDir, [...WEB_PROFILE.bundles, ...RUMI_APP_BUNDLE_NAMES])
+  ensureAppBundleDefaults(projectDir)
   ensureStateIsolation(projectDir)
 }

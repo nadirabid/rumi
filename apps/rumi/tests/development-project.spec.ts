@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -100,6 +100,43 @@ describe('desktop development project', () => {
     expect(readFileSync(join(cli, 'package.json'), 'utf8')).toBe('{"name":"@deepseek-ai/dsh","version":"1.2.3"}\n')
     expect(readFileSync(join(host, 'lib', 'index.js'), 'utf8')).toBe('')
 
+  })
+
+  it('installs app bundles beside dsh and declares them in the installation manifest', () => {
+    const root = temporaryRoot()
+    const cli = join(root, 'apps', 'cli')
+    const host = join(root, 'apps', 'desktop-host')
+    const dependencies = join(root, 'workspace-dependencies')
+    const plugin = join(root, 'brand', 'plugin')
+    mkdirSync(join(cli, 'lib'), { recursive: true })
+    mkdirSync(join(host, 'lib'), { recursive: true })
+    mkdirSync(join(plugin), { recursive: true })
+    mkdirSync(dependencies, { recursive: true })
+    writeFileSync(join(cli, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '1.2.3' }))
+    writeFileSync(join(cli, 'lib', 'index.js'), '')
+    writeFileSync(join(host, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-desktop-host', version: '1.2.3' }))
+    writeFileSync(join(host, 'lib', 'index.js'), '')
+    writeFileSync(join(plugin, 'package.json'), JSON.stringify({ name: '@rumi/plugin', version: '0.1.0' }))
+
+    const project = prepareDevelopmentProject({
+      projectDir: join(root, 'development'),
+      cliDir: cli,
+      hostDir: host,
+      dependencyDir: dependencies,
+      release: release(),
+      target: 'mac-arm64',
+      appBundles: [{ name: '@rumi/plugin', directory: plugin }],
+    })
+    expect(realpathSync(join(project, 'node_modules', '@rumi', 'plugin'))).toBe(realpathSync(plugin))
+    const installation = JSON.parse(readFileSync(
+      join(project, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8',
+    )) as { dependencies: Record<string, string> }
+    expect(installation.dependencies['@rumi/plugin']).toBe('0.1.0')
+    expect(existsSync(join(project, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'index.js'))).toBe(true)
+    const descriptor = JSON.parse(readFileSync(join(project, 'desktop-runtime.json'), 'utf8')) as {
+      sharedPackages: { name: string; version: string; path: string }[]
+    }
+    expect(descriptor.sharedPackages).toContainEqual({ name: '@rumi/plugin', version: '0.1.0', path: 'node_modules/@rumi/plugin' })
   })
 
   it('rejects a CLI package from another release', () => {

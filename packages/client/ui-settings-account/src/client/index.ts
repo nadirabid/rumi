@@ -41,7 +41,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Services required by account settings. */
-export const inject = ['slots', 'locale', 'remote', 'remote.account', 'remote.session', 'theme', 'configForms']
+export const inject = ['slots', 'locale', 'remote', 'remote.account', 'remote.session', 'theme', 'configForms', 'layout']
 /** Register account UI in Desktop and plain Web clients. @param ctx - client plugin context. */
 export function apply(ctx: Context): void {
   const desktop = 'dshDesktop' in globalThis

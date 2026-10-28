@@ -1,0 +1,5 @@
+- insert:
+    - id: live-voice
+      name: '@nmuzaffar/dsh-live-voice'
+      config:
+        apiKeyFile: ~/.dsh/live-voice.key

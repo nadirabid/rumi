@@ -59,6 +59,7 @@ function createProductApi(): DshDesktopProductApi {
 }
 
 if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
+  contextBridge.exposeInMainWorld('__RUMI_BAMBU_LOGIN__', { open: () => ipcRenderer.invoke('rumi:bambu:login') })
   contextBridge.exposeInMainWorld('dshOnboarding', {
     hasApiKey: () => ipcRenderer.invoke(DESKTOP_IPC.onboardingApiKey) as Promise<boolean>,
     setActive: (active: boolean) => { ipcRenderer.send(DESKTOP_IPC.onboardingActive, active) },

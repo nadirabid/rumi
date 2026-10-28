@@ -68,6 +68,29 @@ a bundle patch replaces loader rows, and neither needs a fork.
 Rumi and DeepSeek Harness run at the same time. They share the Harness home for
 configuration but never share Sessions, workspaces, or profiles.
 
+### Plugin UI
+
+Every Rumi plugin follows the stock plugin-settings surface; a bespoke form is a
+regression even when it works. These rules apply to every plugin under
+`apps/rumi/brand/**`.
+
+- Register the settings page as `plugins.item` in the client half. The page's
+  `view === 'summary'` returns one plain sentence; `view === 'page'` returns the
+  form. The card title comes from the registration label.
+- Build the page from the shared primitives: `SettingsForm`,
+  `SettingsValueField`, `SettingsSecretField`, `Switch`, `Button`, and `Tag` from
+  `@deepseek-ai/dsh-client-ui-primitives`. Do not hand-roll inputs, buttons,
+  save bars, labels, or status tags.
+- Use `SettingsForm`'s `state`, `labels`, `onSave`, and `onDiscard` for staging
+  and saving. The form's footer is the only save control.
+- Use theme tokens (`var(--dsw-alias-…)`) or shared component styles, never
+  literal colors and ad-hoc spacing.
+- Put every visible string in a `ctx.locale` dictionary with `en` and `zh`;
+  never inline copy in the component.
+- Prefer automatic discovery and app-owned state over a setup form. Ask only for
+  a fact that cannot be discovered, and keep secrets in `ctx.credentials`, never
+  in the profile patch or a settings response.
+
 ### Build
 
 ```sh

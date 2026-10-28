@@ -28,6 +28,7 @@ import { installWindowsDirectoryInstaller } from './windows-directory-installer.
 import { preserveWindowsRuntimeSignature, signWindowsCode } from './windows-runtime-signature.mjs'
 import { prepareWindowsAsarUnpack, verifyWindowsAsarUnpack } from './windows-asar-unpack.mjs'
 import { recordPackagingEvent } from './packaging-run.mjs'
+import { scopeMacOSExecutableIdentities } from './macos-executable-identity.mjs'
 import {
   resolveMacOSAppUpdateFeed,
   verifyMacOSAppUpdateConfig,
@@ -137,6 +138,7 @@ export function createElectronBuilderConfig(
       'lib/main.js',
       'lib/welcome/**/*',
       'lib/preload-app.cjs',
+      'lib/preload-bambu.cjs',
       'lib/preload-mandatory.cjs',
       'lib/preload-platform-account.cjs',
       'lib/preload-update-dialog.cjs',
@@ -160,12 +162,15 @@ export function createElectronBuilderConfig(
       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
       category: 'public.app-category.developer-tools',
       // macOS matches the application locale against this bundle, not Electron Framework resources.
-      extendInfo: { CFBundleLocalizations: ['en', 'zh_CN'] },
+      extendInfo: {
+        CFBundleLocalizations: ['en', 'zh_CN'],
+        NSMicrophoneUsageDescription: 'Rumi uses your microphone to transcribe speech into message drafts.',
+        NSLocalNetworkUsageDescription: 'Rumi finds and connects to your 3D printer on your local network.',
+      },
       // Ad-hoc signing keeps the modified Electron executable runnable without a Developer ID.
       identity: unsigned ? '-' : macOSSigning?.signingIdentity,
       forceCodeSigning: !unsigned,
       hardenedRuntime: true,
-      extendInfo: { NSMicrophoneUsageDescription: 'Rumi uses your microphone to transcribe speech into message drafts.' },
       entitlements: fileURLToPath(new URL('./macos-entitlements.plist', import.meta.url)),
       entitlementsInherit: fileURLToPath(new URL('./macos-entitlements.plist', import.meta.url)),
       // Prepared runtime files retain their signatures; PAK resources are sealed by their enclosing bundle.
@@ -195,6 +200,10 @@ export function createElectronBuilderConfig(
     afterPack: async context => {
       const { verifyDesktopRuntime } = await import('../lib/types/runtime-tree.js')
       const resourcesDir = context.packager.getResourcesDir(context.appOutDir)
+      if (resolvedPlatform === 'darwin') {
+        const name = context.packager.appInfo.productFilename
+        await scopeMacOSExecutableIdentities(join(context.appOutDir, `${name}.app`), name, appId)
+      }
       if (resolvedPlatform === 'darwin' && update !== undefined) {
         await writeMacOSAppUpdateConfig(resourcesDir, resolveMacOSAppUpdateFeed(context.packager.config.publish),
           context.packager.appInfo.updaterCacheDirName)

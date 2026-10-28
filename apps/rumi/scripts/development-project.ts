@@ -39,6 +39,8 @@ export interface DevelopmentProjectOptions {
   readonly release: DesktopRelease
   /** Build target whose prepared payload the disposable project runs against. */
   readonly target: DesktopAutoUpdateTarget
+  /** App-owned plugin packages installed beside dsh, so the profile resolves them without a package manager. */
+  readonly appBundles?: readonly { readonly name: string; readonly directory: string }[]
 }
 
 function readManifest(path: string): PackageManifest {
@@ -67,6 +69,32 @@ function removeOwnedPath(path: string): void {
 function linkDirectory(source: string, destination: string): void {
   mkdirSync(dirname(destination), { recursive: true })
   symlinkSync(realpathSync(source), destination, process.platform === 'win32' ? 'junction' : 'dir')
+}
+
+/**
+ * Materialize the dsh package with the app's bundled plugins declared as
+ * dependencies. The profile resolver and the Plugins page read the
+ * installation manifest, so the disposable project needs the same entries the
+ * packaged runtime carries.
+ */
+function materializeBundledDsh(
+  cliDir: string, destination: string,
+  appBundles: readonly { readonly name: string; readonly directory: string }[],
+): void {
+  const manifest = readManifest(join(cliDir, 'package.json'))
+  const bundled = Object.fromEntries(appBundles.map((bundle) => {
+    const version = readManifest(join(bundle.directory, 'package.json')).version
+    if (version === undefined) throw new Error(`desktop development: bundled plugin ${bundle.name} has no version`)
+    return [bundle.name, version]
+  }))
+  mkdirSync(destination, { recursive: true })
+  writeFileSync(join(destination, 'package.json'), `${JSON.stringify({
+    ...manifest,
+    dependencies: { ...manifest.dependencies, ...bundled },
+  }, undefined, 2)}\n`)
+  // Exported subpaths such as `@deepseek-ai/dsh/profile-boot` resolve through this link.
+  const lib = join(cliDir, 'lib')
+  if (existsSync(lib)) symlinkSync(realpathSync(lib), join(destination, 'lib'), process.platform === 'win32' ? 'junction' : 'dir')
 }
 
 function mirrorDependencyLinks(sourceRoot: string, destinationRoot: string): string[] {
@@ -148,13 +176,21 @@ export function prepareDevelopmentProject(options: DevelopmentProjectOptions): s
   createDevelopmentProjectMetadata(options.projectDir, options.release)
   const destinationModules = join(options.projectDir, 'node_modules')
   mkdirSync(destinationModules, { recursive: true })
+  const appBundles = options.appBundles ?? []
   const names = [
     ...mirrorDependencyLinks(options.dependencyDir, destinationModules),
     ...mirrorWorkspaceDependencies([options.cliDir, options.hostDir], destinationModules),
+    ...appBundles.map(bundle => bundle.name),
   ]
+  for (const bundle of appBundles) {
+    const destination = join(destinationModules, ...bundle.name.split('/'))
+    removeOwnedPath(destination)
+    linkDirectory(bundle.directory, destination)
+  }
   const dshLink = join(destinationModules, '@deepseek-ai', 'dsh')
   removeOwnedPath(dshLink)
-  linkDirectory(options.cliDir, dshLink)
+  if (appBundles.length === 0) linkDirectory(options.cliDir, dshLink)
+  else materializeBundledDsh(options.cliDir, dshLink, appBundles)
   const hostLink = join(destinationModules, '@deepseek-ai', 'dsh-desktop-host')
   removeOwnedPath(hostLink)
   linkDirectory(options.hostDir, hostLink)

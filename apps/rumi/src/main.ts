@@ -1,3 +1,4 @@
+import { openBambuLogin } from './bambu-login.ts'
 import type { ProductEventMap, ProductEvent } from '@deepseek-ai/dsh-client-product-analytics/types'
 import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
 /** Electron shell: desktop project ownership, custom protocol, windows, and lifecycle. */
@@ -735,6 +736,8 @@ async function main(): Promise<void> {
     try { event.returnValue = platformView.bootstrap(event) }
     catch { event.returnValue = null }
   })
+  ipcMain.handle('rumi:bambu:login', (event) => openBambuLogin(assertMainApplication(event),
+    fileURLToPath(new URL('./preload-bambu.cjs', import.meta.url))))
   ipcMain.handle(PLATFORM_IPC.open, (event, page: unknown, bounds: unknown) => {
     const owner = assertMainApplication(event)
     if (page !== 'usage' && page !== 'top-up') throw new Error('Invalid Platform page')

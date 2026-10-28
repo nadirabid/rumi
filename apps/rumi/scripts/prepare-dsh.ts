@@ -5,8 +5,9 @@ import { packagingStep } from './packaging-step.mjs'
 import { spawn } from 'node:child_process'
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join, relative, resolve } from 'node:path'
+import { basename, delimiter, join, relative, resolve, sep } from 'node:path'
 import { desktopNodeEnvironment } from '../src/node-environment.ts'
+import { appBundleSources } from '../src/app-bundles.ts'
 import { createRuntimeProjectMetadata } from '../src/project-manager.ts'
 import { DESKTOP_HOST_PROTOCOL_VERSION } from '../src/host-protocol.ts'
 import { parseDesktopRelease, type DesktopRelease } from '../src/release.ts'
@@ -119,10 +120,26 @@ async function main(): Promise<void> {
       mkdirSync(STORE_ROOT, { recursive: true })
     })
     const release = desktopRelease()
+    const appBundles = appBundleSources(APP_ROOT)
     const patches = await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:stage-packages', async () => {
       copyFileSync(join(PACKAGE_SET_ROOT, DESKTOP_PACKAGE_SET_FILE), join(BUILD_ROOT, DESKTOP_PACKAGE_SET_FILE))
       cpSync(join(PACKAGE_SET_ROOT, DESKTOP_PACKAGES_DIR), join(BUILD_ROOT, DESKTOP_PACKAGES_DIR), { recursive: true })
-      createRuntimeProjectMetadata(BUILD_ROOT, release)
+      const stagedBundles = join(BUILD_ROOT, 'app-bundles')
+      mkdirSync(stagedBundles, { recursive: true })
+      for (const bundle of appBundles) {
+        // A nested bundle package is staged on its own; keep it out of this package's files.
+        const nested = appBundles
+          .filter(other => other !== bundle && other.directory.startsWith(`${bundle.directory}${sep}`))
+          .map(other => other.directory)
+        cpSync(bundle.directory, join(stagedBundles, basename(bundle.directory)), {
+          recursive: true,
+          filter: source => !nested.some(directory => source === directory || source.startsWith(`${directory}${sep}`)),
+        })
+      }
+      createRuntimeProjectMetadata(BUILD_ROOT, release, appBundles.map(bundle => ({
+        name: bundle.name,
+        spec: `file:./app-bundles/${basename(bundle.directory)}`,
+      })))
       return prepareRuntimePatches(BUILD_ROOT, resolve(APP_ROOT, '..', '..'))
     })
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:lockfile', () => runPnpm(['install', '--lockfile-only']))
@@ -136,6 +153,11 @@ async function main(): Promise<void> {
     const targetName = resolveDesktopBuildTarget()
     const target = { platform: process.platform, arch: desktopTargetPlatform(targetName).arch }
     const modules = join(BUILD_ROOT, 'node_modules')
+    const bundledPackages = appBundles.map((bundle) => {
+      const manifest = JSON.parse(readFileSync(join(modules, ...bundle.name.split('/'), 'package.json'), 'utf8')) as { version?: unknown }
+      if (typeof manifest.version !== 'string') throw new Error(`desktop runtime: bundled plugin ${bundle.name} has no version`)
+      return { name: bundle.name, version: manifest.version }
+    })
     const officeManifest = JSON.parse(readFileSync(join(modules, '@deepseek-ai/libreoffice-kit/package.json'), 'utf8'))
     const officeEngine = selectOfficeEngine(officeManifest, target)
     mkdirSync(DSH_OUTPUT_ROOT, { recursive: true })
@@ -163,8 +185,21 @@ async function main(): Promise<void> {
       await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'sign:primary-native', () => signMacOSRuntime(join(RUNTIME_ROOT, 'primary-runtime'), resolveDesktopAppId(process.env), resolveMacOSSigningEnvironment(process.env), target.arch, cacheDirectory, 'primary'))
     }
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:manifests', () => prepareRuntimeManifests(DSH_OUTPUT_ROOT))
+    await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:bundled-plugins', async () => {
+      // The profile resolver and the Plugins page read the installation manifest,
+      // so shipped app plugins must be direct dependencies of the bundled dsh package.
+      const manifestPath = join(DSH_OUTPUT_ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { dependencies?: Record<string, string> }
+      manifest.dependencies = {
+        ...manifest.dependencies,
+        ...Object.fromEntries(bundledPackages.map(entry => [entry.name, entry.version])),
+      }
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`)
+    })
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:primary-smoke', async () => smokePrimaryRuntime(join(RUNTIME_ROOT, 'primary-runtime')))
-    await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:write-descriptor', async () => writeDesktopRuntime(DSH_OUTPUT_ROOT, release, packageSet.packages.map(entry => entry.name), target))
+    await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:write-descriptor', async () => writeDesktopRuntime(
+      DSH_OUTPUT_ROOT, release, [...packageSet.packages.map(entry => entry.name), ...bundledPackages.map(entry => entry.name)], target,
+    ))
     const descriptor = await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:verify-before-smoke', () => verifyDesktopRuntime(DSH_OUTPUT_ROOT, release.version, target))
     if (!process.argv.includes('--defer-runtime-smoke')) {
       await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:smoke', () => smokePreparedRuntime(DSH_OUTPUT_ROOT, NODE, RUNTIME_ROOT, descriptor))

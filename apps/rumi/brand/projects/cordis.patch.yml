@@ -1,0 +1,16 @@
+# Rumi's project gallery. It is the app's home surface, so it composes into the
+# profile beside the conversation and the print viewer rather than replacing
+# them: the gallery is a main panel and the New/Close control is the
+# window-chrome leading seat.
+#
+# The stock navigation column is disabled: Rumi has no sidebar, and that row is
+# what occupies the frame's leading seat. Its inner seats (settings, workspaces,
+# footer actions) have no product surface here — settings, plugins, and
+# automation stay reachable through the app menu and their shortcuts.
+- id: ui-sidebar
+  disabled: true
+
+- insert:
+    - id: rumi-projects
+      name: '@rumi/projects'
+      config: {}

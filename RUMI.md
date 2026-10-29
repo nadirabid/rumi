@@ -70,7 +70,15 @@ Electron then runs as plain Node and exits silently.
 
 ## Next
 
-The UI is still stock Harness. Custom UI packages that are not shipped this way go in `~/.dsh/profiles/rumi/package.json`.
+Custom UI packages that are not shipped this way go in `~/.dsh/profiles/rumi/package.json`.
+
+## Projects
+
+The app opens on a project gallery. A project is a directory under `~/.rumi/workspace/<id>/` holding `project.json`, `artifacts/`, `source/`, and `references/`; the id is immutable and the name lives in the JSON, so renaming never moves files. `@rumi/projects` owns this: the gallery is a `main` panel, the New/Close control is the window-chrome `shell.leading` seat, and the stock navigation column is collapsed at boot so the gallery owns the window.
+
+Opening a project starts or reuses a DSH session whose working directory is the project root, and records the session id in `project.json`. Close returns to the gallery with `ctx.layout.selectPanel('projects')` and never ends the session, so a running turn or an unsent draft survives. Settings, plugins, and automation lose their sidebar home along with the navigation column; they stay reachable through the app menu and their shortcuts.
+
+The first pass has no renaming, deletion, thumbnails, or project switching inside a project. Session logs stay in Rumi's own session storage; only their ids are recorded per project.
 
 ## Print Studio
 

@@ -19,6 +19,7 @@ export const RUMI_APP_BUNDLES: readonly AppBundleSource[] = [
   { name: '@rumi/brand', directory: 'brand' },
   { name: '@nmuzaffar/dsh-live-voice', directory: join('brand', 'live-voice') },
   { name: '@rumi/print-studio', directory: join('brand', 'print-studio') },
+  { name: '@rumi/projects', directory: join('brand', 'projects') },
 ]
 
 /** Bundle names seeded into every Rumi profile. */

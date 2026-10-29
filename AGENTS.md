@@ -142,7 +142,9 @@ Two traps that produced false confidence here:
 - The packaged app bundles `apps/rumi/lib` and the workspace packages as sealed
   tarballs. Editing `apps/rumi/src/preload-app.ts` or any `packages/client/*` source
   requires `pnpm --filter dsh-rumi run build` and `pnpm run build:official`
-  respectively before packaging; the root `pnpm build` rebuilds neither.
+  respectively before packaging; the root `pnpm build` rebuilds neither. The mesh
+  viewer's browser half is the same story: `apps/rumi/brand/print-studio/viewer/` is
+  bundled into `lib/client.js` by `pnpm --filter dsh-rumi run build`, not served as source.
 
 ### Verify before claiming done
 

@@ -6,7 +6,7 @@
   "description": "Print Studio: detection and guided Bambu Lab setup for Rumi's 3D print workflow",
   "exports": {
     ".": "./index.js",
-    "./client": "./client.js",
+    "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
@@ -16,7 +16,6 @@
     "index.js",
     "probe.js",
     "cloud.js",
-    "client.js",
     "skills",
     "cordis.patch.yml",
     "locale/*.json",
@@ -25,7 +24,10 @@
     "assets",
     "slicer.js",
     "connect.js",
-    "monitor.js"
+    "monitor.js",
+    "lib/client.js",
+    "lib/THREE-LICENSE.txt",
+    "viewer"
   ],
   "main": "index.js",
   "icon": "./icon.svg",
@@ -38,7 +40,9 @@
       "inject": [
         "@deepseek-ai/dsh-client-ui-plugin-manager",
         "@deepseek-ai/dsh-client-ui-primitives",
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-ui-sidebar-documentpreview"
       ]
     }
   }

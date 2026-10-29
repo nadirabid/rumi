@@ -43,13 +43,14 @@ window.__ModuleLoader__.load({
     };
 
     const STYLES = `
-.rumi-projects{display:flex;flex-direction:column;gap:20px;width:100%;height:100%;min-height:0;overflow:auto;padding:72px 40px 40px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base)}
+.rumi-projects{display:flex;flex-direction:column;gap:20px;width:100%;height:100%;min-height:0;overflow:auto;padding:calc(var(--dsh-frame-top-clearance,48px) + 16px) 40px 40px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base)}
 .rumi-projects-head{display:flex;align-items:baseline;gap:12px}
 .rumi-projects-title{margin:0;font-size:20px;font-weight:600;letter-spacing:-0.01em}
 .rumi-projects-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px}
 .rumi-project{display:flex;flex-direction:column;gap:10px;padding:0;border:0;background:none;text-align:left;cursor:pointer;color:inherit}
-.rumi-project-cover{position:relative;aspect-ratio:4/3;border-radius:14px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);overflow:hidden}
+.rumi-project-cover{position:relative;display:flex;align-items:center;justify-content:center;aspect-ratio:4/3;border-radius:14px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);overflow:hidden}
 .rumi-project-cover::after{content:"";position:absolute;inset:0;background:linear-gradient(160deg,var(--dsw-alias-bg-layer-3),transparent 60%)}
+.rumi-project-initial{position:relative;font-size:44px;font-weight:600;color:var(--dsw-alias-label-tertiary);opacity:.55}
 .rumi-project:hover .rumi-project-cover{border-color:var(--dsw-alias-brand-primary)}
 .rumi-project:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:4px;border-radius:16px}
 .rumi-project-name{font-size:14px;font-weight:600;margin:0}
@@ -58,8 +59,9 @@ window.__ModuleLoader__.load({
 .rumi-projects-empty-title{margin:0;font-size:14px;font-weight:600}
 .rumi-projects-empty-hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
 .rumi-projects-error{margin:0;font-size:12px;color:var(--dsw-alias-state-error-primary)}
-.rumi-projects-leading{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 72%,transparent);backdrop-filter:blur(18px) saturate(1.4);-webkit-backdrop-filter:blur(18px) saturate(1.4)}
-.rumi-projects-leading-name{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600}
+.rumi-projects-leading{display:flex;align-items:center;gap:8px}
+.rumi-projects-leading button{height:28px;padding:0 12px;border-radius:8px;font-size:12px}
+.rumi-projects-leading-name{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary)}
 `;
 
     /** Copy and styles installed once per plugin instance. */
@@ -129,9 +131,11 @@ window.__ModuleLoader__.load({
           ctx.layout.selectPanel(PANEL_ID);
         },
         /**
-         * The session that represents the project: its recorded one while the
-         * Host still knows it, otherwise a new session rooted at the project
-         * directory.
+         * The session that represents the project. DSH conversations belong to
+         * a Workspace, so the project directory is registered as one (create is
+         * idempotent by path) and the workspace resolves the session: its
+         * recorded one while the Host still lists it, otherwise the blank the
+         * workspace connects.
          */
         async sessionFor(project) {
           const known = ctx.sessions.list.getSnapshot();
@@ -139,11 +143,14 @@ window.__ModuleLoader__.load({
           const exists = (id) => byId instanceof Map ? byId.has(id) : Boolean(byId?.[id]);
           const recorded = project.activeSessionId ?? project.sessionIds.at(-1);
           if (recorded !== undefined && exists(recorded)) return recorded;
-          const sessionId = await ctx.sessions.create({ cwd: project.path });
+          const workspace = await ctx.workspaces.create({ path: project.path });
+          // The directory is an opaque id, so give the Workspace the project's own name.
+          if (workspace.title !== project.name) await ctx.workspaces.rename(workspace.workspaceId, project.name);
+          const sessionId = await ctx.uiWorkspace.connectWorkspace(workspace.workspaceId);
           await fetch(`${ROUTE}/session`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ projectId: project.id, sessionId }),
+            body: JSON.stringify({ projectId: project.id, sessionId, workspaceId: workspace.workspaceId }),
           });
           return sessionId;
         },
@@ -151,7 +158,7 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale', 'layout', 'sessions', 'uiWorkspace'],
+      inject: ['slots', 'locale', 'layout', 'sessions', 'uiWorkspace', 'workspaces'],
       apply(ctx) {
         const t = ctx.locale.bind(NS);
         installChrome(ctx, t);
@@ -164,7 +171,8 @@ window.__ModuleLoader__.load({
             className: 'rumi-project', type: 'button', onClick: () => onOpen(project),
             'aria-label': project.name,
           },
-            h('span', { className: 'rumi-project-cover', 'aria-hidden': 'true' }),
+            h('span', { className: 'rumi-project-cover', 'aria-hidden': 'true' },
+              h('span', { className: 'rumi-project-initial' }, project.name.trim().charAt(0).toUpperCase() || '?')),
             h('p', { className: 'rumi-project-name' }, project.name),
             when === '' ? null : h('p', { className: 'rumi-project-meta' }, t('updated', { when })),
           );

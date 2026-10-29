@@ -83,6 +83,7 @@ export function createProjectStore(root) {
         name: normalizeName(name),
         sessionIds: [],
         activeSessionId: null,
+        workspaceId: null,
         createdAt: now,
         updatedAt: now,
       }
@@ -91,10 +92,11 @@ export function createProjectStore(root) {
       for (const child of SUBDIRECTORIES) await mkdir(join(directory, child), { recursive: true })
       return write({ ...project, path: directory })
     },
-    async attachSession(id, sessionId) {
+    async attachSession(id, sessionId, workspaceId) {
       const project = await read(id)
       if (!project.sessionIds.includes(sessionId)) project.sessionIds.push(sessionId)
       project.activeSessionId = sessionId
+      if (workspaceId !== undefined) project.workspaceId = workspaceId
       project.updatedAt = new Date().toISOString()
       return write(project)
     },
@@ -125,7 +127,8 @@ export function apply(ctx, config = {}) {
       return json({ error: 'project_and_session_required' }, 400)
     }
     try {
-      return json({ project: await store.attachSession(body.projectId, body.sessionId) })
+      const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : undefined
+      return json({ project: await store.attachSession(body.projectId, body.sessionId, workspaceId) })
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 404)
     }

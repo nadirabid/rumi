@@ -14,7 +14,7 @@ window.__ModuleLoader__.load({
   id: '@rumi/projects',
   factory(require) {
     const React = require('react');
-    const { Button } = require('@deepseek-ai/dsh-client-ui-primitives');
+    const { IconChevronLeftOutlineRegular, IconPlusOutlineRegular } = require('@deepseek-ai/dsh-client-ui-primitives');
     const h = React.createElement;
 
     const PANEL_ID = 'projects';
@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const en = {
       title: 'Projects',
       new: 'New',
-      close: 'Close',
+      back: 'All projects',
       empty: 'No projects yet.',
       emptyHint: 'Make one, then ask Rumi to help build it.',
       updated: 'Updated {when}',
@@ -34,7 +34,7 @@ window.__ModuleLoader__.load({
     const zh = {
       title: '项目',
       new: '新建',
-      close: '关闭',
+      back: '所有项目',
       empty: '还没有项目',
       emptyHint: '先新建一个，然后请 Rumi 一起制作',
       updated: '更新于 {when}',
@@ -60,8 +60,12 @@ window.__ModuleLoader__.load({
 .rumi-projects-empty-hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
 .rumi-projects-error{margin:0;font-size:12px;color:var(--dsw-alias-state-error-primary)}
 .rumi-projects-leading{display:flex;align-items:center;gap:8px}
-.rumi-projects-leading button{height:28px;padding:0 12px;border-radius:8px;font-size:12px}
-.rumi-projects-leading-name{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary)}
+/* Liquid Glass: a translucent capsule over the window material. The specular
+   inset and drop shade are material constants, not theme colors. */
+.rumi-glass{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border-radius:9px;cursor:default;color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 55%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 75%,transparent);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 1px 2px rgba(0,0,0,.10);transition:background-color 120ms ease}
+.rumi-glass:hover{background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 78%,transparent)}
+.rumi-glass:active{background:color-mix(in srgb,var(--dsw-alias-bg-layer-3) 85%,transparent)}
+.rumi-glass:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
 `;
 
     /** Copy and styles installed once per plugin instance. */
@@ -195,23 +199,24 @@ window.__ModuleLoader__.load({
 
         function Leading({ usePanelInfo, t }) {
           const onHome = usePanelInfo(info => info.activePanelId === PANEL_ID);
-          const state = React.useSyncExternalStore(list.subscribe, list.getSnapshot);
-          const active = state.projects.find(project => project.id === state.activeId);
           const busy = React.useRef(false);
           const run = (action) => {
             if (busy.current) return;
             busy.current = true;
             void Promise.resolve(action()).finally(() => { busy.current = false; });
           };
+          // The frame reserves a 160px band beside the traffic lights for
+          // icon-sized controls; the project name lives in the panel header.
           return h('div', { className: 'rumi-projects-leading' },
             onHome
-              ? h(Button, {
-                size: 'sm', variant: 'outline',
+              ? h('button', {
+                type: 'button', className: 'rumi-glass', 'aria-label': t('new'), title: t('new'),
                 onClick: () => run(() => list.create(t)),
-              }, t('new'))
-              : h(React.Fragment, null,
-                h('span', { className: 'rumi-projects-leading-name' }, active?.name ?? ''),
-                h(Button, { size: 'sm', variant: 'outline', onClick: () => list.close() }, t('close'))),
+              }, h(IconPlusOutlineRegular, { size: 16 }))
+              : h('button', {
+                type: 'button', className: 'rumi-glass', 'aria-label': t('back'), title: t('back'),
+                onClick: () => list.close(),
+              }, h(IconChevronLeftOutlineRegular, { size: 16 })),
           );
         }
 

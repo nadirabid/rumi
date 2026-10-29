@@ -33,7 +33,7 @@ function translate(key: string, params?: Record<string, unknown>) {
 }
 
 const COPY: Record<string, string> = {
-  title: 'Projects', new: 'New', close: 'Close',
+  title: 'Projects', new: 'New', back: 'All projects',
   empty: 'No projects yet.', emptyHint: 'Make one, then ask Rumi to help build it.',
   updated: 'Updated {when}', failed: 'That did not work. Try again.', untitled: 'Untitled project',
 }
@@ -45,9 +45,7 @@ const project = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
-function Button({ children, onClick }: React.PropsWithChildren<{ onClick?: () => void }>) {
-  return <button onClick={onClick}>{children}</button>
-}
+const Icon = () => null
 
 /** Apply the plugin into a fake context and return its handles. */
 function fixture(host: { projects?: object[]; knownSessions?: Record<string, object>; activePanelId?: string | null } = {}) {
@@ -95,7 +93,7 @@ function fixture(host: { projects?: object[]; knownSessions?: Record<string, obj
     workspaces: { create: handles.createWorkspace, rename: handles.renameWorkspace },
     uiWorkspace: { openSession: handles.openSession, connectWorkspace: handles.connect },
   }
-  const definition = loaded!.factory(name => name === 'react' ? React : { Button })
+  const definition = loaded!.factory(name => name === 'react' ? React : { IconPlusOutlineRegular: Icon, IconChevronLeftOutlineRegular: Icon })
   definition.apply(ctx)
   return {
     ...handles, posts,
@@ -156,11 +154,11 @@ it('creates a project from the New control and opens it', async () => {
   expect(view.openSession).toHaveBeenCalled()
 })
 
-it('closes back to the gallery without ending the session', async () => {
+it('returns to the gallery without ending the session', async () => {
   const view = fixture({ projects: [project()] })
   render(view.view('shell.leading'))
   await settle()
-  fireEvent.click(screen.getByRole('button', { name: COPY.close }))
+  fireEvent.click(screen.getByRole('button', { name: COPY.back }))
   expect(view.selectPanel).toHaveBeenCalledWith('projects')
 })
 

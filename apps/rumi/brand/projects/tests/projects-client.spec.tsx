@@ -71,7 +71,9 @@ function fixture(host: { projects?: object[]; knownSessions?: Record<string, obj
     getSnapshot: () => ({ activePanelId: host.activePanelId ?? null }),
   }
   const handles = {
-    create: vi.fn(async () => 'session-new'),
+    createWorkspace: vi.fn(async () => ({ workspaceId: 'workspace-1', path: '/Users/me/.rumi/workspace/p1', title: 'p1' })),
+    renameWorkspace: vi.fn(async () => ({ workspaceId: 'workspace-1', title: 'Dragon cup' })),
+    connect: vi.fn(async () => 'session-new'),
     openSession: vi.fn(),
     selectPanel: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -88,10 +90,10 @@ function fixture(host: { projects?: object[]; knownSessions?: Record<string, obj
     },
     layout: { selectPanel: handles.selectPanel, toggleSidebar: handles.toggleSidebar, panelInfo },
     sessions: {
-      create: handles.create,
       list: { subscribe: () => () => {}, getSnapshot: () => ({ byId: host.knownSessions ?? {} }) },
     },
-    uiWorkspace: { openSession: handles.openSession },
+    workspaces: { create: handles.createWorkspace, rename: handles.renameWorkspace },
+    uiWorkspace: { openSession: handles.openSession, connectWorkspace: handles.connect },
   }
   const definition = loaded!.factory(name => name === 'react' ? React : { Button })
   definition.apply(ctx)
@@ -117,10 +119,12 @@ it('lists projects with their recency and opens one on click', async () => {
   expect(screen.getByText('Dragon cup')).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Dragon cup' }))
   await settle()
-  expect(view.create).toHaveBeenCalledWith({ cwd: '/Users/me/.rumi/workspace/p1' })
+  expect(view.createWorkspace).toHaveBeenCalledWith({ path: '/Users/me/.rumi/workspace/p1' })
+  expect(view.renameWorkspace).toHaveBeenCalledWith('workspace-1', 'Dragon cup')
+  expect(view.connect).toHaveBeenCalledWith('workspace-1')
   expect(view.openSession).toHaveBeenCalledWith('session-new')
   expect(view.selectPanel).toHaveBeenCalledWith(null)
-  expect(view.posts.at(-1)?.body).toEqual({ projectId: 'p1', sessionId: 'session-new' })
+  expect(view.posts.at(-1)?.body).toEqual({ projectId: 'p1', sessionId: 'session-new', workspaceId: 'workspace-1' })
 })
 
 it('reuses the session a project already recorded', async () => {
@@ -130,7 +134,7 @@ it('reuses the session a project already recorded', async () => {
   await settle()
   fireEvent.click(screen.getByRole('button', { name: 'Dragon cup' }))
   await settle()
-  expect(view.create).not.toHaveBeenCalled()
+  expect(view.connect).not.toHaveBeenCalled()
   expect(view.openSession).toHaveBeenCalledWith('session-1')
 })
 

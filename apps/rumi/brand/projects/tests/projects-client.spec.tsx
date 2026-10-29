@@ -36,6 +36,7 @@ const COPY: Record<string, string> = {
   title: 'Projects', new: 'New', back: 'All projects',
   empty: 'No projects yet.', emptyHint: 'Make one, then ask Rumi to help build it.',
   updated: 'Updated {when}', failed: 'That did not work. Try again.', untitled: 'Untitled project',
+  count: '{count} projects',
 }
 
 const project = (overrides: Record<string, unknown> = {}) => ({

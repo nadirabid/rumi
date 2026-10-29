@@ -23,6 +23,7 @@ window.__ModuleLoader__.load({
 
     const en = {
       title: 'Projects',
+      count: '{count} projects',
       new: 'New',
       back: 'All projects',
       empty: 'No projects yet.',
@@ -33,6 +34,7 @@ window.__ModuleLoader__.load({
     };
     const zh = {
       title: '项目',
+      count: '{count} 个项目',
       new: '新建',
       back: '所有项目',
       empty: '还没有项目',
@@ -43,18 +45,19 @@ window.__ModuleLoader__.load({
     };
 
     const STYLES = `
-.rumi-projects{display:flex;flex-direction:column;gap:20px;width:100%;height:100%;min-height:0;overflow:auto;padding:calc(var(--dsh-frame-top-clearance,48px) + 16px) 40px 40px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base)}
-.rumi-projects-head{display:flex;align-items:baseline;gap:12px}
-.rumi-projects-title{margin:0;font-size:20px;font-weight:600;letter-spacing:-0.01em}
-.rumi-projects-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px}
+.rumi-projects{box-sizing:border-box;display:flex;flex-direction:column;gap:26px;width:100%;height:100%;min-height:0;overflow:auto;padding:calc(var(--dsh-frame-top-clearance,48px) + 20px) 40px 48px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base)}
+.rumi-projects-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.rumi-projects-title{margin:0;font-size:22px;font-weight:600;letter-spacing:-0.02em}
+.rumi-projects-count{margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary)}
+.rumi-projects-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:28px 24px}
 .rumi-project{display:flex;flex-direction:column;gap:10px;padding:0;border:0;background:none;text-align:left;cursor:pointer;color:inherit}
-.rumi-project-cover{position:relative;display:flex;align-items:center;justify-content:center;aspect-ratio:4/3;border-radius:14px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);overflow:hidden}
-.rumi-project-cover::after{content:"";position:absolute;inset:0;background:linear-gradient(160deg,var(--dsw-alias-bg-layer-3),transparent 60%)}
-.rumi-project-initial{position:relative;font-size:44px;font-weight:600;color:var(--dsw-alias-label-tertiary);opacity:.55}
-.rumi-project:hover .rumi-project-cover{border-color:var(--dsw-alias-brand-primary)}
-.rumi-project:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:4px;border-radius:16px}
-.rumi-project-name{font-size:14px;font-weight:600;margin:0}
-.rumi-project-meta{margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary)}
+.rumi-project-cover{box-sizing:border-box;position:relative;display:flex;align-items:center;justify-content:center;aspect-ratio:4/3;border-radius:16px;border:1px solid var(--dsw-alias-border-l2);overflow:hidden;background:linear-gradient(160deg,hsl(var(--rumi-hue,220) 65% 62% / .26),hsl(var(--rumi-hue,220) 55% 58% / .10) 60%),var(--dsw-alias-bg-layer-2);transition:border-color 140ms ease,box-shadow 140ms ease,transform 140ms ease}
+.rumi-project-initial{position:relative;font-size:64px;font-weight:500;letter-spacing:-0.04em;color:var(--dsw-alias-label-tertiary);opacity:.38;text-shadow:0 1px 0 rgba(255,255,255,.5)}
+.rumi-project:hover .rumi-project-cover{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 55%,var(--dsw-alias-border-l2));box-shadow:0 8px 20px rgba(0,0,0,.07);transform:translateY(-1px)}
+.rumi-project:active .rumi-project-cover{transform:none;box-shadow:none}
+.rumi-project:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:4px;border-radius:18px}
+.rumi-project-name{margin:0;font-size:14px;font-weight:500;color:var(--dsw-alias-label-secondary)}
+.rumi-project-meta{margin:0;font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .rumi-projects-empty{display:flex;flex-direction:column;gap:6px;max-width:320px;margin:auto;text-align:center}
 .rumi-projects-empty-title{margin:0;font-size:14px;font-weight:600}
 .rumi-projects-empty-hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
@@ -67,6 +70,13 @@ window.__ModuleLoader__.load({
 .rumi-glass:active{background:color-mix(in srgb,var(--dsw-alias-bg-layer-3) 85%,transparent)}
 .rumi-glass:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
 `;
+
+    /** A stable, pleasant cover tint per project; product artwork, not theme state. */
+    function hueOf(id) {
+      let hash = 0;
+      for (let index = 0; index < id.length; index++) hash = (hash * 31 + id.charCodeAt(index)) % 360;
+      return hash;
+    }
 
     /** Copy and styles installed once per plugin instance. */
     function installChrome(ctx, t) {
@@ -173,7 +183,7 @@ window.__ModuleLoader__.load({
           const when = Number.isNaN(updated.valueOf()) ? '' : updated.toLocaleDateString();
           return h('button', {
             className: 'rumi-project', type: 'button', onClick: () => onOpen(project),
-            'aria-label': project.name,
+            'aria-label': project.name, style: { '--rumi-hue': hueOf(project.id) },
           },
             h('span', { className: 'rumi-project-cover', 'aria-hidden': 'true' },
               h('span', { className: 'rumi-project-initial' }, project.name.trim().charAt(0).toUpperCase() || '?')),
@@ -186,7 +196,9 @@ window.__ModuleLoader__.load({
           const state = React.useSyncExternalStore(list.subscribe, list.getSnapshot);
           React.useEffect(() => { void list.load(); }, []);
           return h('section', { className: 'rumi-projects', 'aria-label': t('title') },
-            h('div', { className: 'rumi-projects-head' }, h('h1', { className: 'rumi-projects-title' }, t('title'))),
+            h('div', { className: 'rumi-projects-head' },
+              h('h1', { className: 'rumi-projects-title' }, t('title')),
+              state.phase === 'ready' ? h('p', { className: 'rumi-projects-count' }, t('count', { count: state.projects.length })) : null),
             state.error === '' ? null : h('p', { role: 'alert', className: 'rumi-projects-error' }, t('failed')),
             state.phase === 'ready' && state.projects.length === 0
               ? h('div', { className: 'rumi-projects-empty' },

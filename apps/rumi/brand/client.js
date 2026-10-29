@@ -45,6 +45,45 @@ window.__ModuleLoader__.load({
       return null;
     }
 
+    /**
+     * Rumi's conversation chrome is the chat and nothing else. The row under
+     * the composer reports turn and step counts, output speed, token totals,
+     * cache hit, and context occupancy; the header carries Chat/Trajectory
+     * View tabs for a second view Rumi never uses. Both are hidden in place:
+     * the composer row is the margin under the message box, and the tab strip
+     * is what gives the header its taller two-row layout. The header keeps the
+     * shorter single-row height once the strip is gone.
+     */
+    const HIDDEN_CHROME = 'rumi-hidden-chrome';
+
+    /** Rules removing developer chrome while preserving the layout it defined. */
+    const HIDDEN_CHROME_RULES = [
+      '[data-composer-dock] { visibility: hidden !important; }',
+      '[data-conversation-tabs] { display: none !important; }',
+      'header div:has(> [data-conversation-tabs]) { display: none !important; }',
+      'header:has([data-conversation-tabs]) { min-height: 0 !important; padding-bottom: 10px !important; }',
+    ].join('\n');
+
+    /** Hide composer and header chrome; the disposer removes the rules again. */
+    function hideChrome() {
+      if (document.getElementById(HIDDEN_CHROME) !== null) return () => {};
+      const style = document.createElement('style');
+      style.id = HIDDEN_CHROME;
+      style.textContent = HIDDEN_CHROME_RULES;
+      document.head.append(style);
+      return () => { style.remove(); };
+    }
+
+    /**
+     * The Session header's open-in-finder split button and its overflow menu
+     * (Session download and feedback) are developer affordances. Shadowing
+     * their own list ids renders nothing there without disturbing the other
+     * header utilities.
+     */
+    function NoHeaderUtility() {
+      return null;
+    }
+
     const NS = 'rumi.brand';
 
     const en = {
@@ -181,7 +220,21 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale'],
       apply(ctx) {
+        ctx.effect(hideChrome, 'rumi-brand: hide developer chrome');
         ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'rumi-brand: live voice copy');
+        ctx.slots.inject('conversation.session.header.utilities', function* () {
+          yield ctx.slots.register({
+            name: 'conversation.session.header.utilities',
+            id: 'open-in-app',
+            order: -10,
+            priority: -1,
+          }, NoHeaderUtility);
+          yield ctx.slots.register({
+            name: 'conversation.session.header.utilities',
+            id: 'session-log-download',
+            priority: -1,
+          }, NoHeaderUtility);
+        });
         const t = ctx.locale.bind(NS);
         ctx.slots.inject('sidebar.brand.mark', () => ctx.slots.register({
           name: 'sidebar.brand.mark',

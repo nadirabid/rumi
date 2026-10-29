@@ -45,9 +45,16 @@ ask the adult to update it.
 
 ## Before any print
 
-- Confirm the model fits the H2D: single nozzle 325×320×325 mm, dual nozzle
-  300×320×320 mm.
-- Confirm it is watertight, has a flat base, and no unsupported overhangs.
+- Call `mesh_state` before saying what the preview shows; the scene is in memory and is
+  empty after Rumi restarts, whatever the conversation remembers.
+- Show the model with `mesh_open` and pass the envelope you are printing in:
+  `buildVolume: { x: 300, y: 320, z: 320 }` for the dual nozzle, or
+  `{ x: 325, y: 320, z: 325 }` for a single nozzle. The panel opens for the person and
+  the result reports fit, a suggested scale, and whether a rotation would fit.
+- Place it with `mesh_transform` (scale, rotate in degrees, position in millimetres) rather
+  than rewriting the file. Opening the same file again adds a second copy.
+- Confirm it is watertight, has a flat base, and no unsupported overhangs. Every check
+  is a measurement; none of them means the model will slice or print.
 - Ask the adult which loaded AMS filament to use.
 - Never send a print without the adult confirming the prepared job.
 

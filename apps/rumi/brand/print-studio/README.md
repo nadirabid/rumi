@@ -10,12 +10,12 @@ adds one end-to-end print path:
 - Is a printer configured and reachable on the LAN?
 
 The host half discovers the printer over SSDP, exposes `GET /api/print-studio/status`,
-the Bambu Cloud routes under `/api/print-studio/cloud/*`, and the
-model-facing `print_studio_status` tool. Signing in fetches the bound printer's `dev_access_code`;
-printing stays on the local network. The browser half is the Print Studio
-card under **Plugins → Built-in plugin settings**. The bundled
-`skills/print-studio-setup/SKILL.md` is registered at load so the agent can walk an adult
-through whatever the probe reports.
+the Bambu Cloud routes under `/api/print-studio/cloud/*`, the mesh viewer routes under
+`/api/print-studio/viewer/*`, and the model-facing tools. Signing in fetches the bound
+printer's `dev_access_code`; Bambu Connect sends the sliced job. The browser half is the
+Print Studio card under **Plugins → Built-in plugin settings**, plus the 3D preview tab.
+The bundled `skills/print-studio-setup/SKILL.md` is registered at load so the agent can
+walk an adult through whatever the probe reports.
 
 Printer IP and serial are stored in `$DSH_HOME/print-studio/printer.json` (owner-only).
 The LAN access code is stored through `ctx.credentials` as `BAMBU_LAN_ACCESS_CODE`; it
@@ -30,8 +30,57 @@ an adult to press **Send**; there is no supported API for that final authorizati
 macOS. `GET /api/print-studio/print/status` and `print_studio_progress` read progress,
 layers, temperatures, AMS, and errors over local MQTT.
 
-The test tile is about six minutes. The viewer, make DSL, and print checks are later
-slices.
+The test tile is about six minutes. A make DSL is a later slice.
+
+## Mesh preview
+
+The `viewer/` module is a general 3D viewport for any conversation; printing is one caller,
+not its subject. One folder is one Cordis plugin, so it ships here rather than as a package
+of its own.
+
+The scene is the document, in the Blender sense:
+
+- a **datablock** is one mesh: the geometry the host read, its canonical STL bytes, and the
+  centre its rotation turns around;
+- an **object** places one datablock with a scale, a rotation, and a position; scale and
+  rotation turn the mesh about its centre, and the position says where its bottom centre
+  sits, so a part that grows or turns stays on the plate
+- the **scene** is the objects plus the build volume they are checked against.
+
+Opening the same file twice places two objects that share one datablock, so the browser
+fetches the geometry once and every placement moves without touching it.
+
+Every change is a command (`addObject`, `removeObject`, `setTransform`, `setVisible`,
+`setVolume`), and commands return a new document, so undo is a list of earlier documents.
+The agent issues them through `mesh_open`, `mesh_transform`, and `mesh_remove`, and reads the
+result with `mesh_state`; a gizmo, when there is one, will issue the same commands.
+
+`GET /api/print-studio/viewer/state?sessionId=…` returns the scene as the browser draws it
+(one placement matrix per object, statuses, and counts). `GET
+/api/print-studio/viewer/model?sessionId=…&datablockId=…` returns one datablock's bytes,
+which never change once opened and are cached as immutable.
+
+`bake.js` is the projection onto files: one mesh per visible object, transforms applied. It is
+the only place a placement becomes geometry, so an exported mesh and a measured mesh cannot
+disagree. Export and slicing will consume it; nothing else may apply a transform.
+
+The first pass accepts STL only, up to 20 MiB and 200,000 triangles. Scenes and datablocks are
+held in memory for eight conversations and disappear when the plugin unloads. An STL opened
+from a conversation renders through the same tab type as a file preview.
+
+Two rules keep the layering: only `viewport/` imports three, and only `bake.js` turns a
+placement into geometry.
+
+## Client build
+
+This is the one Cordis row that ships a renderer, so its browser half is bundled rather
+than served as plain JavaScript: Three.js stays private to this row and never enters the
+shared client module table. `esbuild` and `three` are development dependencies of
+`apps/rumi`; `build-client.mjs` writes `lib/client.js` and Three's license beside it.
+
+```sh
+pnpm --filter dsh-rumi run build:print-studio-client   # or `run build`, which includes it
+```
 
 ## Account sign-in
 
@@ -45,4 +94,4 @@ The hosted page and ticket exchange were verified with a live Bambu account; re-
 
 ## Source ownership
 
-The host and client entrypoints, discovery, cloud protocol, native login window, sandboxed Bambu preload, and behavior tests live in this package. `desktop/` is compiled separately for Electron by `tsconfig.desktop.json`; it is not imported by the Cordis host. Rumi composes this adapter through a private package import and bundles its preload. The app retains only the validated IPC entry, main-window ownership, and preload exposure. `apps/rumi/tests/print-studio.spec.ts` includes the package-owned tests in upstream test discovery. Executable UUID assignment belongs to Rumi packaging because it affects every native capability.
+The host and client entrypoints, discovery, cloud protocol, native login window, sandboxed Bambu preload, mesh viewer, and behavior tests live in this package. `desktop/` is compiled separately for Electron by `tsconfig.desktop.json`; it is not imported by the Cordis host. Rumi composes this adapter through a private package import and bundles its preload. The app retains only the validated IPC entry, main-window ownership, and preload exposure. `apps/rumi/tests/print-studio.spec.ts` includes the package-owned tests in upstream test discovery. Executable UUID assignment belongs to Rumi packaging because it affects every native capability.

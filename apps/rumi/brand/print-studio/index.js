@@ -4,7 +4,7 @@
  * Detects Bambu Studio and the configured Bambu printer, exposes the result
  * to the Print Studio card and to `print_studio_status`, and ships the
  * `print-studio-setup` skill that walks an adult through whatever is missing.
- * Slicing and printing are deliberately absent from this slice.
+ * Preview tools publish session-owned meshes to the existing right sidebar.
  *
  * @module @rumi/print-studio
  */
@@ -20,12 +20,13 @@ import { loginMessageToken, accessCodeFor, devices as cloudDevices } from './clo
 import { sliceMesh } from './slicer.js'
 import { handoffToBambuConnect, hasBambuConnect } from './connect.js'
 import { readPrinterStatus } from './monitor.js'
+import { applyViewer } from './viewer/host.js'
 
 /** The plugin row id, also the card identity. */
 export const name = 'print-studio'
 
 /** Services this host half reaches. */
-export const inject = ['connection', 'tools', 'skills', 'credentials']
+export const inject = ['connection', 'tools', 'skills', 'credentials', 'fs', 'workingDirectory']
 
 const ROUTE = '/api/print-studio'
 const SKILL_NAME = 'print-studio-setup'
@@ -181,6 +182,7 @@ function registerSkill(ctx) {
  * @param {object} ctx - host plugin context.
  */
 export function apply(ctx) {
+  applyViewer(ctx, defineTool)
   const register = (path, methods, fetch) => {
     ctx.effect(() => ctx.connection.fetch.register({
       path: `${ROUTE}${path}`,

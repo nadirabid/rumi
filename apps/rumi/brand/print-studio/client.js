@@ -1,9 +1,10 @@
+import { installViewer } from './viewer/client.js'
 /**
  * Print Studio — browser half.
  *
  * The setup card under Plugins → Built-in plugin settings. The host discovers
  * the printer on the LAN; an adult signs in once with their Bambu account so
- * the host can fetch the printer's access code. Printing itself stays local.
+ * the host can fetch the printer's access code. Bambu Connect sends sliced jobs.
  * The page uses the shared settings-form primitives so it matches every other
  * plugin settings page.
  */
@@ -33,7 +34,7 @@ window.__ModuleLoader__.load({
       checking: 'Looking for the printer…',
       ready: 'Ready to make something',
       needsSetup: 'Setup needed',
-      intro: 'Print Studio finds the printer on this network. Sign in once with your Bambu account so it can fetch the printer’s access code; printing stays on your local network.',
+      intro: 'Print Studio finds your printer. Sign in with your Bambu account to read its status. Sliced jobs open in Bambu Connect for you to send.',
       slicer: 'Slicer',
       notInstalled: 'not installed',
       download: 'Download Bambu Studio',
@@ -44,7 +45,7 @@ window.__ModuleLoader__.load({
       scan: 'Scan again',
       choose: 'Choose the printer',
       cloudMode: 'Cloud mode',
-      cloudDetail: 'The printer is connected to Bambu Cloud. Print Studio signs in once to fetch its access code, then prints over the local network.',
+      cloudDetail: 'The printer is connected to Bambu Cloud. Sign in to fetch its access code for status monitoring. Bambu Connect sends print jobs.',
       next: 'Next steps',
       ssoWaitingDetail: 'Complete sign-in in the Bambu window.',
       signedIn: 'Signed in to Bambu',
@@ -72,7 +73,7 @@ window.__ModuleLoader__.load({
       checking: '正在寻找打印机…',
       ready: '可以开始创作了',
       needsSetup: '需要设置',
-      intro: '打印工作室会自动寻找同一网络上的打印机。用 Bambu 账号登录一次，即可获取打印机的访问码；打印仍然走本地网络。',
+      intro: '打印工作室会自动寻找打印机。请登录 Bambu 账号以读取打印机状态。切片后会打开 Bambu Connect，由你发送打印任务。',
       slicer: '切片软件',
       notInstalled: '未安装',
       download: '下载 Bambu Studio',
@@ -83,7 +84,7 @@ window.__ModuleLoader__.load({
       scan: '重新扫描',
       choose: '选择打印机',
       cloudMode: '云模式',
-      cloudDetail: '打印机已连接 Bambu 云端。打印工作室登录一次获取访问码，然后通过本地网络打印。',
+      cloudDetail: '打印机已连接 Bambu 云端。登录后可获取访问码以监控状态。打印任务通过 Bambu Connect 发送。',
       next: '下一步',
       ssoWaitingDetail: '请在 Bambu 窗口中完成登录',
       signedIn: '已登录 Bambu',
@@ -309,8 +310,9 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale'],
+      inject: ['slots', 'locale', 'sidebarRight', 'sidebarRightTabs', 'documentPreviews'],
       apply(ctx) {
+        installViewer(ctx, React, require('@deepseek-ai/dsh-client-ui-primitives'));
         ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'rumi print studio: copy');
         const t = ctx.locale.bind(NS);
         ctx.slots.inject('plugins.item', () => ctx.slots.register({

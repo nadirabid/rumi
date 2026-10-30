@@ -67,8 +67,13 @@ it('refuses an id that is not a plain directory name', async () => {
 it('serves the gallery over the connection routes', async () => {
   const routes = new Map<string, (request: Request) => Promise<Response>>()
   const cleanup: (() => void)[] = []
+  const provided = new Map<string, unknown>()
   apply({
     effect: (effect: () => (() => void)) => cleanup.push(effect()),
+    provide: (name: string, value: unknown) => {
+      provided.set(name, value)
+      return () => { provided.delete(name) }
+    },
     connection: { fetch: { register: (route: { path: string; fetch: (request: Request) => Promise<Response> }) => {
       routes.set(route.path, route.fetch)
       return () => { routes.delete(route.path) }
@@ -80,6 +85,8 @@ it('serves the gallery over the connection routes', async () => {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Tiny rover' }),
   })).json()
   expect(created.project.name).toBe('Tiny rover')
+  expect(provided.has('rumiProjectTypes')).toBe(true)
+  expect(readFileSync(join(created.project.path, 'AGENTS.md'), 'utf8')).toContain('# Tiny rover')
 
   const listed = await (await request('/api/rumi-projects')).json()
   expect(listed.projects).toHaveLength(1)

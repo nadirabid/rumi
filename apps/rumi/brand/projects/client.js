@@ -30,7 +30,6 @@ window.__ModuleLoader__.load({
       emptyHint: 'Make one, then ask Rumi to help build it.',
       updated: 'Updated {when}',
       failed: 'That did not work. Try again.',
-      untitled: 'Untitled project',
     };
     const zh = {
       title: '项目',
@@ -41,7 +40,6 @@ window.__ModuleLoader__.load({
       emptyHint: '先新建一个，然后请 Rumi 一起制作',
       updated: '更新于 {when}',
       failed: '没有成功，请再试一次',
-      untitled: '未命名项目',
     };
 
     const STYLES = `
@@ -111,12 +109,12 @@ window.__ModuleLoader__.load({
           }
         },
         /** Create a project and open it; a new project has no session yet. */
-        async create(t) {
+        async create() {
           try {
             const response = await fetch(ROUTE, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ name: t('untitled') }),
+              body: JSON.stringify({}),
             });
             if (!response.ok) throw new Error(`projects: ${response.status}`);
             const { project } = await json(response);
@@ -158,6 +156,12 @@ window.__ModuleLoader__.load({
           const workspace = await ctx.workspaces.create({ path: project.path });
           // DSH workspace titles are unique; project display names may repeat.
           const sessionId = await ctx.uiWorkspace.connectWorkspace(workspace.workspaceId);
+          const renamed = await ctx.sessions.using(
+            sessionId,
+            { source: 'workspaceOperation' },
+            reference => reference.binding.session.rename(project.name),
+          );
+          if (!renamed.ok) throw new Error(renamed.error.message);
           const response = await fetch(`${ROUTE}/session`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -220,7 +224,7 @@ window.__ModuleLoader__.load({
             onHome
               ? h('button', {
                 type: 'button', className: 'rumi-glass', 'aria-label': t('new'), title: t('new'),
-                onClick: () => run(() => list.create(t)),
+                onClick: () => run(() => list.create()),
               }, h(IconPlusOutlineRegular, { size: 16 }))
               : h('button', {
                 type: 'button', className: 'rumi-glass', 'aria-label': t('back'), title: t('back'),

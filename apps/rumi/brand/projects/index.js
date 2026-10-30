@@ -33,7 +33,7 @@ function json(value, status = 200) {
 
 function normalizeName(name) {
   const trimmed = typeof name === 'string' ? name.trim() : ''
-  if (trimmed === '') return 'Untitled project'
+  if (trimmed === '') return null
   return trimmed.slice(0, NAME_LIMIT)
 }
 
@@ -55,6 +55,29 @@ export function createProjectStore(root) {
     const { path: _, ...metadata } = project
     await writeFile(join(directoryOf(project.id), 'project.json'), `${JSON.stringify(metadata, undefined, 2)}\n`)
     return { ...metadata, path: directoryOf(project.id) }
+  }
+  const allocateName = async () => {
+    await mkdir(root, { recursive: true })
+    let number = 1
+    for (const entry of await readdir(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const metadata = await read(entry.name).catch(error => {
+        if (error.code === 'ENOENT') return null
+        throw error
+      })
+      const match = /^Untitled (\d+)$/u.exec(metadata?.name ?? '')
+      if (match) number = Math.max(number, Number(match[1]) + 1)
+    }
+    // Exclusive reservations survive restarts and prevent concurrent name reuse.
+    for (;;) {
+      try {
+        await writeFile(join(root, `.untitled-${number}`), '', { flag: 'wx' })
+        return `Untitled ${number}`
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error
+        number += 1
+      }
+    }
   }
   return {
     async list() {
@@ -80,7 +103,7 @@ export function createProjectStore(root) {
       const now = new Date().toISOString()
       const project = {
         id: randomUUID(),
-        name: normalizeName(name),
+        name: normalizeName(name) ?? await allocateName(),
         sessionIds: [],
         activeSessionId: null,
         workspaceId: null,

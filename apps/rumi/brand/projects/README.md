@@ -45,3 +45,7 @@ concerns, and the gallery renders no session state of its own.
 
 Settings, plugins, and automation lose their sidebar home with the navigation
 column. They stay reachable through the app menu and their shortcuts.
+
+## Gallery appearance
+
+The gallery uses neutral board covers, a three-column grid that reduces to two or one column on narrow windows, and a circular New control. Covers are placeholders until project thumbnails are available; they do not depict generated artifacts. Colors follow the active DSH theme. The glass treatment is CSS, not native SwiftUI Liquid Glass.

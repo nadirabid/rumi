@@ -123,7 +123,7 @@ describe('desktop external plugin profile', () => {
     expect(manifest.dsh.profile.bundles).not.toContain('plugin')
     expect(manifest.dsh.profile.bundles).toContain('@deepseek-ai/dsh-web-app')
     await manager.applyRelease()
-    expect(readFileSync(patch, 'utf8')).toContain('[]')
+    expect(readFileSync(patch, 'utf8')).toContain('# Rumi profile policy')
   })
 
   it('needs no runtime or package manifest when no plugins have been installed', async () => {
@@ -182,7 +182,7 @@ describe('desktop external plugin profile', () => {
     await expect(manager.applyRelease()).resolves.toBeUndefined()
     expect(readFileSync(join(manager.paths.profile, '.DS_Store'), 'utf8')).toBe('metadata')
     expect(readFileSync(join(manager.paths.profile, 'user-file'), 'utf8')).toBe('retain')
-    expect(readFileSync(join(manager.paths.profile, 'cordis.patch.yml'), 'utf8')).toContain('[]')
+    expect(readFileSync(join(manager.paths.profile, 'cordis.patch.yml'), 'utf8')).toContain('# Rumi profile policy')
     expect(existsSync(join(manager.paths.profile, 'desktop-runtime-state.json'))).toBe(false)
   })
 
@@ -223,7 +223,7 @@ describe('desktop external plugin profile', () => {
     const next = new DesktopProjectManager(manager.paths, { ...manager.runtime, dsh: nextRoot })
     await expect(next.applyRelease()).resolves.toBeUndefined()
     expect(plugins(next)).toEqual(plugins(manager))
-    expect(readFileSync(join(manager.paths.profile, 'cordis.patch.yml'), 'utf8')).toBe('[]\n')
+    expect(readFileSync(join(manager.paths.profile, 'cordis.patch.yml'), 'utf8')).toContain('# Rumi profile policy')
     expect(readFileSync(join(manager.paths.profile, 'node_modules/plugin/bundle.yml'), 'utf8')).toBe('[]\n')
   })
 

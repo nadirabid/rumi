@@ -11,14 +11,20 @@ product; everything else is upstream, unmodified.
 | product name | `Rumi` |
 | bundle id | `com.nadirmuzaffar.rumi` |
 | URL scheme | `rumi` |
-| profile | `$DSH_HOME/profiles/rumi` |
+| home | `~/.rumi` (override: `DSH_RUMI_HOME`) |
+| profile | `~/.rumi/profiles/rumi` |
+| sessions and storages | `~/.rumi/sessions`, `~/.rumi/storages` |
+| projects | `~/.rumi/workspace` |
 | data root | `~/Library/Application Support/dsh-rumi` |
 | icon | `apps/rumi/resources/icon*.png` — the word "rumi" |
 | window title | `Rumi` (set by `DSH_CLIENT_TITLE` in `scripts/client-build-environment.ts`) |
 
-Both apps run at the same time: separate bundle ids, separate single-instance locks,
-separate profiles, ephemeral ports. They share `$DSH_HOME` (sessions, credentials,
-settings) but not their plugin sets.
+Both apps run at the same time and share nothing: separate bundle ids, single-instance
+locks, homes, profiles, Sessions, credentials, instructions, and plugin sets. The
+Electron main process points `DSH_HOME` at `~/.rumi` before the first path resolves, so
+the profile, Session and storage roots, credentials, `AGENTS.md`, skills, presets,
+provisioned runtimes, and every bundled plugin that reads the home all land under
+Rumi's own directory. Nothing resolves `~/.dsh`, which belongs to DeepSeek Harness.
 
 ## Build
 
@@ -64,13 +70,29 @@ Launch from Finder. If you launch from inside a DSH shell, unset
 `ELECTRON_RUN_AS_NODE` first — the harness sets it for its own children, and
 Electron then runs as plain Node and exits silently.
 
+## Moving an earlier install
+
+Builds before Rumi owned `~/.rumi` kept their profile and state under `~/.dsh`,
+beside DeepSeek Harness. Move that data once before launching a newer build, or the
+app opens empty:
+
+```sh
+node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/migrate-rumi-home.ts
+```
+
+It moves the profile, Sessions, storages, and Print Studio state, copies the
+credentials and the Live Voice key, and repoints the profile's Session and storage
+roots. Each path moves only when Rumi's home does not already hold it, so rerunning is
+safe. The shared Python and Node runtimes are not copied; the app provisions them under
+`~/.rumi/dsh-runtimes` the first time a task asks for them.
+
 ## Bundled plugins
 
-`apps/rumi/brand/` holds the packages Rumi carries inside its own runtime and enables in every new profile. `@rumi/brand` draws the wordmark and owns the Live Voice key page; `@nmuzaffar/dsh-live-voice` adds full-duplex voice. Packaging installs both beside `dsh` and declares them in the bundled installation manifest, so the profile resolves them without a package manager. The key page appears as a built-in card on the Plugins page (Plugins → Live Voice) and writes the key file the voice plugin reads (`~/.dsh/live-voice.key`). `apps/rumi/brand/live-voice/README.md` records the vendored version and the update steps.
+`apps/rumi/brand/` holds the packages Rumi carries inside its own runtime and enables in every new profile. `@rumi/brand` draws the wordmark and owns the Live Voice key page; `@nmuzaffar/dsh-live-voice` adds full-duplex voice. Packaging installs both beside `dsh` and declares them in the bundled installation manifest, so the profile resolves them without a package manager. The key page appears as a built-in card on the Plugins page (Plugins → Live Voice) and writes the key file the voice plugin reads (`~/.rumi/live-voice.key`). `apps/rumi/brand/live-voice/README.md` records the vendored version and the update steps.
 
 ## Next
 
-Custom UI packages that are not shipped this way go in `~/.dsh/profiles/rumi/package.json`.
+Custom UI packages that are not shipped this way go in `~/.rumi/profiles/rumi/package.json`.
 
 ## Projects
 

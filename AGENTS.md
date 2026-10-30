@@ -59,14 +59,17 @@ a bundle patch replaces loader rows, and neither needs a fork.
 | package | `dsh-rumi` (`apps/rumi`) |
 | bundle id | `com.nadirmuzaffar.rumi` |
 | URL scheme | `rumi` |
-| profile | `$DSH_HOME/profiles/rumi` |
-| state | `$DSH_HOME/rumi/sessions`, `$DSH_HOME/rumi/storages` |
-| config | shared from `$DSH_HOME`: credentials, `AGENTS.md`, skills, presets |
+| home | `~/.rumi` (`DSH_RUMI_HOME` overrides it) |
+| profile | `~/.rumi/profiles/rumi` |
+| state | `~/.rumi/sessions`, `~/.rumi/storages` |
+| config | Rumi's own: `~/.rumi/.credentials.yaml`, `AGENTS.md`, skills, presets |
 | window title | `Rumi` |
 | icon | `apps/rumi/resources/icon*.png` — the word "rumi" |
 
-Rumi and DeepSeek Harness run at the same time. They share the Harness home for
-configuration but never share Sessions, workspaces, or profiles.
+Rumi and DeepSeek Harness run at the same time and share no directory. The Electron
+main process sets `DSH_HOME` to `~/.rumi` before the first path resolves, so nothing
+the app reads or writes lands under `~/.dsh`. Earlier builds did share that home; the
+one-time migration in `apps/rumi/src/rumi-home-migration.ts` moves what they wrote.
 
 ### Plugin UI
 
@@ -150,9 +153,10 @@ Two traps that produced false confidence here:
 
 1. `Rumi.app` is in `/Applications` and `codesign -v` passes.
 2. It launches and stays running (`pgrep -f "MacOS/Rumi$"`).
-3. `~/Library/Application Support/dsh-rumi` and `~/.dsh/profiles/rumi` exist, and the
-   profile patch carries the state-isolation rows.
-4. `~/.dsh/rumi/sessions` grows when Rumi runs; `~/.dsh/sessions` does not.
+3. `~/Library/Application Support/dsh-rumi` and `~/.rumi/profiles/rumi` exist, and the
+   profile patch carries the Rumi policy block.
+4. `~/.rumi/sessions` grows when Rumi runs, and no Rumi process has a path under
+   `~/.dsh`: `lsof -p $(pgrep -f "MacOS/Rumi$") | grep -c '\.dsh/'` is zero.
 5. The stock app still builds: `pnpm --filter @deepseek-ai/dsh-desktop run build`.
 
 ---

@@ -24,5 +24,5 @@ Rumi installs this package beside `dsh` at build time.
 
 ## Configuration
 
-Keys are stored in `~/.dsh/live-voice.key` by default. Set one under **Plugins →
+Keys are stored in `~/.rumi/live-voice.key` by default. Set one under **Plugins →
 Live Voice** in the app, or provide `OPENAI_API_KEY` in the environment.

@@ -53,3 +53,5 @@ The gallery uses neutral board covers, a three-column grid that reduces to two o
 New projects and their initial sessions share the name `Untitled <number>`. The host reserves numbers exclusively on disk so concurrent creation and app restarts do not reuse them. Existing names are preserved.
 
 The home gallery owns project selection. Rumi shadows `conversation.hero.workspace` with a hidden occupant and hides the conversation hero’s workspace button in its app-owned stylesheet. The conversation does not expose the stock workspace picker.
+
+The app header has a separate tinted surface and divider. It shows Projects on home, the active project name beside Back in a conversation, and New at the trailing edge.

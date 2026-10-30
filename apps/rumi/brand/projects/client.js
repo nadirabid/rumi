@@ -62,7 +62,11 @@ window.__ModuleLoader__.load({
 .rumi-projects-empty-title{margin:0;font-size:14px;font-weight:600}
 .rumi-projects-empty-hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
 .rumi-projects-error{margin:0;font-size:12px;color:var(--dsw-alias-state-error-primary)}
-.rumi-projects-leading{display:flex;align-items:center;gap:8px}
+.rumi-projects-leading{position:fixed;inset:0 0 auto 0;box-sizing:border-box;height:var(--dsh-frame-top-clearance,48px);display:flex;align-items:center;gap:10px;padding:0 16px 0 88px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 92%,transparent);border-bottom:1px solid var(--dsw-alias-border-l2);backdrop-filter:blur(24px);-webkit-app-region:drag}
+.rumi-projects-leading button{-webkit-app-region:no-drag;flex-shrink:0}
+.rumi-header-title{font-size:14px;font-weight:500;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--dsw-alias-label-primary)}
+.rumi-header-new{margin-left:auto}
+html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
 /* Liquid Glass: a translucent capsule over the window material. The specular
    inset and drop shade are material constants, not theme colors. */
 .rumi-glass{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border-radius:50%;corner-shape:round;cursor:default;color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 55%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 75%,transparent);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 1px 2px rgba(0,0,0,.10);transition:background-color 120ms ease}
@@ -217,24 +221,25 @@ window.__ModuleLoader__.load({
 
         function Leading({ usePanelInfo, t }) {
           const onHome = usePanelInfo(info => info.activePanelId === PANEL_ID);
-          const busy = React.useRef(false);
-          const run = (action) => {
-            if (busy.current) return;
-            busy.current = true;
-            void Promise.resolve(action()).finally(() => { busy.current = false; });
+          const state = React.useSyncExternalStore(list.subscribe, list.getSnapshot);
+          const project = state.projects.find(item => item.id === state.activeId);
+          const [busy, setBusy] = React.useState(false);
+          const create = async () => {
+            if (busy) return;
+            setBusy(true);
+            try { await list.create(); } finally { setBusy(false); }
           };
-          // The frame reserves a 160px band beside the traffic lights for
-          // icon-sized controls; the project name lives in the panel header.
-          return h('div', { className: 'rumi-projects-leading' },
-            onHome
-              ? h('button', {
-                type: 'button', className: 'rumi-glass', 'aria-label': t('new'), title: t('new'),
-                onClick: () => run(() => list.create()),
-              }, h(IconPlusOutlineRegular, { size: 16 }))
-              : h('button', {
-                type: 'button', className: 'rumi-glass', 'aria-label': t('back'), title: t('back'),
-                onClick: () => list.close(),
-              }, h(IconChevronLeftOutlineRegular, { size: 16 })),
+          return h('header', { className: 'rumi-projects-leading' },
+            onHome ? null : h('button', {
+              type: 'button', className: 'rumi-glass', 'aria-label': t('back'), title: t('back'),
+              onClick: () => list.close(),
+            }, h(IconChevronLeftOutlineRegular, { size: 16 })),
+            h('span', { className: 'rumi-header-title', title: onHome ? t('title') : project?.name },
+              onHome ? t('title') : project?.name),
+            h('button', {
+              type: 'button', className: 'rumi-glass rumi-header-new', 'aria-label': t('new'), title: t('new'),
+              disabled: busy, onClick: create,
+            }, h(IconPlusOutlineRegular, { size: 16 })),
           );
         }
 

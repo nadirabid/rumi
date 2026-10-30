@@ -222,3 +222,14 @@ it('leaves project selection on the home page instead of the conversation hero',
   expect(document.body.textContent).toBe('')
   expect(screen.queryByRole('combobox')).toBeNull()
 })
+
+it('shows the opened project name in the header and keeps New available', async () => {
+  const view = fixture({ projects: [project({ name: 'Dragon cup' })] })
+  render(<>{view.view('main:projects')}{view.view('shell.leading')}</>)
+  await settle()
+  fireEvent.click(screen.getByRole('button', { name: 'Dragon cup' }))
+  await settle()
+  expect(document.querySelector('.rumi-header-title')?.textContent).toBe('Dragon cup')
+  expect(screen.getByRole('button', { name: COPY.new })).toBeTruthy()
+  expect(screen.getByRole('button', { name: COPY.back })).toBeTruthy()
+})

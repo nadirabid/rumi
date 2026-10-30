@@ -137,7 +137,8 @@ window.__ModuleLoader__.load({
             ctx.uiWorkspace.openSession(sessionId);
             ctx.layout.selectPanel(null);
             publish({ activeId: project.id, error: '' });
-          } catch {
+          } catch (error) {
+            console.error('Rumi project opening failed', error);
             publish({ error: 'open' });
           }
         },
@@ -158,14 +159,14 @@ window.__ModuleLoader__.load({
           const recorded = project.activeSessionId ?? project.sessionIds.at(-1);
           if (recorded !== undefined && exists(recorded)) return recorded;
           const workspace = await ctx.workspaces.create({ path: project.path });
-          // The directory is an opaque id, so give the Workspace the project's own name.
-          if (workspace.title !== project.name) await ctx.workspaces.rename(workspace.workspaceId, project.name);
+          // DSH workspace titles are unique; project display names may repeat.
           const sessionId = await ctx.uiWorkspace.connectWorkspace(workspace.workspaceId);
-          await fetch(`${ROUTE}/session`, {
+          const response = await fetch(`${ROUTE}/session`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ projectId: project.id, sessionId, workspaceId: workspace.workspaceId }),
           });
+          if (!response.ok) throw new Error(`project session association failed: ${response.status}`);
           return sessionId;
         },
       };

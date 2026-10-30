@@ -16,7 +16,8 @@ session-scoped workspace.
 The id is immutable and is the directory name; the name is user-facing and lives in
 `project.json`, so renaming never moves files. Opening a project starts or reuses a
 DSH session whose working directory is the project root, and records its id in
-`project.json`.
+`project.json`. Internal DSH workspaces retain their unique directory-derived names,
+so multiple projects can share a display name.
 
 ## Surfaces
 

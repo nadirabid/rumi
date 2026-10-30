@@ -102,7 +102,7 @@ export function detectSlicer(options = {}) {
 /** Harness home used when the caller does not supply one. */
 function defaultHome() {
   const configured = process.env.DSH_HOME?.trim()
-  return configured === undefined || configured === '' ? join(homedir(), '.dsh') : configured
+  return configured === undefined || configured === '' ? join(homedir(), '.rumi') : configured
 }
 
 /** Where the printer profile is stored, owner-only. */

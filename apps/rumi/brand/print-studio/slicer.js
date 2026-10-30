@@ -25,7 +25,7 @@ export const BED_TYPE_LABELS = {
 }
 
 /** @param {string} home @returns {string} */
-function defaultHome(home = process.env.DSH_HOME?.trim() || join(homedir(), '.dsh')) {
+function defaultHome(home = process.env.DSH_HOME?.trim() || join(homedir(), '.rumi')) {
   return home
 }
 

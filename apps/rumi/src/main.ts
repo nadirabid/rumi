@@ -24,6 +24,7 @@ import {
   type MenuItemConstructorOptions,
 } from 'electron'
 import { resolveDesktopPaths } from './paths.ts'
+import { applyRumiHome } from './rumi-home.ts'
 import { clearLaunchCookies } from './launch-cookies.ts'
 import { DesktopProjectManager } from './project-manager.ts'
 import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError } from './host-process.ts'
@@ -85,6 +86,11 @@ const rendererConsole = new RendererConsoleTail()
 // Platform-conventional logs directory (macOS ~/Library/Logs/<name>, otherwise under userData);
 // set before ready so the first fatal report already resolves under it.
 app.setAppLogsPath()
+
+// Rumi owns `~/.rumi`. Applying the home here, before any path resolves, moves
+// the profile, Sessions, storages, credentials, instructions, runtimes, and
+// every bundled plugin that reads the shared home onto Rumi's own root.
+applyRumiHome()
 
 function currentDesktopLocale(): ReturnType<typeof resolveDesktopLocale> {
   return resolveDesktopLocale(windowsLanguage ?? app.getLocale())

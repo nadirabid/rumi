@@ -2,4 +2,4 @@
     - id: live-voice
       name: '@nmuzaffar/dsh-live-voice'
       config:
-        apiKeyFile: ~/.dsh/live-voice.key
+        apiKeyFile: ~/.rumi/live-voice.key

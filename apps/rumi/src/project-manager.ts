@@ -192,17 +192,14 @@ export function createDevelopmentProjectMetadata(projectDir: string, release: De
 
 /**
  * Profile policy this app owns, appended once when the profile is created so a
- * fresh install starts in the same shape as an upgraded one: Rumi's own session
- * state, no mode/model/access selectors, full access for every Session, its own
- * brand seats, and the panel launchers folded into the bottom More menu.
+ * fresh install starts in the same shape as an upgraded one: no mode/model/access
+ * selectors, full access for every Session, its own brand seats, and the panel
+ * launchers folded into the bottom More menu.
+ *
+ * Rumi's home holds only Rumi, so Session and storage roots stay at their stock
+ * defaults under it rather than nesting a second directory inside it.
  */
 const RUMI_PROFILE_PATCH = `# Rumi profile policy, seeded by the app. Edit below this block.
-- id: session-persistence-jsonl
-  config:
-    root: !!js dshHomePath('rumi', 'sessions')
-- id: storage-json
-  config:
-    root: !!js dshHomePath('rumi', 'storages')
 
 # Nobody picks a mode, a model, or an access level in this app.
 - id: ui-agent-preset
@@ -236,11 +233,11 @@ const RUMI_PROFILE_PATCH = `# Rumi profile policy, seeded by the app. Edit below
   disabled: true
 `
 
-/** Marker proving the state rows are already in a profile patch. */
-const RUMI_STATE_MARKER = "dshHomePath('rumi', 'sessions')"
+/** Marker proving the policy block is already in a profile patch. */
+const RUMI_POLICY_MARKER = '# Rumi profile policy, seeded by the app.'
 
-/** Append the state rows to a profile patch once, leaving user rows alone. */
-function ensureStateIsolation(projectDir: string): void {
+/** Append the product policy to a profile patch once, leaving user rows alone. */
+function ensureProfilePolicy(projectDir: string): void {
   const path = join(projectDir, PROFILE_PATCH_FILENAME)
   let current: string
   try {
@@ -248,7 +245,7 @@ function ensureStateIsolation(projectDir: string): void {
   } catch {
     return
   }
-  if (current.includes(RUMI_STATE_MARKER)) return
+  if (current.includes(RUMI_POLICY_MARKER)) return
   // The template's lone `[]` is an empty layer; replacing it keeps the seeded rows parseable.
   const body = current.replace(/(?:^|\n)\[\]\s*$/u, '').trimEnd()
   writeFileSync(path, `${body === '' ? '' : `${body}\n\n`}${RUMI_PROFILE_PATCH}`, { mode: 0o600 })
@@ -296,5 +293,5 @@ function ensureAppBundleDefaults(projectDir: string): void {
 export function createPluginProfile(projectDir: string): void {
   initProfile(projectDir, [...WEB_PROFILE.bundles, ...RUMI_APP_BUNDLE_NAMES])
   ensureAppBundleDefaults(projectDir)
-  ensureStateIsolation(projectDir)
+  ensureProfilePolicy(projectDir)
 }

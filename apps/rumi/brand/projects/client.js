@@ -45,18 +45,19 @@ window.__ModuleLoader__.load({
     };
 
     const STYLES = `
-.rumi-projects{box-sizing:border-box;display:flex;flex-direction:column;gap:26px;width:100%;height:100%;min-height:0;overflow:auto;padding:calc(var(--dsh-frame-top-clearance,48px) + 20px) 40px 48px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base)}
+.rumi-projects{box-sizing:border-box;display:flex;flex-direction:column;gap:24px;width:100%;height:100%;min-height:0;overflow:auto;padding:calc(var(--dsh-frame-top-clearance,48px) + 28px) clamp(20px,4vw,56px) 48px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base)}
 .rumi-projects-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
-.rumi-projects-title{margin:0;font-size:22px;font-weight:600;letter-spacing:-0.02em}
+.rumi-projects-title{margin:0;font-size:22px;font-weight:500;letter-spacing:-0.02em}
 .rumi-projects-count{margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary)}
-.rumi-projects-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:28px 24px}
-.rumi-project{display:flex;flex-direction:column;gap:10px;padding:0;border:0;background:none;text-align:left;cursor:pointer;color:inherit}
-.rumi-project-cover{box-sizing:border-box;position:relative;display:flex;align-items:center;justify-content:center;aspect-ratio:4/3;border-radius:16px;border:1px solid var(--dsw-alias-border-l2);overflow:hidden;background:linear-gradient(160deg,hsl(var(--rumi-hue,220) 65% 62% / .26),hsl(var(--rumi-hue,220) 55% 58% / .10) 60%),var(--dsw-alias-bg-layer-2);transition:border-color 140ms ease,box-shadow 140ms ease,transform 140ms ease}
-.rumi-project-initial{position:relative;font-size:64px;font-weight:500;letter-spacing:-0.04em;color:var(--dsw-alias-label-tertiary);opacity:.38;text-shadow:0 1px 0 rgba(255,255,255,.5)}
-.rumi-project:hover .rumi-project-cover{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 55%,var(--dsw-alias-border-l2));box-shadow:0 8px 20px rgba(0,0,0,.07);transform:translateY(-1px)}
+.rumi-projects-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:40px 24px;align-items:start}
+.rumi-project{display:flex;flex-direction:column;gap:8px;min-width:0;padding:0;border:0;background:none;text-align:left;cursor:pointer;color:inherit}
+/* Empty projects appear as blank boards until a project preview is available. */
+.rumi-project-cover{box-sizing:border-box;position:relative;display:flex;align-items:center;justify-content:center;width:100%;aspect-ratio:3/2;border-radius:12px;border:1px solid var(--dsw-alias-border-l2);overflow:hidden;background:radial-gradient(circle,color-mix(in srgb,var(--dsw-alias-label-tertiary) 18%,transparent) .6px,transparent .7px) 0 0/12px 12px,var(--dsw-alias-bg-layer-1);transition:border-color 140ms ease,box-shadow 140ms ease}
+.rumi-project-initial{width:40px;height:30px;border:1px solid var(--dsw-alias-border-l2);border-radius:4px;background:var(--dsw-alias-bg-base);box-shadow:0 2px 6px color-mix(in srgb,var(--dsw-alias-label-primary) 5%,transparent)}
+.rumi-project:hover .rumi-project-cover{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 55%,var(--dsw-alias-border-l2));box-shadow:0 8px 20px rgba(0,0,0,.07);transform:none}
 .rumi-project:active .rumi-project-cover{transform:none;box-shadow:none}
 .rumi-project:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:4px;border-radius:18px}
-.rumi-project-name{margin:0;font-size:14px;font-weight:500;color:var(--dsw-alias-label-secondary)}
+.rumi-project-name{margin:0;font-size:14px;font-weight:500;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}
 .rumi-project-meta{margin:0;font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .rumi-projects-empty{display:flex;flex-direction:column;gap:6px;max-width:320px;margin:auto;text-align:center}
 .rumi-projects-empty-title{margin:0;font-size:14px;font-weight:600}
@@ -65,18 +66,14 @@ window.__ModuleLoader__.load({
 .rumi-projects-leading{display:flex;align-items:center;gap:8px}
 /* Liquid Glass: a translucent capsule over the window material. The specular
    inset and drop shade are material constants, not theme colors. */
-.rumi-glass{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border-radius:9px;cursor:default;color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 55%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 75%,transparent);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 1px 2px rgba(0,0,0,.10);transition:background-color 120ms ease}
+.rumi-glass{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border-radius:50%;corner-shape:round;cursor:default;color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 55%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 75%,transparent);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 1px 2px rgba(0,0,0,.10);transition:background-color 120ms ease}
 .rumi-glass:hover{background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 78%,transparent)}
 .rumi-glass:active{background:color-mix(in srgb,var(--dsw-alias-bg-layer-3) 85%,transparent)}
 .rumi-glass:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
+@media(max-width:900px){.rumi-projects-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.rumi-projects-grid{grid-template-columns:minmax(0,1fr)}}
+@media(prefers-reduced-motion:reduce){.rumi-project-cover,.rumi-glass{transition:none}}
 `;
-
-    /** A stable, pleasant cover tint per project; product artwork, not theme state. */
-    function hueOf(id) {
-      let hash = 0;
-      for (let index = 0; index < id.length; index++) hash = (hash * 31 + id.charCodeAt(index)) % 360;
-      return hash;
-    }
 
     /** Copy and styles installed once per plugin instance. */
     function installChrome(ctx, t) {
@@ -184,10 +181,10 @@ window.__ModuleLoader__.load({
           const when = Number.isNaN(updated.valueOf()) ? '' : updated.toLocaleDateString();
           return h('button', {
             className: 'rumi-project', type: 'button', onClick: () => onOpen(project),
-            'aria-label': project.name, style: { '--rumi-hue': hueOf(project.id) },
+            'aria-label': project.name,
           },
             h('span', { className: 'rumi-project-cover', 'aria-hidden': 'true' },
-              h('span', { className: 'rumi-project-initial' }, project.name.trim().charAt(0).toUpperCase() || '?')),
+              h('span', { className: 'rumi-project-initial' })),
             h('p', { className: 'rumi-project-name' }, project.name),
             when === '' ? null : h('p', { className: 'rumi-project-meta' }, t('updated', { when })),
           );
@@ -198,8 +195,7 @@ window.__ModuleLoader__.load({
           React.useEffect(() => { void list.load(); }, []);
           return h('section', { className: 'rumi-projects', 'aria-label': t('title') },
             h('div', { className: 'rumi-projects-head' },
-              h('h1', { className: 'rumi-projects-title' }, t('title')),
-              state.phase === 'ready' ? h('p', { className: 'rumi-projects-count' }, t('count', { count: state.projects.length })) : null),
+              h('h1', { className: 'rumi-projects-title' }, t('title'))),
             state.error === '' ? null : h('p', { role: 'alert', className: 'rumi-projects-error' }, t('failed')),
             state.phase === 'ready' && state.projects.length === 0
               ? h('div', { className: 'rumi-projects-empty' },

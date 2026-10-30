@@ -170,12 +170,32 @@ export class LiveBridge {
 }
 
 /**
+ * Reduce an assistant answer to something a voice model can speak.
+ *
+ * Commentary is spoken in the model's own words, so markdown syntax, link
+ * targets, and bare paths become noise or get read out. Keep the words, drop
+ * the formatting.
+ * @param {string} text - Raw assistant text.
+ * @returns Plain prose.
+ */
+export function speakable(text) {
+  return String(text ?? '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/gu, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/gu, '$1')
+    .replace(/`{1,3}([^`]*)`{1,3}/gu, '$1')
+    .replace(/^\s*[-*+]\s+/gmu, '')
+    .replace(/^\s*#{1,6}\s+/gmu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Keep a spoken result short enough for one commentary append.
  * @param {string} text
  * @param {number} [maxChars]
  */
 export function summarize(text, maxChars = 1_800) {
-  const flat = String(text ?? '').replace(/\s+/g, ' ').trim();
+  const flat = speakable(text);
   if (flat.length <= maxChars) return flat;
   const cut = flat.slice(0, maxChars);
   const boundary = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('\n'));

@@ -27,6 +27,25 @@ const INSTRUCTIONS_FILE = 'AGENTS.md'
 const INSTRUCTIONS_TEMPLATE = 'AGENTS_TEMPLATE.md'
 const DEFAULT_TYPE = 'print'
 
+/**
+ * The instructions a Session's project carries.
+ * @param {{list: () => Promise<object[]>}} store - Project store.
+ * @param {string} sessionId - Session to find.
+ * @returns {Promise<string>} The project's `AGENTS.md`, or '' when the Session has no project or no file.
+ */
+export async function projectInstructionsFor(store, sessionId) {
+  for (const project of await store.list()) {
+    if (!Array.isArray(project.sessionIds) || !project.sessionIds.includes(sessionId)) continue
+    try {
+      return await readFile(join(project.path, INSTRUCTIONS_FILE), 'utf8')
+    } catch (error) {
+      if (error.code === 'ENOENT') return ''
+      throw error
+    }
+  }
+  return ''
+}
+
 /** The template every project carries, read from this package's own directory. */
 const BASE_TEMPLATE = join(import.meta.dirname, INSTRUCTIONS_TEMPLATE)
 
@@ -212,6 +231,17 @@ export function apply(ctx, config = {}) {
   const types = createProjectTypes()
   // A project-type plugin contributes here instead of importing this one.
   ctx.provide('rumiProjectTypes', types)
+
+  const instructionsFor = (sessionId) => projectInstructionsFor(store, sessionId)
+
+  // Live Voice asks for the Session's project context when its button starts a
+  // session, so the voice model knows what is being made before it speaks.
+  ctx.inject(['liveVoice'], (scoped) => {
+    scoped.effect(() => scoped.liveVoice.register({
+      id: 'project',
+      instructions: instructionsFor,
+    }), 'rumi projects: live voice context')
+  })
   const route = (path, methods, fetch) => ctx.effect(() => ctx.connection.fetch.register({
     path: `${ROUTE}${path}`, methods, requestBody: 'buffered', fetch,
   }), `rumi projects: ${methods.join(',')} ${ROUTE}${path}`)

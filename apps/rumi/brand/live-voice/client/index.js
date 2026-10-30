@@ -13,7 +13,7 @@
  */
 // bundle marker: 0.8.0
 window.__ModuleLoader__.load({
-  id: '@nmuzaffar/dsh-live-voice',
+  id: '@rumi/live-voice',
   factory(require) {
     const React = require('react');
     const { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore } = React;
@@ -145,7 +145,7 @@ window.__ModuleLoader__.load({
     }
 
     /** Everything one live session owns, so teardown is one call. */
-    function createEngine({ onAudio, onStatus, onTranscript, onError, onClosed }) {
+    function createEngine({ onAudio, onStatus, onTranscript, onError, onClosed, onMuted }) {
       let liveId = null;
       let audioContext = null;
       let worklet = null;
@@ -244,6 +244,8 @@ window.__ModuleLoader__.load({
           onStatus(message.state === 'thinking' ? 'thinking' : 'listening');
         } else if (message.type === 'transcript') {
           onTranscript(message.role, message.text);
+        } else if (message.type === 'muted') {
+          onMuted(message.muted === true);
         } else if (message.type === 'error') {
           onError(message.message);
         } else if (message.type === 'closed') {
@@ -289,7 +291,13 @@ window.__ModuleLoader__.load({
         nextPlaybackAt = 0;
       }
 
-      return { start, stop };
+      /** Ask the host to mute or unmute caller audio; the server confirms. */
+      async function setMuted(next) {
+        if (!liveId) return;
+        try { await api('/mute', { liveId, muted: next }); } catch {}
+      }
+
+      return { start, stop, setMuted };
     }
 
     const STATUS_TEXT = {
@@ -338,6 +346,7 @@ window.__ModuleLoader__.load({
 
     function LiveVoice({ sessionId }) {
       const [status, setStatus] = useState('idle');
+      const [muted, setMuted] = useState(false);
       const [error, setError] = useState('');
       const engineRef = useRef(null);
       const idleTimer = useRef(null);
@@ -356,6 +365,7 @@ window.__ModuleLoader__.load({
         const engine = engineRef.current;
         engineRef.current = null;
         setStatus('idle');
+        setMuted(false);
         dictation.stop();
         await engine?.stop();
       }, []);
@@ -374,6 +384,7 @@ window.__ModuleLoader__.load({
             if (next === 'thinking') dictation.clearUser();
           },
           onTranscript: (role, text) => { dictation.append(role, text); },
+          onMuted: (next) => setMuted(next),
           onError: (message) => {
             setError(message);
             setStatus('error');
@@ -451,6 +462,40 @@ window.__ModuleLoader__.load({
           fill: '#0d0f12',
           style: { animationDelay: `${index * 90}ms` },
         })))),
+        active ? h('span', {
+          role: 'button',
+          tabIndex: 0,
+          'aria-label': muted ? 'Unmute microphone' : 'Mute microphone',
+          'aria-pressed': muted,
+          title: muted ? 'Unmute microphone' : 'Mute microphone',
+          className: 'lv-mic',
+          onClick: () => {
+            const next = !muted;
+            setMuted(next);
+            void engineRef.current?.setMuted(next);
+          },
+          onKeyDown: (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            const next = !muted;
+            setMuted(next);
+            void engineRef.current?.setMuted(next);
+          },
+          style: {
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 26, height: 26, minWidth: 26, padding: 0, margin: 0,
+            borderRadius: '50%', cursor: 'pointer', userSelect: 'none',
+            background: muted ? '#0d0f12' : 'transparent',
+            border: '1px solid rgba(0, 0, 0, 0.18)',
+            color: muted ? '#ffffff' : '#0d0f12',
+          },
+        }, h('svg', { width: 14, height: 14, viewBox: '0 0 16 16', 'aria-hidden': true },
+          h('path', {
+            d: muted
+              ? 'M3 2l10 12M6.5 4.5A2.5 2.5 0 0 1 10 7v1M10 11.4A3.5 3.5 0 0 1 4.5 8V7M8 12v2'
+              : 'M5 7v1a3 3 0 0 0 6 0V7M8 12v2M3.5 3.5l9 9',
+            stroke: 'currentColor', strokeWidth: 1.3, fill: 'none', strokeLinecap: 'round',
+          }))) : null,
         error ? h('span', {
           title: error,
           style: { fontSize: 11, color: '#ff8a8a', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -711,7 +756,7 @@ window.__ModuleLoader__.load({
         }, LiveVoice));
         ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
           name: 'plugins.bundle.config',
-          key: '@nmuzaffar/dsh-live-voice',
+          key: '@rumi/live-voice',
           locale: NS,
         }, LiveVoiceSettings));
       },

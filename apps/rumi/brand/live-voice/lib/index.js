@@ -11,7 +11,7 @@
  * (with the auth cookie) to the host, so relative Fetch paths are the only
  * origin-agnostic way to reach this process.
  *
- * @module @local/dsh-live-voice
+ * @module @rumi/live-voice
  */
 
 import { randomUUID } from 'node:crypto';
@@ -20,6 +20,7 @@ import { homedir } from 'node:os';
 import z from '@deepseek-ai/schemastery';
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment';
 import { LiveBridge } from './bridge.js';
+import { composeInstructions, createLiveVoiceRegistry } from './registry.js';
 import { LiveClient } from './live-client.js';
 import { DEFAULT_INSTRUCTIONS, DEFAULT_MODEL, DEFAULT_VOICE, LIVE_ENDPOINT, VOICES } from './protocol.js';
 
@@ -62,7 +63,22 @@ export function apply(ctx, config) {
     warn: (message) => console.warn(`[live-voice] ${message}`),
   };
   /** @type {Map<string, any>} */
-  const sessions = new Map();
+  const liveSessions = new Map();
+  /** @type {Map<string, string>} One live session per DSH session, at most. */
+  const liveIdBySession = new Map();
+  /** @type {{id: string, order: number, instructions?: Function}[]} */
+  const contributors = [];
+
+
+  const registry = createLiveVoiceRegistry();
+  ctx.provide('liveVoice', registry);
+
+  const compose = (sessionId) => composeInstructions({
+    base: config.instructions ?? DEFAULT_INSTRUCTIONS,
+    contributors: registry.contributors(),
+    sessionId,
+    onError: (id, error) => logger.warn(`live voice: ${id} instructions failed: ${error instanceof Error ? error.message : String(error)}`),
+  });
 
   const register = (path, methods, fetch) => {
     ctx.effect(
@@ -76,6 +92,16 @@ export function apply(ctx, config) {
     );
   };
 
+  const stop = (liveId) => {
+    const entry = liveSessions.get(liveId);
+    if (!entry) return;
+    // Drop the entry first: closing it reports back through `onClosed`, which
+    // calls this again, and a live entry here would recurse.
+    liveSessions.delete(liveId);
+    if (liveIdBySession.get(entry.sessionId) === liveId) liveIdBySession.delete(entry.sessionId);
+    entry.close();
+  };
+
   register('/session', ['POST'], async (request) => {
     const body = await readJson(request);
     const sessionId = body?.sessionId;
@@ -83,10 +109,19 @@ export function apply(ctx, config) {
     const apiKey = await resolveApiKey(ctx, config);
     debugLog(config, `start session=${sessionId} key=${apiKey ? 'yes' : 'no'}`);
     if (!apiKey) return json({ error: `live voice: no OpenAI API key in ${config.apiKeyEnv ?? 'OPENAI_API_KEY'}` }, 503);
+    // One live session per Session: a second start replaces the first rather
+    // than leaving two sockets appending into the same conversation.
+    const existing = liveIdBySession.get(sessionId);
+    if (existing !== undefined) {
+      debugLog(config, `replacing live session ${existing} for session=${sessionId}`);
+      stop(existing);
+    }
     try {
-      const entry = await createEntry({ ctx, config, logger, apiKey, sessionId });
+      const instructions = await compose(sessionId);
       const liveId = randomUUID();
-      sessions.set(liveId, entry);
+      const entry = await createEntry({ ctx, config, logger, apiKey, sessionId, liveId, instructions, onClosed: () => stop(liveId) });
+      liveSessions.set(liveId, entry);
+      liveIdBySession.set(sessionId, liveId);
       return json({ liveId, model: config.model ?? DEFAULT_MODEL, voice: config.voice ?? DEFAULT_VOICE });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -97,7 +132,7 @@ export function apply(ctx, config) {
 
   register('/audio', ['POST'], async (request) => {
     const body = await readJson(request);
-    const entry = sessions.get(body?.liveId);
+    const entry = liveSessions.get(body?.liveId);
     if (!entry) return json({ error: 'live voice: unknown session' }, 404);
     if (typeof body.data === 'string') entry.sendAudio(body.data);
     return new Response(null, { status: 204 });
@@ -105,7 +140,7 @@ export function apply(ctx, config) {
 
   register('/poll', ['POST'], async (request) => {
     const body = await readJson(request);
-    const entry = sessions.get(body?.liveId);
+    const entry = liveSessions.get(body?.liveId);
     if (!entry) return json({ error: 'live voice: unknown session', closed: true }, 404);
     return json(await entry.poll(5_000));
   });
@@ -113,11 +148,15 @@ export function apply(ctx, config) {
   register('/close', ['POST'], async (request) => {
     const body = await readJson(request);
     debugLog(config, `close requested reason=${body?.reason ?? 'user'}`);
-    const entry = sessions.get(body?.liveId);
-    if (entry) {
-      entry.close();
-      sessions.delete(body.liveId);
-    }
+    if (typeof body?.liveId === 'string') stop(body.liveId);
+    return new Response(null, { status: 204 });
+  });
+
+  register('/mute', ['POST'], async (request) => {
+    const body = await readJson(request);
+    const entry = liveSessions.get(body?.liveId);
+    if (!entry) return json({ error: 'live voice: unknown session' }, 404);
+    entry.mute(body?.muted !== false);
     return new Response(null, { status: 204 });
   });
 
@@ -143,14 +182,49 @@ export function apply(ctx, config) {
   });
 }
 
+/** Shortest gap between two progress notes, so a busy turn stays quiet. */
+const NARRATION_INTERVAL_MS = 4_000;
+
+/**
+ * Follow one Session's activity and report it as quiet progress.
+ *
+ * Only tool calls are narrated, and only one every few seconds: the point is a
+ * voice that is not silent for minutes, not a transcript. Notes go through
+ * `thinking`, so the model can follow along without speaking them.
+ * @param {object} ctx - host plugin context.
+ * @param {string} sessionId - Session to follow.
+ * @param {(content: string) => void} note - Sends one thinking note.
+ * @returns {() => void} Stops the subscription.
+ */
+function narrate(ctx, sessionId, note) {
+  let lastAt = 0;
+  let lastTool = '';
+  const stop = ctx.on('session/event', (session, event) => {
+    if (session.id !== sessionId) return;
+    if (event.type !== 'tool/call') return;
+    const tool = event.data?.name;
+    if (typeof tool !== 'string' || tool === '') return;
+    const now = Date.now();
+    if (tool === lastTool && now - lastAt < NARRATION_INTERVAL_MS * 4) return;
+    if (now - lastAt < NARRATION_INTERVAL_MS) return;
+    lastAt = now;
+    lastTool = tool;
+    note(`The harness is using ${tool}.`);
+  });
+  return typeof stop === 'function' ? stop : () => {};
+}
+
 /**
  * One live session: the GPT-Live socket, the bridge, and the event queue the
  * browser polls.
  */
-async function createEntry({ ctx, config, logger, apiKey, sessionId }) {
+async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, instructions, onClosed }) {
   const queue = [];
   let waiter = null;
   let isClosed = false;
+  let muted = false;
+  /** Stop the session-event narration; runs before the socket closes. */
+  let stopNarration = () => {};
 
   const push = (message) => {
     queue.push(message);
@@ -178,7 +252,7 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId }) {
     url: config.endpoint ?? LIVE_ENDPOINT,
     model: config.model ?? DEFAULT_MODEL,
     voice: config.voice ?? DEFAULT_VOICE,
-    instructions: config.instructions ?? DEFAULT_INSTRUCTIONS,
+    instructions,
     onEvent: (event) => {
       if (event.type === 'session.output_audio.delta') {
         push({ type: 'audio', data: event.delta });
@@ -189,6 +263,9 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId }) {
       } else if (event.type === 'session.closed') {
         debugLog(config, `session-closed reason=${event.reason}`);
         push({ type: 'closed', reason: event.reason });
+      } else if (event.type === 'session.input_audio.muted' || event.type === 'session.input_audio.unmuted') {
+        muted = event.type === 'session.input_audio.muted';
+        push({ type: 'muted', muted });
       } else if (event.type === 'error') {
         push({ type: 'error', message: event.error?.message ?? 'live error' });
       }
@@ -196,8 +273,10 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId }) {
     },
     onClose: (detail) => {
       isClosed = true;
+      stopNarration();
       debugLog(config, `socket-closed code=${detail?.code ?? '-'} reason=${detail?.reason || '-'}`);
       push({ type: 'closed', reason: 'socket_closed' });
+      onClosed?.();
     },
     onError: (error) => push({ type: 'error', message: error.message }),
   });
@@ -205,17 +284,49 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId }) {
   await live.connect();
   push({ type: 'ready', model: config.model ?? DEFAULT_MODEL, voice: config.voice ?? DEFAULT_VOICE });
 
-  const cap = setTimeout(() => live.close(), (config.maxSessionMinutes ?? 60) * 60_000);
+  /** The delegation whose work is running, or null between tasks. */
+  const currentDelegation = () => bridge.snapshot().inFlight?.delegationId ?? null;
+
+  /**
+   * Tell the voice model what the harness is doing without asking it to say it.
+   *
+   * These are `thinking` notes, so the model can follow along silently; the
+   * spoken answer arrives later as commentary.
+   */
+  const noteProgress = (content) => {
+    if (content === '') return;
+    live.send({ type: 'session.thinking.append', delegation_id: currentDelegation(), content });
+  };
+
+  stopNarration = narrate(ctx, sessionId, noteProgress);
+
+  let cap;
+  const end = (reason) => {
+    if (isClosed) return;
+    isClosed = true;
+    stopNarration();
+    clearTimeout(cap);
+    live.close();
+    push({ type: 'closed', reason });
+    waiter?.();
+    waiter = null;
+    onClosed?.();
+  };
+
+  cap = setTimeout(() => end('max_session_minutes'), (config.maxSessionMinutes ?? 60) * 60_000);
   cap.unref?.();
 
   return {
+    sessionId,
+    liveId,
     sendAudio: (data) => live.sendAudio(data),
+    /** Mute or unmute caller audio on the wire; the server confirms with an event. */
+    mute(next) {
+      if (next === muted) return;
+      live.send({ type: next ? 'session.input_audio.mute' : 'session.input_audio.unmute' });
+    },
     close() {
-      clearTimeout(cap);
-      isClosed = true;
-      live.close();
-      waiter?.();
-      waiter = null;
+      end('close_requested');
     },
     /** Return everything queued, waiting up to `timeoutMs` for the first item. */
     async poll(timeoutMs) {

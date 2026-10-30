@@ -17,13 +17,21 @@ export interface AppBundleSource {
  */
 export const RUMI_APP_BUNDLES: readonly AppBundleSource[] = [
   { name: '@rumi/brand', directory: 'brand' },
-  { name: '@nmuzaffar/dsh-live-voice', directory: join('brand', 'live-voice') },
+  { name: '@rumi/live-voice', directory: join('brand', 'live-voice') },
   { name: '@rumi/print-studio', directory: join('brand', 'print-studio') },
   { name: '@rumi/projects', directory: join('brand', 'projects') },
 ]
 
 /** Bundle names seeded into every Rumi profile. */
 export const RUMI_APP_BUNDLE_NAMES: readonly string[] = RUMI_APP_BUNDLES.map(bundle => bundle.name)
+
+/**
+ * Bundle names an earlier build seeded into every profile and this one no
+ * longer ships. A profile that still lists one asks the loader for a package
+ * that is not beside `dsh`, so preparation drops it instead of leaving a
+ * missing bundle in the manifest.
+ */
+export const RUMI_RETIRED_BUNDLES: readonly string[] = ['@nmuzaffar/dsh-live-voice']
 
 /**
  * Resolve each bundled plugin's directory from the app package root.

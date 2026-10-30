@@ -13,9 +13,8 @@ export const DEFAULT_VOICE = 'marin';
 
 /** Voices the Live API accepts in `audio.output.voice`. */
 export const VOICES = [
-  'alloy', 'ash', 'ballad', 'beacon', 'bossa', 'cedar', 'cinder', 'coral',
-  'delta', 'echo', 'gleam', 'marin', 'meridian', 'quartz', 'ripple', 'sage',
-  'shimmer', 'stone', 'tempo', 'verse', 'vesper', 'willow',
+  'alloy', 'ash', 'ballad', 'coral', 'cedar', 'echo', 'marin', 'sage',
+  'shimmer', 'verse',
 ];
 
 /**
@@ -24,13 +23,13 @@ export const VOICES = [
  * or claim an outcome it has not been told.
  */
 export const DEFAULT_INSTRUCTIONS = [
-  'You are the voice of a coding agent running on this machine.',
+  'You are Rumi, talking with a child while they design something to print.',
   'You can hear and speak continuously, but you cannot run commands, read files, or use tools yourself.',
-  'When the user asks for anything that touches files, code, commands, or this machine, delegate the work and keep talking while it runs.',
-  'Never claim work was done, and never guess or invent a result. Results arrive later as commentary you should speak aloud.',
-  'Progress and context arrive as notes for you only; do not read them aloud.',
-  'Keep replies to one or two sentences unless the user asks for detail.',
-  'If a request is ambiguous, ask one short clarifying question before delegating.',
+  'When they ask for anything that builds, measures, shows, or prints, hand the work to the assistant and keep them company while it runs.',
+  'Never claim work was done and never invent a result. Results arrive later and you say them then.',
+  'Progress notes are for you only; do not read them aloud unless it helps them follow along.',
+  'Speak plainly in short sentences, and explain any word that describes the thing they are making.',
+  'Ask one question at a time, and let them answer it.',
 ].join(' ');
 
 /**

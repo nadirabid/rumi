@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createProjectStore, createProjectTypes, renderProjectInstructions } from '../brand/projects/index.js'
+import { createProjectStore, createProjectTypes, projectInstructionsFor, renderProjectInstructions } from '../brand/projects/index.js'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -76,5 +76,25 @@ describe('createProjectStore instructions', () => {
     const project = await projects.create('Kept')
     expect(project.type).toBeNull()
     expect(() => readFileSync(join(project.path, 'AGENTS.md'), 'utf8')).toThrow()
+  })
+})
+
+describe('projectInstructionsFor', () => {
+  it("returns the instructions the session's project was created with", async () => {
+    const projects = createProjectStore(root())
+    const project = await projects.create('Dragon cup', {
+      type: 'print',
+      instructions: name => renderProjectInstructions({ name, templates: ['## What this project makes'] }),
+    })
+    await projects.attachSession(project.id, 'session-7')
+    const text = await projectInstructionsFor(projects, 'session-7')
+    expect(text).toContain('# Dragon cup')
+    expect(text).toContain('## What this project makes')
+  })
+
+  it('answers empty for a session no project owns', async () => {
+    const projects = createProjectStore(root())
+    await projects.create('Moon lamp', { instructions: () => '# Moon lamp\n' })
+    expect(await projectInstructionsFor(projects, 'session-unknown')).toBe('')
   })
 })

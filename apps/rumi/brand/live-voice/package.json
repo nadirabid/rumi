@@ -1,14 +1,10 @@
 {
-  "name": "@nmuzaffar/dsh-live-voice",
+  "name": "@rumi/live-voice",
   "version": "0.8.0",
-  "description": "Live, full-duplex voice for DeepSeek Harness: GPT-Live listens and speaks, the harness does the work.",
+  "description": "Live, full-duplex voice for Rumi: GPT-Live listens and speaks, the harness does the work.",
   "private": true,
   "type": "module",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/nadirabid/dsh-live-voice.git"
-  },
   "exports": {
     ".": "./lib/index.js",
     "./client": "./client/index.js",

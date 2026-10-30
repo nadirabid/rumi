@@ -88,7 +88,7 @@ safe. The shared Python and Node runtimes are not copied; the app provisions the
 
 ## Bundled plugins
 
-`apps/rumi/brand/` holds the packages Rumi carries inside its own runtime and enables in every new profile. `@rumi/brand` draws the wordmark and owns the Live Voice key page; `@nmuzaffar/dsh-live-voice` adds full-duplex voice. Packaging installs both beside `dsh` and declares them in the bundled installation manifest, so the profile resolves them without a package manager. The key page appears as a built-in card on the Plugins page (Plugins → Live Voice) and writes the key file the voice plugin reads (`~/.rumi/live-voice.key`). `apps/rumi/brand/live-voice/README.md` records the vendored version and the update steps.
+`apps/rumi/brand/` holds the packages Rumi carries inside its own runtime and enables in every new profile. `@rumi/brand` draws the wordmark and owns the Live Voice key page; `@rumi/live-voice` adds full-duplex voice, and contributes the project's instructions to the voice model through `ctx.liveVoice`. Packaging installs them beside `dsh` and declares them in the bundled installation manifest, so the profile resolves them without a package manager. The key page appears as a built-in card on the Plugins page (Plugins → Live Voice) and writes the key file the voice plugin reads (`~/.rumi/live-voice.key`).
 
 A package that ships skills keeps them at `skills/<name>/SKILL.md` and publishes them by mounting the stock `@deepseek-ai/dsh-skill-filesystem` provider on that directory, so the frontmatter is parsed and the body loads on demand. `@rumi/print-studio` is the reference: `skills/print-studio-setup/` with a `providerName` of its own and `includeDefaultRoots` off.
 

@@ -1,5 +1,5 @@
 - insert:
     - id: live-voice
-      name: '@nmuzaffar/dsh-live-voice'
+      name: '@rumi/live-voice'
       config:
         apiKeyFile: ~/.rumi/live-voice.key

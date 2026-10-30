@@ -26,7 +26,7 @@ import {
   initProfile, PROFILE_PATCH_FILENAME, PROFILE_TEMPLATES, readProfileManifest, removeLinkProjections,
   sanitizeProfile, writeProfileBundles, type ProfileTemplate,
 } from '@deepseek-ai/dsh-app-boot'
-import { RUMI_APP_BUNDLE_NAMES } from './app-bundles.ts'
+import { RUMI_APP_BUNDLE_NAMES, RUMI_RETIRED_BUNDLES } from './app-bundles.ts'
 
 const PROJECT_NAME = '@deepseek-ai/dsh-desktop-runtime'
 const DSH_PACKAGE = '@deepseek-ai/dsh'
@@ -276,17 +276,19 @@ function writeAppBundleLedger(projectDir: string, names: ReadonlySet<string>): v
 function ensureAppBundleDefaults(projectDir: string): void {
   const offered = readAppBundleLedger(projectDir)
   const pending = RUMI_APP_BUNDLE_NAMES.filter(name => !offered.has(name))
-  if (pending.length === 0) return
   const manifest = readProfileManifest('dsh', projectDir)
-  const bundles = [...manifest.dsh?.profile?.bundles ?? []]
-  let changed = false
+  const current = [...manifest.dsh?.profile?.bundles ?? []]
+  const retired = current.some(name => RUMI_RETIRED_BUNDLES.includes(name))
+  if (pending.length === 0 && !retired) return
+  const bundles = current.filter(name => !RUMI_RETIRED_BUNDLES.includes(name))
   for (const name of pending) {
-    if (bundles.includes(name)) continue
-    bundles.push(name)
-    changed = true
+    if (!bundles.includes(name)) bundles.push(name)
   }
-  if (changed) writeProfileBundles(projectDir, manifest, bundles)
-  writeAppBundleLedger(projectDir, new Set([...offered, ...RUMI_APP_BUNDLE_NAMES]))
+  if (bundles.length !== current.length || bundles.some((name, index) => name !== current[index])) {
+    writeProfileBundles(projectDir, manifest, bundles)
+  }
+  const kept = [...offered].filter(name => !RUMI_RETIRED_BUNDLES.includes(name))
+  writeAppBundleLedger(projectDir, new Set([...kept, ...RUMI_APP_BUNDLE_NAMES]))
 }
 
 /** Create the first external plugin profile without running a package manager. */

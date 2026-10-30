@@ -174,11 +174,29 @@ function mountSkills(ctx) {
 }
 
 /**
+ * What a 3D-printing project adds to the instructions every project carries.
+ *
+ * The template next to this file becomes part of the project's `AGENTS.md` at
+ * creation, beside the frame Rumi's own plugin writes, so a Session starts
+ * knowing which project it is in and what the print plugin provides.
+ */
+const PRINT_TYPE = {
+  id: 'print',
+  label: '3D printing',
+  isDefault: true,
+  templates: [join(import.meta.dirname, 'AGENTS_TEMPLATE.md')],
+}
+
+/**
  * Register the status tool, the card routes, and the setup skill.
  * @param {object} ctx - host plugin context.
  */
 export function apply(ctx) {
   applyViewer(ctx, defineTool)
+  // A project-type plugin contributes; it does not own the creation flow.
+  ctx.inject(['rumiProjectTypes'], (scoped) => {
+    scoped.effect(() => scoped.rumiProjectTypes.register(PRINT_TYPE), 'print-studio: project type')
+  })
   const register = (path, methods, fetch) => {
     ctx.effect(() => ctx.connection.fetch.register({
       path: `${ROUTE}${path}`,

@@ -103,6 +103,7 @@ Custom UI packages that are not shipped this way go in `~/.rumi/profiles/rumi/pa
 | Rumi home | `~/.rumi`, the root of every path the app reads or writes. `DSH_RUMI_HOME` relocates it. |
 | Rumi project | One directory at `~/.rumi/workspace/<id>/`. It is the unit the gallery lists and the directory a Session runs in. |
 | Project instructions | An `AGENTS.md` directly inside a Rumi project, loaded in that project's Sessions only. DSH scopes project files to the nearest ancestor holding `.git` and falls back to the working directory, which for a Rumi project is the project directory itself. |
+| Project type | The workflow a project follows, recorded in `project.json`. A type's plugin contributes the instructions its projects carry. One type today: `print`. |
 | User instructions | `~/.rumi/AGENTS.md`. Loaded in every Session. Absent today, so Sessions start with no user instructions. |
 | Bundled plugin | A package under `apps/rumi/brand/` that ships inside the signed app and activates in every profile. |
 
@@ -111,6 +112,8 @@ Custom UI packages that are not shipped this way go in `~/.rumi/profiles/rumi/pa
 The app opens on a project gallery. Each project is a directory of its own, holding `project.json`, `artifacts/`, `source/`, and `references/`; the id is immutable and the name lives in the JSON, so renaming never moves files. `@rumi/projects` owns this: the gallery is a `main` panel, the New/Close control is the window-chrome `shell.leading` seat, and the stock navigation column is collapsed at boot so the gallery owns the window.
 
 Opening a project starts or reuses a DSH session whose working directory is the project root, and records the session id in `project.json`. Close returns to the gallery with `ctx.layout.selectPanel('projects')` and never ends the session, so a running turn or an unsent draft survives. Settings, plugins, and automation lose their sidebar home along with the navigation column; they stay reachable through the app menu and their shortcuts.
+
+The creator writes the project's `AGENTS.md`. `@rumi/projects` contributes the frame — what a project is, and what each folder in it holds — and a project-type plugin contributes what its type adds. Each keeps that text in an `AGENTS_TEMPLATE.md` beside its code. `ctx.rumiProjectTypes` is the seam: a plugin registers its template paths and the creator concatenates them under the project name, so a Session starts knowing what it is for and what it makes.
 
 The first pass has no renaming, deletion, thumbnails, or project switching inside a project. Session logs stay in Rumi's own session storage; only their ids are recorded per project.
 

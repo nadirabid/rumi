@@ -43,6 +43,7 @@ window.__ModuleLoader__.load({
     };
 
     const STYLES = `
+[class*="heroWorkspaceRow"] > button[aria-haspopup="menu"]{display:none}
 .rumi-projects{box-sizing:border-box;display:flex;flex-direction:column;gap:24px;width:100%;height:100%;min-height:0;overflow:auto;padding:calc(var(--dsh-frame-top-clearance,48px) + 28px) clamp(20px,4vw,56px) 48px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base)}
 .rumi-projects-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .rumi-projects-title{margin:0;font-size:22px;font-weight:500;letter-spacing:-0.02em}
@@ -178,6 +179,10 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         const t = ctx.locale.bind(NS);
         installChrome(ctx, t);
+        ctx.slots.inject('conversation.hero.workspace', () => ctx.slots.register(
+          { name: 'conversation.hero.workspace', priority: -1 },
+          () => h('span', { className: 'rumi-project-workspace-marker', hidden: true }),
+        ));
         const list = createProjectList(ctx);
 
         function ProjectCard({ project, t, onOpen }) {

@@ -215,3 +215,10 @@ it('keeps the gallery open when saving the session association fails', async () 
     report.mockRestore()
   }
 })
+
+it('leaves project selection on the home page instead of the conversation hero', () => {
+  const view = fixture({ projects: [] })
+  render(view.view('conversation.hero.workspace'))
+  expect(document.body.textContent).toBe('')
+  expect(screen.queryByRole('combobox')).toBeNull()
+})

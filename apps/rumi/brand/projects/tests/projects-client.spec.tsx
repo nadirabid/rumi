@@ -49,7 +49,7 @@ const project = (overrides: Record<string, unknown> = {}) => ({
 const Icon = () => null
 
 /** Apply the plugin into a fake context and return its handles. */
-function fixture(host: { projects?: object[]; knownSessions?: Record<string, object>; activePanelId?: string | null } = {}) {
+function fixture(host: { projects?: object[]; knownSessions?: Record<string, object>; activePanelId?: string | null; associationOk?: boolean } = {}) {
   const entries = new Map<string, React.ComponentType<Record<string, unknown>>>()
   const register = () => () => {}
   const posts: { url: string; body: unknown }[] = []
@@ -58,7 +58,7 @@ function fixture(host: { projects?: object[]; knownSessions?: Record<string, obj
     if (init?.method === 'POST') {
       const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
       posts.push({ url: String(url), body })
-      if (String(url).endsWith('/session')) return { ok: true, json: async () => ({ project: project() }) }
+      if (String(url).endsWith('/session')) return { ok: host.associationOk ?? true, status: 500, json: async () => ({ project: project() }) }
       const created = project({ id: 'p2', name: 'Untitled project' })
       listed = [created, ...listed]
       return { ok: true, json: async () => ({ project: created }) }
@@ -119,7 +119,7 @@ it('lists projects with their recency and opens one on click', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Dragon cup' }))
   await settle()
   expect(view.createWorkspace).toHaveBeenCalledWith({ path: '/Users/me/.rumi/workspace/p1' })
-  expect(view.renameWorkspace).toHaveBeenCalledWith('workspace-1', 'Dragon cup')
+  expect(view.renameWorkspace).not.toHaveBeenCalled()
   expect(view.connect).toHaveBeenCalledWith('workspace-1')
   expect(view.openSession).toHaveBeenCalledWith('session-new')
   expect(view.selectPanel).toHaveBeenCalledWith(null)
@@ -184,4 +184,31 @@ it('leaves an already collapsed column alone', async () => {
   expect(view.toggleSidebar).not.toHaveBeenCalled()
   expect(view.selectPanel).toHaveBeenCalledWith('projects')
   frame.remove()
+})
+
+it('opens projects even when their display name is already a workspace title', async () => {
+  const view = fixture({ projects: [project({ name: 'Untitled project' })] })
+  view.renameWorkspace.mockRejectedValue(new Error('workspace/name-conflict'))
+  render(view.view('main:projects'))
+  await settle()
+  fireEvent.click(screen.getByRole('button', { name: 'Untitled project' }))
+  await settle()
+  expect(view.openSession).toHaveBeenCalledWith('session-new')
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+it('keeps the gallery open when saving the session association fails', async () => {
+  const report = vi.spyOn(console, 'error').mockImplementation(() => {})
+  try {
+    const view = fixture({ projects: [project()], associationOk: false })
+    render(view.view('main:projects'))
+    await settle()
+    fireEvent.click(screen.getByRole('button', { name: 'Dragon cup' }))
+    await settle()
+    expect(view.openSession).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert').textContent).toBe(COPY.failed)
+    expect(report).toHaveBeenCalled()
+  } finally {
+    report.mockRestore()
+  }
 })

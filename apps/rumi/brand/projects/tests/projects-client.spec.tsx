@@ -59,7 +59,7 @@ function fixture(host: { projects?: object[]; knownSessions?: Record<string, obj
       const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
       posts.push({ url: String(url), body })
       if (String(url).endsWith('/session')) return { ok: host.associationOk ?? true, status: 500, json: async () => ({ project: project() }) }
-      const created = project({ id: 'p2', name: 'Untitled project' })
+      const created = project({ id: 'p2', name: 'Untitled 1' })
       listed = [created, ...listed]
       return { ok: true, json: async () => ({ project: created }) }
     }
@@ -72,6 +72,7 @@ function fixture(host: { projects?: object[]; knownSessions?: Record<string, obj
   const handles = {
     createWorkspace: vi.fn(async () => ({ workspaceId: 'workspace-1', path: '/Users/me/.rumi/workspace/p1', title: 'p1' })),
     renameWorkspace: vi.fn(async () => ({ workspaceId: 'workspace-1', title: 'Dragon cup' })),
+    renameSession: vi.fn(async (_title: string) => {}),
     connect: vi.fn(async () => 'session-new'),
     openSession: vi.fn(),
     selectPanel: vi.fn(),
@@ -89,6 +90,7 @@ function fixture(host: { projects?: object[]; knownSessions?: Record<string, obj
     },
     layout: { selectPanel: handles.selectPanel, toggleSidebar: handles.toggleSidebar, panelInfo },
     sessions: {
+      using: vi.fn(async (_id: string, _options: object, callback: (reference: { binding: { session: { rename: typeof handles.renameSession } } }) => Promise<void>) => { await callback({ binding: { session: { rename: handles.renameSession } } }); return { ok: true } }),
       list: { subscribe: () => () => {}, getSnapshot: () => ({ byId: host.knownSessions ?? {} }) },
     },
     workspaces: { create: handles.createWorkspace, rename: handles.renameWorkspace },
@@ -151,7 +153,8 @@ it('creates a project from the New control and opens it', async () => {
   await settle()
   fireEvent.click(screen.getByRole('button', { name: COPY.new }))
   await settle()
-  expect(view.posts[0]?.body).toEqual({ name: COPY.untitled })
+  expect(view.posts[0]?.body).toEqual({})
+  expect(view.renameSession).toHaveBeenCalledWith('Untitled 1')
   expect(view.openSession).toHaveBeenCalled()
 })
 

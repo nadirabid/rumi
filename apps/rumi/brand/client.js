@@ -62,6 +62,15 @@ window.__ModuleLoader__.load({
       '[data-conversation-tabs] { display: none !important; }',
       'header div:has(> [data-conversation-tabs]) { display: none !important; }',
       'header:has([data-conversation-tabs]) { min-height: 0 !important; padding-bottom: 10px !important; }',
+      // The add-files menu opens a listbox of commands and file pickers. Rumi
+      // takes files by drag and by asking, so the control only offers a
+      // developer's menu. `aria-haspopup` survives class hashing and locale.
+      'button[aria-haspopup="listbox"] { display: none !important; }',
+      // The stock send button sits two pixels higher than the row centres it, as
+      // an optical nudge applied with its own transform. The live-voice orb is
+      // ours, so it follows with an offset that composes with the orb's own
+      // hover scale instead of replacing it.
+      '.lv-orb, .lv-mic { position: relative; top: -2px; }',
     ].join('\n');
 
     /** Hide composer and header chrome; the disposer removes the rules again. */

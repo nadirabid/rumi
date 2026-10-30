@@ -90,13 +90,25 @@ safe. The shared Python and Node runtimes are not copied; the app provisions the
 
 `apps/rumi/brand/` holds the packages Rumi carries inside its own runtime and enables in every new profile. `@rumi/brand` draws the wordmark and owns the Live Voice key page; `@nmuzaffar/dsh-live-voice` adds full-duplex voice. Packaging installs both beside `dsh` and declares them in the bundled installation manifest, so the profile resolves them without a package manager. The key page appears as a built-in card on the Plugins page (Plugins → Live Voice) and writes the key file the voice plugin reads (`~/.rumi/live-voice.key`). `apps/rumi/brand/live-voice/README.md` records the vendored version and the update steps.
 
+A package that ships skills keeps them at `skills/<name>/SKILL.md` and publishes them by mounting the stock `@deepseek-ai/dsh-skill-filesystem` provider on that directory, so the frontmatter is parsed and the body loads on demand. `@rumi/print-studio` is the reference: `skills/print-studio-setup/` with a `providerName` of its own and `includeDefaultRoots` off.
+
 ## Next
 
 Custom UI packages that are not shipped this way go in `~/.rumi/profiles/rumi/package.json`.
 
+## Terms
+
+| Term | Meaning |
+|---|---|
+| Rumi home | `~/.rumi`, the root of every path the app reads or writes. `DSH_RUMI_HOME` relocates it. |
+| Rumi project | One directory at `~/.rumi/workspace/<id>/`. It is the unit the gallery lists and the directory a Session runs in. |
+| Project instructions | An `AGENTS.md` directly inside a Rumi project, loaded in that project's Sessions only. DSH scopes project files to the nearest ancestor holding `.git` and falls back to the working directory, which for a Rumi project is the project directory itself. |
+| User instructions | `~/.rumi/AGENTS.md`. Loaded in every Session. Absent today, so Sessions start with no user instructions. |
+| Bundled plugin | A package under `apps/rumi/brand/` that ships inside the signed app and activates in every profile. |
+
 ## Projects
 
-The app opens on a project gallery. A project is a directory under `~/.rumi/workspace/<id>/` holding `project.json`, `artifacts/`, `source/`, and `references/`; the id is immutable and the name lives in the JSON, so renaming never moves files. `@rumi/projects` owns this: the gallery is a `main` panel, the New/Close control is the window-chrome `shell.leading` seat, and the stock navigation column is collapsed at boot so the gallery owns the window.
+The app opens on a project gallery. Each project is a directory of its own, holding `project.json`, `artifacts/`, `source/`, and `references/`; the id is immutable and the name lives in the JSON, so renaming never moves files. `@rumi/projects` owns this: the gallery is a `main` panel, the New/Close control is the window-chrome `shell.leading` seat, and the stock navigation column is collapsed at boot so the gallery owns the window.
 
 Opening a project starts or reuses a DSH session whose working directory is the project root, and records the session id in `project.json`. Close returns to the gallery with `ctx.layout.selectPanel('projects')` and never ends the session, so a running turn or an unsent draft survives. Settings, plugins, and automation lose their sidebar home along with the navigation column; they stay reachable through the app menu and their shortcuts.
 

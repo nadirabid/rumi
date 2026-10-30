@@ -70,6 +70,8 @@ Rumi and DeepSeek Harness run at the same time and share no directory. The Elect
 main process sets `DSH_HOME` to `~/.rumi` before the first path resolves, so nothing
 the app reads or writes lands under `~/.dsh`. Earlier builds did share that home; the
 one-time migration in `apps/rumi/src/rumi-home-migration.ts` moves what they wrote.
+Product terms — "Rumi home", "Rumi project", "project instructions" — are defined once
+in [RUMI.md](RUMI.md#terms); append there rather than restating them.
 
 ### Plugin UI
 

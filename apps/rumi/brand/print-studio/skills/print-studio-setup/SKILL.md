@@ -1,3 +1,8 @@
+---
+name: print-studio-setup
+description: "Set up and diagnose Print Studio: Bambu Studio, H2D LAN mode, access code, and print readiness."
+---
+
 # Print Studio setup
 
 Use this skill whenever a person asks to set up, fix, or check the 3D printer, or when

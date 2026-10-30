@@ -9,8 +9,8 @@
  * @module @rumi/print-studio
  */
 
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
+import * as skillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import {
@@ -26,7 +26,7 @@ import { applyViewer } from './viewer/host.js'
 export const name = 'print-studio'
 
 /** Services this host half reaches. */
-export const inject = ['connection', 'tools', 'skills', 'credentials', 'fs', 'workingDirectory']
+export const inject = ['connection', 'tools', 'credentials', 'fs', 'workingDirectory']
 
 const ROUTE = '/api/print-studio'
 const SKILL_NAME = 'print-studio-setup'
@@ -157,24 +157,20 @@ function json(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
 }
 
-/** Register the setup skill from the package's bundled Markdown. */
-function registerSkill(ctx) {
-  const path = join(import.meta.dirname, 'skills', SKILL_NAME, 'SKILL.md')
-  let content
-  try {
-    content = readFileSync(path, 'utf8')
-  } catch (error) {
-    ctx.logger?.warn(`print-studio: setup skill is missing at ${path}: ${String(error)}`)
-    return
-  }
-  ctx.effect(() => ctx.skills.register({
-    name: SKILL_NAME,
-    description: 'Set up and diagnose Print Studio: Bambu Studio, H2D LAN mode, access code, and print readiness.',
-    content,
-    source: 'bundled',
-    path,
-    resourceBase: { kind: 'directory', path: dirname(path) },
-  }), 'print-studio: setup skill')
+/**
+ * Publish this package's `skills/` directory as a skill provider.
+ *
+ * The stock provider keeps `includeDefaultRoots` off so this instance serves
+ * only the files below, and a distinct `providerName` keeps it from colliding
+ * with the profile's own provider. Mounting it as a child plugin ties the
+ * provider's lifetime to this one.
+ */
+function mountSkills(ctx) {
+  ctx.plugin(skillFilesystem, {
+    providerName: 'rumi-print-studio',
+    includeDefaultRoots: false,
+    customSkillDirs: [join(import.meta.dirname, 'skills')],
+  })
 }
 
 /**
@@ -308,5 +304,5 @@ export function apply(ctx) {
     },
   })), 'print-studio: progress tool')
 
-  registerSkill(ctx)
+  mountSkills(ctx)
 }

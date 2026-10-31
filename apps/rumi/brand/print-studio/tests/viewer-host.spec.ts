@@ -1,5 +1,9 @@
 /** A session's scene is edited by commands; geometry is read once and never rewritten by placement. */
-import { expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { afterEach, expect, it } from 'vitest'
+import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { applyViewer } from '../viewer/host.js'
 import { parseStl } from '../viewer/stl.js'
@@ -27,18 +31,22 @@ function stl(positions: Float32Array) {
   return new TextEncoder().encode(`${out}endsolid model\n`)
 }
 
-function fixture(source: Uint8Array = stl(box())) {
+const owners: Context[] = []
+afterEach(async () => { await Promise.all(owners.splice(0).map(owner => owner.fiber.dispose())) })
+
+function fixture(source: Uint8Array = stl(box()), cwd = '/workspace') {
   const routes = new Map<string, (request: Request) => Promise<Response>>()
   const tools = new Map<string, any>() // The fixture captures dynamically registered JavaScript tool definitions.
-  const cleanup: (() => void)[] = []
+  const owner = new Context()
+  owners.push(owner)
   const ctx = {
-    effect: (effect: () => (() => void)) => cleanup.push(effect()),
+    effect: owner.effect.bind(owner),
     connection: { fetch: { register: (route: { path: string; fetch: (request: Request) => Promise<Response> }) => {
       routes.set(route.path, route.fetch)
       return () => { routes.delete(route.path) }
     } } },
     tools: { register: (tool: any) => { tools.set(tool.name, tool); return () => {} } },
-    workingDirectory: { ensure: async () => '/workspace' },
+    workingDirectory: { ensure: async () => cwd },
     fs: { resolve: async (path: string) => ({ path, displayPath: path }), readBytes: async () => source },
   }
   applyViewer(ctx, defineTool)
@@ -47,13 +55,13 @@ function fixture(source: Uint8Array = stl(box())) {
     await tools.get(name).execute(args, { agent: { session: { id: sessionId } }, signal: signal() }),
   )
   return {
-    routes, cleanup, run,
+    routes, run, owner, ctx,
     raw: (name: string) => tools.get(name),
     request: (path: string) => routes.get(path.split('?')[0])!(new Request(`http://rumi${path}`)),
     state: async (sessionId = 'session-a') => (await (await routes.get('/api/print-studio/viewer/state')!(
       new Request(`http://rumi/api/print-studio/viewer/state?sessionId=${sessionId}`),
     )).json()).scene,
-    dispose: () => { for (const dispose of cleanup.toReversed()) dispose() },
+    dispose: () => owner.fiber.dispose(),
   }
 }
 
@@ -156,7 +164,51 @@ it('refuses a conversation-less call and a file that is not an STL', async () =>
 it('drops its routes and scenes when the plugin unloads', async () => {
   const f = fixture()
   await f.run('mesh_open', { path: 'box.stl' })
-  f.dispose()
+  await f.dispose()
   expect(f.routes.size).toBe(0)
   await expect(f.run('mesh_open', { path: 'box.stl' })).rejects.toThrow('closed')
+})
+
+
+it('loads editable source and exposes placement, camera and revision-scoped errors', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-viewer-host-'))
+  const f = fixture(undefined, root)
+  try {
+    await writeFile(join(root, 'model.js'), 'export function build(T) { return new T.Mesh(new T.BoxGeometry(1, 2, 3)) }')
+    const loaded = await f.run('viewer_load', { path: 'model.js', buildVolume: { x: 300, y: 320, z: 320 } })
+    expect(loaded.volume).toEqual({ x: 300, y: 320, z: 320 })
+    expect(loaded.design).toMatchObject({ revision: 1, error: null, report: null })
+    expect((await f.request(loaded.design.url)).headers.get('content-type')).toContain('javascript')
+    const placed = await f.run('viewer_transform', { scale: 2, rotate: { z: 90 } })
+    expect(placed.design.transform).toMatchObject({ scale: 2, rotate: { z: 90 } })
+    const camera = await f.run('viewer_camera', { azimuth: 45, elevation: 30 })
+    expect(camera.camera).toMatchObject({ azimuth: 45, elevation: 30 })
+    const feedback = f.routes.get('/api/print-studio/viewer/feedback')!
+    await feedback(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
+      method: 'POST', body: JSON.stringify({ revision: 1, url: loaded.design.url, transform: placed.design.transform, error: 'Invalid geometry' }),
+    }))
+    expect((await f.run('mesh_state')).design.error).toEqual({ kind: 'build', message: 'Invalid geometry' })
+    await expect(f.run('viewer_transform', { scale: -1 })).rejects.toThrow()
+    expect((await f.run('mesh_state')).design.transform.scale).toBe(2)
+  } finally {
+    await f.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+
+it('waits for an admitted load during Cordis disposal without publishing it afterwards', async () => {
+  const f = fixture()
+  let release!: (cwd: string) => void
+  f.ctx.workingDirectory.ensure = () => new Promise<string>((resolve) => { release = resolve })
+  const load = f.run('viewer_load', { path: 'model.js' })
+  const failure = expect(load).rejects.toThrow('closed')
+  let disposed = false
+  const disposal = f.dispose().then(() => { disposed = true })
+  await Promise.resolve()
+  expect(disposed).toBe(false)
+  release('/workspace')
+  await failure
+  await disposal
+  expect(f.routes.size).toBe(0)
 })

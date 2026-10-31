@@ -128,3 +128,68 @@ it('releases the renderer, the controls, and every resource once', () => {
   expect(state.renderer.domElement.remove).toHaveBeenCalledOnce()
   expect(state.renderer.domElement.removeEventListener).toHaveBeenCalledWith('webglcontextlost', expect.any(Function))
 })
+
+it('reloads source models without resetting the camera and keeps the last build on failure', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  const module = (width: number) => `data:text/javascript,${encodeURIComponent(`export function build(T) { const mesh = new T.Mesh(new T.BoxGeometry(${width}, 2, 3), new T.MeshStandardMaterial()); mesh.name = 'design'; return mesh }`)}`
+  const spec = { url: module(10), transform: { scale: 1, rotate: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 0 } } }
+  const report = await viewport.applyDesign(spec, null)
+  expect(report.dimensions.x).toBe(10)
+  const camera = state.renderer.render.mock.calls.at(-1)[1]
+  const position = camera.position.clone()
+  await viewport.applyDesign({ ...spec, url: module(20) }, null)
+  expect(camera.position.equals(position)).toBe(true)
+  const scene = rendered()
+  expect(scene.getObjectByName('design').geometry.parameters.width).toBe(20)
+  await expect(viewport.applyDesign({ ...spec, url: 'data:text/javascript,export function build(){throw new Error("broken")}' }, null)).rejects.toThrow('broken')
+  expect(scene.getObjectByName('design').geometry.parameters.width).toBe(20)
+  viewport.dispose()
+})
+
+it('discards an imported model that completes after the viewport is disposed', async () => {
+  let release!: () => void
+  let started!: () => void
+  const entered = new Promise<void>((resolve) => { started = resolve })
+  vi.stubGlobal('__rumiModelImport', new Promise<void>((resolve) => { release = resolve }))
+  vi.stubGlobal('__rumiModelStarted', started)
+  const built = vi.fn()
+  vi.stubGlobal('__rumiModelBuilt', built)
+  const viewport = createViewport(container(), vi.fn())
+  const url = `data:text/javascript,${encodeURIComponent('globalThis.__rumiModelStarted(); await globalThis.__rumiModelImport; export function build(T) { globalThis.__rumiModelBuilt(); return new T.Mesh(new T.BoxGeometry(1, 2, 3)) }')}`
+  const loading = viewport.applyDesign({ url, transform: {} }, null)
+  await entered
+  viewport.dispose()
+  release()
+  expect(await loading).toBeNull()
+  expect(built).not.toHaveBeenCalled()
+})
+
+it('keeps the latest revision when an older import completes later', async () => {
+  let release!: () => void
+  let started!: () => void
+  const entered = new Promise<void>((resolve) => { started = resolve })
+  vi.stubGlobal('__rumiOlderImport', new Promise<void>((resolve) => { release = resolve }))
+  vi.stubGlobal('__rumiOlderStarted', started)
+  const viewport = createViewport(container(), vi.fn())
+  const older = `data:text/javascript,${encodeURIComponent('globalThis.__rumiOlderStarted(); await globalThis.__rumiOlderImport; export function build(T) { return new T.Mesh(new T.BoxGeometry(1, 2, 3)) }')}`
+  const newer = `data:text/javascript,${encodeURIComponent('export function build(T) { const mesh = new T.Mesh(new T.BoxGeometry(50, 2, 3)); mesh.name = "newest"; return mesh }')}`
+  const first = viewport.applyDesign({ url: older, transform: {} }, null)
+  await entered
+  const report = await viewport.applyDesign({ url: newer, transform: {} }, null)
+  expect(report.dimensions.x).toBe(50)
+  release()
+  expect(await first).toBeNull()
+  expect(rendered().getObjectByName('newest').geometry.parameters.width).toBe(50)
+  viewport.dispose()
+})
+
+it('frames the current design before applying a requested camera angle', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  const url = `data:text/javascript,${encodeURIComponent('export function build(T) { return new T.Mesh(new T.BoxGeometry(100, 20, 30)) }')}`
+  await viewport.applyDesign({ url, transform: {}, camera: { id: 'front', azimuth: 0, elevation: 0 } }, null)
+  const camera = state.renderer.render.mock.calls.at(-1)[1]
+  expect(camera.position.x).toBeCloseTo(0)
+  expect(camera.position.y).toBeLessThan(-100)
+  expect(camera.position.z).toBeCloseTo(15)
+  viewport.dispose()
+})

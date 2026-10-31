@@ -8,11 +8,13 @@
  * resizing never rewrites a mesh, and the browser renders the same geometry it
  * already fetched.
  */
-import { basename, extname } from 'node:path'
+import { basename, extname, resolve } from 'node:path'
 import { analyzeMesh } from './checks.js'
 import { createHistory } from './document.js'
 import { STL_LIMITS, encodeStl, parseStl } from './stl.js'
 import { placeMesh } from './transform.js'
+
+import { createSource } from './source.js'
 
 const ROUTE = '/api/print-studio/viewer'
 const JSON_HEADERS = { 'cache-control': 'private, no-store', 'content-type': 'application/json', 'x-content-type-options': 'nosniff' }
@@ -95,6 +97,8 @@ function refresh(record, objectIds) {
 
 function summaryOf(record) {
   const measured = [...record.measurements.values()].map(measurement => measurement.report)
+  const designReport = record.source?.state().report
+  if (designReport) measured.push(designReport)
   const errors = measured.reduce((total, report) => total + report.checks.filter(check => check.severity === 'error').length, 0)
   const warnings = measured.reduce((total, report) => total + report.checks.filter(check => check.severity === 'warning').length, 0)
   return { status: errors > 0 ? 'blocked' : warnings > 0 ? 'review' : 'ok', errors, warnings }
@@ -137,6 +141,7 @@ function sceneReport(record) {
     volume: scene.volume,
     objectCount: scene.objects.length,
     ...summaryOf(record),
+    design: record.source?.state() ?? null,
     objects: scene.objects.map((object) => {
       const { report } = record.measurements.get(object.id)
       return {
@@ -174,6 +179,7 @@ export function applyViewer(ctx, defineTool) {
    * @returns {object} the record.
    */
   function recordFor(sessionId) {
+    if (closed) throw new Error('Mesh preview is closed')
     const existing = sessions.get(sessionId)
     if (existing !== undefined) {
       sessions.delete(sessionId)
@@ -182,14 +188,21 @@ export function applyViewer(ctx, defineTool) {
     }
     const record = { history: createHistory(), datablocks: new Map(), byPath: new Map(), measurements: new Map() }
     sessions.set(sessionId, record)
-    while (sessions.size > MAX_SESSIONS) sessions.delete(sessions.keys().next().value)
+    while (sessions.size > MAX_SESSIONS) {
+      const key = sessions.keys().next().value
+      const source = sessions.get(key).source
+      if (source) ctx.effect(async () => { await source.dispose(); return () => {} }, 'print viewer: evict source')
+      sessions.delete(key)
+    }
     return record
   }
 
   route('/state', async (request) => {
     const sessionId = new URL(request.url).searchParams.get('sessionId')
     if (!sessionId) return json({ error: 'session_required' }, 400)
-    return json({ scene: sceneState(recordFor(sessionId)) })
+    const record = recordFor(sessionId)
+    await record.source?.poll()
+    return json({ scene: { ...sceneState(record), design: record.source?.state() ?? null } })
   })
 
   route('/model', async (request) => {
@@ -199,6 +212,108 @@ export function applyViewer(ctx, defineTool) {
     if (datablock === undefined) return json({ error: 'preview_not_found' }, 404)
     return new Response(datablock.bytes.slice(0), { headers: MESH_HEADERS })
   })
+
+  ctx.effect(() => ctx.connection.fetch.register({
+    path: `${ROUTE}/feedback`, methods: ['POST'], requestBody: 'buffered',
+    fetch: async (request) => {
+      const sessionId = new URL(request.url).searchParams.get('sessionId')
+      const source = sessions.get(sessionId)?.source
+      if (!source) return json({ error: 'preview_not_found' }, 404)
+      const body = await request.text()
+      if (body.length > 32_000) return json({ error: 'feedback_too_large' }, 413)
+      let value
+      try { value = JSON.parse(body) } catch (_error) { return json({ error: 'invalid_feedback' }, 400) }
+      if (!value || !Number.isInteger(value.revision)) return json({ error: 'invalid_feedback' }, 400)
+      try { source.feedback(value) } catch (_error) { return json({ error: 'invalid_feedback' }, 400) }
+      return json({ ok: true })
+    },
+  }), 'print viewer: build feedback')
+
+  ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'viewer_load',
+    description: 'Load a project JavaScript model into the 3D viewer. Export synchronous build(THREE) returning a Mesh or Group. '
+      + 'Use millimetres and Z up. Relative .js/.mjs imports inside the entry file’s folder are supported; pass THREE to helpers. '
+      + 'The visible viewer automatically reloads source edits. The viewer owns camera, lighting and controls; do not edit its implementation. '
+      + 'Code executes in the renderer: keep builds synchronous and free of DOM access, timers and other side effects. '
+      + 'Read mesh_state for build errors and measurements after the viewer loads it. Loading does not certify print readiness.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Project model entry, usually source/model.js.' },
+      buildVolume: {
+        type: 'object', additionalProperties: false,
+        description: 'Printable volume in millimetres. Omit to retain the scene’s current print context.',
+        properties: {
+          x: { type: 'number', required: true, description: 'Width in millimetres.' },
+          y: { type: 'number', required: true, description: 'Depth in millimetres.' },
+          z: { type: 'number', required: true, description: 'Height in millimetres.' },
+        },
+      },
+    },
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+    isConcurrencySafe: () => false, timeoutMs: 30_000,
+    async execute(args, exec) {
+      if (!exec.agent) throw new Error('Model preview requires a conversation')
+      const volume = args.buildVolume === undefined ? undefined
+        : createHistory().apply({ type: 'setVolume', volume: args.buildVolume }).volume
+      let record, source
+      const disposeLoad = ctx.effect(async function* () {
+        const cwd = await ctx.workingDirectory.ensure(exec.agent, exec.signal)
+        exec.signal.throwIfAborted()
+        if (closed) throw new Error('Model preview is closed')
+        source = await createSource(ctx, resolve(cwd, args.path), cwd)
+        yield source.dispose
+        exec.signal.throwIfAborted()
+        if (closed) throw new Error('Model preview is closed')
+        record = recordFor(exec.agent.session.id)
+        await record.source?.dispose()
+        if (closed) throw new Error('Model preview is closed')
+        if (volume !== undefined) {
+          record.history.apply({ type: 'setVolume', volume })
+          refresh(record)
+        }
+        record.source = source
+      }, 'print viewer: load model')
+      await disposeLoad
+      if (closed) throw new Error('Model preview is closed')
+      record.source = { ...source, dispose: disposeLoad }
+      return JSON.stringify(sceneReport(record), undefined, 2)
+    },
+  })), 'print viewer: load source')
+
+  ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'viewer_transform',
+    description: 'Place the source model without changing its code. Rotation is in degrees about its centre; position is the bottom centre in millimetres. Placement survives source edits.',
+    parameters: {
+      scale: { type: 'number', description: 'Positive uniform scale.' },
+      rotate: { type: 'object', additionalProperties: false, properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } } },
+      position: { type: 'object', additionalProperties: false, properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } } },
+    },
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+    isConcurrencySafe: () => false, timeoutMs: 10_000,
+    async execute(args, exec) {
+      const record = sessions.get(exec.agent?.session.id)
+      if (!record?.source) throw new Error('Load a model with viewer_load first')
+      record.source.transform(Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined)))
+      return JSON.stringify(sceneReport(record), undefined, 2)
+    },
+  })), 'print viewer: source placement')
+
+  ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'viewer_camera',
+    description: 'Frame the source model and orbit the viewer camera without changing the design or its printed orientation.',
+    parameters: {
+      azimuth: { type: 'number', required: true, description: 'Degrees around the Z axis; zero looks from the front (-Y).' },
+      elevation: { type: 'number', required: true, description: 'Degrees above the plate, between -89 and 89.' },
+    },
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+    isConcurrencySafe: () => false, timeoutMs: 10_000,
+    async execute(args, exec) {
+      const source = sessions.get(exec.agent?.session.id)?.source
+      if (!source) throw new Error('Load a model with viewer_load first')
+      if (!Number.isFinite(args.azimuth) || !Number.isFinite(args.elevation) || Math.abs(args.elevation) > 89) throw new Error('Camera angles must be finite; elevation must be between -89 and 89')
+      source.camera(args)
+      return JSON.stringify(source.state())
+    },
+  })), 'print viewer: camera')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'mesh_state',

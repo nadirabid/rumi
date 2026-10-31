@@ -1,6 +1,9 @@
 /** Copy shared by the mesh preview tab and the STL document preview. */
 export const en = {
   title: '3D preview',
+  buildFailed: 'The model could not update. Ask Rumi to fix the design.',
+  sourceFailed: 'The design files could not be read. Ask Rumi to restore them.',
+  feedbackFailed: 'The preview could not report its status to Rumi. Check the connection.',
   summary: 'See the model Rumi is making.',
   empty: 'No model yet.',
   emptyHint: 'Ask Rumi to show the model you are making.',
@@ -15,6 +18,9 @@ export const en = {
 
 export const zh = {
   title: '3D 预览',
+  buildFailed: '模型无法更新。请让 Rumi 修复设计',
+  sourceFailed: '无法读取设计文件。请让 Rumi 恢复文件',
+  feedbackFailed: '预览无法向 Rumi 报告状态。请检查连接',
   summary: '查看 Rumi 正在制作的模型',
   empty: '还没有模型',
   emptyHint: '请 Rumi 展示你正在制作的模型',

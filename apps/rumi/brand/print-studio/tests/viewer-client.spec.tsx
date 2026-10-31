@@ -4,13 +4,16 @@ import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import { installViewer } from '../viewer/client.js'
-import { en } from '../viewer/locales.js'
+import { en, zh } from '../viewer/locales.js'
 import { encodeStl } from '../viewer/stl.js'
 
 vi.mock('../viewer/viewer.module.css', () => ({ default: '' }))
-const viewport = vi.hoisted(() => ({ apply: vi.fn(), dispose: vi.fn(), create: vi.fn() }))
+const viewport = vi.hoisted(() => ({ apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn() }))
 vi.mock('../viewer/viewport/index.js', () => ({
-  createViewport: (...args: unknown[]) => { viewport.create(...args); return { apply: viewport.apply, dispose: viewport.dispose } },
+  createViewport: (...args: unknown[]) => {
+    viewport.create(...args)
+    return { apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose }
+  },
 }))
 
 type Hooks = Record<string, HostObservable<unknown>>
@@ -22,6 +25,7 @@ const disposers: (() => void | Promise<void>)[] = []
 
 beforeEach(() => {
   vi.useFakeTimers()
+  viewport.applyDesign.mockReset().mockResolvedValue(null)
   viewport.create.mockClear()
   viewport.apply.mockClear()
   viewport.dispose.mockClear()
@@ -33,8 +37,9 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-function translate(key: string, params?: Record<string, unknown>) {
-  const template = en[key as keyof typeof en] ?? key
+function translate(key: string, params?: Record<string, unknown>, locale: 'en' | 'zh' = 'en') {
+  const dictionary = locale === 'en' ? en : zh
+  const template = dictionary[key as keyof typeof en] ?? key
   if (params === undefined) return template
   return template.replace(/\{(\w+)\}/g, (match, name: string) => name in params ? String(params[name]) : match)
 }
@@ -53,7 +58,8 @@ function scene(objects: object[], summary = { status: 'ok', errors: 0, warnings:
 /**
  * @param {{scene?: object | null, modelOk?: boolean}} [host] - What the preview routes answer.
  */
-function fixture(host: { scene?: object | null; modelOk?: boolean } = {}) {
+function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en' | 'zh' } = {}) {
+  const t = (key: string, params?: Record<string, unknown>) => translate(key, params, host.locale)
   const entries = new Map<string, Entry>()
   const register = () => () => {}
   const opened = vi.fn()
@@ -65,7 +71,7 @@ function fixture(host: { scene?: object | null; modelOk?: boolean } = {}) {
   })
   vi.stubGlobal('fetch', fetch)
   installViewer({
-    locale: { bind: () => translate, register },
+    locale: { bind: () => t, register },
     effect: (effect: () => (() => void | Promise<void>)) => { const dispose = effect(); disposers.push(dispose); return dispose },
     sidebarRight: { mounted: { getSnapshot: () => 'session-a' }, openTabIn: opened },
     sidebarRightTabs: { register }, documentPreviews: { register },
@@ -88,7 +94,7 @@ function fixture(host: { scene?: object | null; modelOk?: boolean } = {}) {
           selector(React.useSyncExternalStore(source.subscribe, source.getSnapshot))) satisfies SnapshotSelectorHook<unknown>
         return [`use${hook[0]!.toUpperCase()}${hook.slice(1)}`, use]
       }))
-      return React.createElement(entry.component, { ...owner, ...injected, ...bound, t: translate })
+      return React.createElement(entry.component, { ...owner, ...injected, ...bound, t })
     },
   }
 }
@@ -149,4 +155,45 @@ it('renders an STL opened from a conversation and explains one it cannot read', 
   expect(viewport.apply.mock.calls.at(-1)![0].objects[0].matrix).toHaveLength(16)
   mounted.rerender(view.view('sidebar.right.tab.document', { content: { kind: 'bytes', data: new TextEncoder().encode('not a mesh') }, resourceAddress }))
   expect(screen.getByRole('alert').textContent).toBe(en.failed)
+})
+
+
+it('keeps the viewport mounted through source build errors and reports recovery', async () => {
+  const design = { url: '/source/one/model.js', revision: 1, transform: { scale: 1 } }
+  viewport.applyDesign.mockResolvedValue({ dimensions: { x: 10, y: 20, z: 30 }, checks: [] })
+  const view = fixture({ scene: { ...scene([]), design } })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  expect(screen.getByTestId('print-viewport')).toBeTruthy()
+  expect(viewport.applyDesign.mock.calls[0][0]).toEqual(design)
+  viewport.applyDesign.mockRejectedValueOnce(new Error('missing part'))
+  view.setScene({ ...scene([]), design: { ...design, url: '/source/two/model.js', revision: 2 } })
+  await settle(2000)
+  expect(screen.getByRole('alert').textContent).toBe(en.buildFailed)
+  expect(viewport.create).toHaveBeenCalledOnce()
+  expect(view.fetch.mock.calls.some(([url]) => String(url).includes('/feedback'))).toBe(true)
+  view.setScene({ ...scene([]), design: { ...design, url: '/source/three/model.js', revision: 3 } })
+  await settle(2000)
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(viewport.create).toHaveBeenCalledOnce()
+})
+
+
+it.each(['en', 'zh'] as const)('localizes persistent model failure in %s', async (locale) => {
+  viewport.applyDesign.mockRejectedValueOnce(new Error('technical detail'))
+  const view = fixture({ locale, scene: { ...scene([]), design: { url: '/source/broken/model.js', revision: 1 } } })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  expect(screen.getByRole('alert').textContent).toBe((locale === 'en' ? en : zh).buildFailed)
+  expect(screen.queryByText('technical detail')).toBeNull()
+})
+
+
+it('reports a non-Error thrown by model code without losing the preview', async () => {
+  viewport.applyDesign.mockRejectedValueOnce(null)
+  const view = fixture({ scene: { ...scene([]), design: { url: '/source/non-error/model.js', revision: 1 } } })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  expect(screen.getByRole('alert').textContent).toBe(en.buildFailed)
+  expect(screen.getByTestId('print-viewport')).toBeTruthy()
 })

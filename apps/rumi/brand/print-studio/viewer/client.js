@@ -78,7 +78,9 @@ export function installViewer(ctx, React, primitives) {
       if (!response.ok) throw new Error('preview bytes unavailable')
       return parseStl(await response.arrayBuffer())
     }
-    const viewOf = scene => ({
+    const viewOf = (scene, sessionId) => ({
+      design: scene.design ?? null,
+      sessionId,
       volume: scene.volume,
       objects: scene.objects.map(object => ({
         id: object.id,
@@ -95,19 +97,21 @@ export function installViewer(ctx, React, primitives) {
       const scene = await readScene(sessionId)
       if (scene === null) { publish(sessionId, EMPTY); return }
       const unchanged = current?.scene != null && current.scene.revision === scene.revision
+        && JSON.stringify(current.scene.design) === JSON.stringify(scene.design)
       const complete = scene.objects.every(object => geometry.has(object.datablockId))
       if (unchanged && complete && current.view !== null) return
       // Publish the scene before its geometry so a failed fetch is reportable.
-      if (!complete) publish(sessionId, { scene, view: null })
+      if (!complete) publish(sessionId, { scene, view: current?.view ?? null })
       for (const object of scene.objects) {
         if (geometry.has(object.datablockId)) continue
         if (geometry.size >= MAX_GEOMETRY) geometry.clear()
         geometry.set(object.datablockId, await readPositions(sessionId, object.datablockId))
       }
       if (stopped()) return
-      publish(sessionId, { scene, view: viewOf(scene) })
-      if (scene.objects.length === 0 || opened.get(sessionId) === scene.revision) return
-      opened.set(sessionId, scene.revision)
+      publish(sessionId, { scene, view: viewOf(scene, sessionId) })
+      const opening = scene.design?.url ?? scene.revision
+      if ((scene.objects.length === 0 && !scene.design) || opened.get(sessionId) === opening) return
+      opened.set(sessionId, opening)
       ctx.sidebarRight.openTabIn(sessionId, KIND)
     }
     const run = () => {
@@ -135,6 +139,7 @@ export function installViewer(ctx, React, primitives) {
     const holder = React.useRef(null)
     const viewport = React.useRef(null)
     const [failed, setFailed] = React.useState(false)
+    const [buildError, setBuildError] = React.useState(null)
     React.useEffect(() => {
       try {
         viewport.current = createViewport(holder.current, () => setFailed(true))
@@ -148,9 +153,38 @@ export function installViewer(ctx, React, primitives) {
     React.useEffect(() => {
       if (view !== null) viewport.current?.apply(view)
     }, [view])
+    React.useEffect(() => {
+      if (!viewport.current?.applyDesign) return
+      let active = true
+      const controller = new AbortController()
+      const feedback = async (value) => {
+        if (!active || !view?.design) return
+        const response = await fetch(`${ROUTE}/feedback?sessionId=${encodeURIComponent(view.sessionId)}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
+          body: JSON.stringify({ revision: view.design.revision, url: view.design.url, transform: view.design.transform, ...value }),
+        })
+        if (!response.ok) throw new Error('Build feedback unavailable')
+      }
+      viewport.current.applyDesign(view?.design ?? null, view?.volume ?? null).then(async (report) => {
+        if (!active || !report) return
+        setBuildError(null)
+        await feedback({ report })
+      }).catch(async (error) => {
+        if (!active) return
+        setBuildError('buildFailed')
+        try { await feedback({ error: error instanceof Error ? error.message : String(error) }) }
+        catch (_feedbackError) { if (active) setBuildError('feedbackFailed') }
+      })
+      return () => { active = false; controller.abort() }
+    }, [
+      view?.design?.url, JSON.stringify(view?.design?.transform), view?.design?.camera?.id,
+      view?.sessionId, JSON.stringify(view?.volume),
+    ])
     return h(React.Fragment, null,
       h('div', { className: 'pv-stage', ref: holder, role: 'img', 'aria-label': t('view'), 'data-testid': 'print-viewport' }),
-      failed ? h('p', { role: 'alert', className: 'pv-error' }, t('webgl')) : null)
+      failed ? h('p', { role: 'alert', className: 'pv-error' }, t('webgl')) : null,
+      buildError && !failed && view?.design?.error?.kind !== 'source'
+        ? h('p', { role: 'alert', className: 'pv-error' }, t(buildError)) : null)
   }
 
   function StatusPill({ summary, t }) {
@@ -166,7 +200,7 @@ export function installViewer(ctx, React, primitives) {
   function MeshPane({ useScene, t }) {
     const state = useScene(value => value)
     const scene = state.scene
-    if (scene === null || scene.objects.length === 0) {
+    if (scene === null || (scene.objects.length === 0 && !scene.design)) {
       return h('section', { className: 'rumi-print-viewer', 'aria-label': t('title') },
         h('div', { className: 'pv-empty' },
           h('p', { className: 'pv-empty-title' }, t('empty')),
@@ -180,7 +214,8 @@ export function installViewer(ctx, React, primitives) {
         }, scene.failed ? t('previewFailed') : t('loading')))
     }
     return h('section', { className: 'rumi-print-viewer', 'aria-label': t('title') },
-      h(Stage, { view: state.view, t }),
+      h(Stage, { key: state.view.sessionId, view: state.view, t }),
+      scene.design?.error?.kind === 'source' ? h('p', { role: 'alert', className: 'pv-error' }, t('sourceFailed')) : null,
       h(StatusPill, { summary: scene.summary, t }),
       scene.failed ? h('p', { role: 'alert', className: 'pv-error' }, t('previewFailed')) : null)
   }

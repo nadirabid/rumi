@@ -1,0 +1,4 @@
+- insert:
+    - id: rumi-settings
+      name: '@rumi/settings'
+      config: {}

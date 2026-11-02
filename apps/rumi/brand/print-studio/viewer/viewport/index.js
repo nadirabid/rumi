@@ -152,6 +152,38 @@ export function createViewport(element, onFailure) {
   }
 
   return {
+    /** Capture a fitted 480 × 320 PNG using the loaded geometry; restore the interactive viewport. */
+    thumbnail() {
+      if (closed || (objects.size === 0 && !design)) return null
+      const bounds = new THREE.Box3()
+      for (const { mesh } of objects.values()) bounds.expandByObject(mesh)
+      if (design) bounds.expandByObject(designRoot)
+      if (bounds.isEmpty()) return null
+      const { center, radius } = bounds.getBoundingSphere(new THREE.Sphere())
+      const coverCamera = camera.clone()
+      coverCamera.aspect = 1.5
+      const distance = Math.max(radius, 1) / Math.sin(coverCamera.fov * Math.PI / 360) * 1.15
+      coverCamera.position.copy(center).add(new THREE.Vector3(1, -1, 0.8).setLength(distance))
+      coverCamera.near = Math.max(distance / 1000, 0.001)
+      coverCamera.far = distance + radius * 4 + 1
+      coverCamera.lookAt(center)
+      coverCamera.updateProjectionMatrix()
+      const size = renderer.getSize(new THREE.Vector2())
+      const ratio = renderer.getPixelRatio()
+      const visibility = volumeNodes.map(node => node.visible)
+      try {
+        for (const node of volumeNodes) node.visible = false
+        renderer.setPixelRatio(1)
+        renderer.setSize(480, 320, false)
+        renderer.render(scene, coverCamera)
+        return renderer.domElement.toDataURL('image/png')
+      } finally {
+        volumeNodes.forEach((node, index) => { node.visible = visibility[index] })
+        renderer.setPixelRatio(ratio)
+        renderer.setSize(size.x, size.y, false)
+        render()
+      }
+    },
     async applyDesign(spec, volume) {
       if (closed) return null
       designSpec = spec

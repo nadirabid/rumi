@@ -48,7 +48,7 @@ column. They stay reachable through the app menu and their shortcuts.
 
 ## Gallery appearance
 
-The gallery uses neutral board covers, a three-column grid that reduces to two or one column on narrow windows, and a circular New control. Covers are placeholders until project thumbnails are available; they do not depict generated artifacts. Colors follow the active DSH theme. The glass treatment is CSS, not native SwiftUI Liquid Glass.
+The gallery uses neutral board covers, a three-column grid that reduces to two or one column on narrow windows, and a circular New control. Covers show the last successfully previewed model as a fitted 480 × 320 PNG, saved as `.preview.png` in the project directory. The open 3D viewport captures after scene changes settle, reusing its loaded geometry and renderer. The gallery loads images lazily and never builds meshes or creates WebGL contexts. Projects without a saved preview show a neutral placeholder until their model is opened. Failed model builds retain the last successful cover; source changes made without opening the preview are not reflected. Colors follow the active DSH theme. The glass treatment is CSS, not native SwiftUI Liquid Glass.
 
 New projects and their initial sessions share the name `Untitled <number>`. The host reserves numbers exclusively on disk so concurrent creation and app restarts do not reuse them. Existing names are preserved.
 

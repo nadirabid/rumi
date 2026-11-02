@@ -138,6 +138,7 @@ export function installViewer(ctx, React, primitives) {
   function Stage({ view, t }) {
     const holder = React.useRef(null)
     const viewport = React.useRef(null)
+    const designReady = React.useRef(Promise.resolve(null))
     const [failed, setFailed] = React.useState(false)
     const [buildError, setBuildError] = React.useState(null)
     React.useEffect(() => {
@@ -165,7 +166,8 @@ export function installViewer(ctx, React, primitives) {
         })
         if (!response.ok) throw new Error('Build feedback unavailable')
       }
-      viewport.current.applyDesign(view?.design ?? null, view?.volume ?? null).then(async (report) => {
+      designReady.current = viewport.current.applyDesign(view?.design ?? null, view?.volume ?? null)
+      designReady.current.then(async (report) => {
         if (!active || !report) return
         setBuildError(null)
         await feedback({ report })
@@ -180,6 +182,30 @@ export function installViewer(ctx, React, primitives) {
       view?.design?.url, JSON.stringify(view?.design?.transform), view?.design?.camera?.id,
       view?.sessionId, JSON.stringify(view?.volume),
     ])
+    React.useEffect(() => {
+      if (!view?.sessionId) return
+      let active = true
+      const controller = new AbortController()
+      // Debounce changing scenes; a stationary preview never captures on polling or orbit.
+      const timer = setTimeout(async () => {
+        try {
+          if (view.design) {
+            const report = await designReady.current
+            if (!report || !active) return
+          }
+          const image = viewport.current?.thumbnail()
+          if (!image || !active) return
+          const bytes = Uint8Array.from(atob(image.split(',')[1]), character => character.charCodeAt(0))
+          const response = await fetch(`/api/rumi-projects/thumbnail?sessionId=${encodeURIComponent(view.sessionId)}`, {
+            method: 'POST', headers: { 'content-type': 'image/png' }, body: bytes, signal: controller.signal,
+          })
+          if (!response.ok && response.status !== 404) throw new Error(`Thumbnail save failed: ${response.status}`)
+        } catch (error) {
+          if (active) console.warn('Project thumbnail unavailable', error)
+        }
+      }, 750)
+      return () => { active = false; clearTimeout(timer); controller.abort() }
+    }, [view])
     return h(React.Fragment, null,
       h('div', { className: 'pv-stage', ref: holder, role: 'img', 'aria-label': t('view'), 'data-testid': 'print-viewport' }),
       failed ? h('p', { role: 'alert', className: 'pv-error' }, t('webgl')) : null,

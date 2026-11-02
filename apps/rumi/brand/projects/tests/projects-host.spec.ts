@@ -69,6 +69,7 @@ it('serves the gallery over the connection routes', async () => {
   const cleanup: (() => void)[] = []
   const provided = new Map<string, unknown>()
   apply({
+    inject: () => {},
     effect: (effect: () => (() => void)) => cleanup.push(effect()),
     provide: (name: string, value: unknown) => {
       provided.set(name, value)
@@ -102,6 +103,21 @@ it('serves the gallery over the connection routes', async () => {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId: 'nope' }),
   })
   expect(missing.status).toBe(400)
+  const thumbnailRoute = '/api/rumi-projects/thumbnail'
+  const invalid = await request(`${thumbnailRoute}?sessionId=session-9`, { method: 'POST', body: 'not a PNG' })
+  expect(invalid.status).toBe(400)
+  const image = Buffer.alloc(24)
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(image)
+  image.write('IHDR', 12)
+  image.writeUInt32BE(480, 16)
+  image.writeUInt32BE(320, 20)
+  expect((await request(`${thumbnailRoute}?sessionId=session-9`, { method: 'POST', body: image })).status).toBe(204)
+  const cover = await request(`${thumbnailRoute}?projectId=${created.project.id}`)
+  expect(cover.headers.get('content-type')).toBe('image/png')
+  expect(Buffer.from(await cover.arrayBuffer())).toEqual(image)
+  expect((await request(`${thumbnailRoute}?projectId=../escape`)).status).toBe(404)
+  image.writeUInt32BE(999999, 16)
+  expect((await request(`${thumbnailRoute}?sessionId=session-9`, { method: 'POST', body: image })).status).toBe(400)
   for (const dispose of cleanup.toReversed()) dispose()
   expect(routes.size).toBe(0)
 })
@@ -113,4 +129,20 @@ it('allocates distinct names concurrently and continues after reopening the stor
   const created = await Promise.all([first.create(), second.create(), first.create()])
   expect(created.map(project => project.name).sort()).toEqual(['Untitled 1', 'Untitled 2', 'Untitled 3'])
   expect((await createProjectStore(directory).create()).name).toBe('Untitled 4')
+})
+
+it('persists a cover across store restarts without changing session metadata', async () => {
+  const directory = root()
+  const store = createProjectStore(directory)
+  const project = await store.create('Dragon')
+  await store.attachSession(project.id, 'dragon-session')
+  const metadata = readFileSync(join(project.path, 'project.json'), 'utf8')
+  const bytes = Buffer.from('saved image')
+  expect(await store.saveThumbnail('unknown', bytes)).toBe(false)
+  expect(await store.saveThumbnail('dragon-session', bytes)).toBe(true)
+  const reopened = createProjectStore(directory)
+  expect(await reopened.thumbnail(project.id)).toEqual(bytes)
+  expect((await reopened.list())[0].thumbnailVersion).not.toBeNull()
+  expect(readFileSync(join(project.path, 'project.json'), 'utf8')).toBe(metadata)
+  await expect(reopened.thumbnail('../escape')).rejects.toThrow('invalid id')
 })

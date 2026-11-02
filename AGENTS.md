@@ -2,30 +2,13 @@
 
 ## This checkout is the Rumi fork
 
-Rumi is a **separate installable macOS app** built on DeepSeek Harness. This repo is a
-fork of `deepseek-ai/deepseek-harness` (tag `dsh-v0.2.1-rc.3`). Upstream is the
-`upstream` remote. `apps/rumi` is the only product surface we own, and the stock app in
-`apps/desktop` must keep building unchanged from the same tree.
+Rumi is a **separate installable macOS app** built on DeepSeek Harness. This repo is a fork of `deepseek-ai/deepseek-harness` (tag `dsh-v0.2.1-rc.3`). Upstream is the `upstream` remote. `apps/rumi` is the only product surface we own, and the stock app in `apps/desktop` must keep building unchanged from the same tree.
 
 ### Why it exists
 
-Rumi is built **for my kids** — a place for them to play, make things, and learn by
-working alongside an agent. That is the product goal, and it should decide arguments
-that would otherwise be close calls:
+Rumi is for my kids: play, creation, and learning alongside an agent. Prefer simple, safe defaults without requiring knowledge of modes, permissions, plugins, or terminals. Expect exploratory clicks: confirm destructive actions and keep recoverable actions discoverable. Fun must preserve safety and clarity. Admit a general-purpose improvement only if it helps a child use the app; when uncertain, choose the smaller change.
 
-- Prefer the simpler, safer default. A child should not have to reason about modes,
-  permissions, or plugin state to get something done.
-- Assume the person at the keyboard will click things to see what happens. Destructive
-  actions deserve confirmation; recoverable ones should not be buried.
-- The interface should be legible to someone who has never used a terminal. Where the
-  stock UI assumes a developer's mental model, the Rumi version can assume less.
-- Fun is part of the point, but never at the cost of the two rules above.
-
-Do not let a general-purpose improvement in without asking whether it helps a kid use
-the app. When in doubt, the answer is the smaller change.
-
-The table below is the whole allowed-change set. Anything outside it is shared code:
-editing it changes DeepSeek Harness as well as Rumi.
+The table is the complete allowed-change set; everything else is shared upstream code.
 
 ### Allowed to modify
 
@@ -48,118 +31,19 @@ editing it changes DeepSeek Harness as well as Rumi.
 - `packages/**` except the boot-page wordmark line above — published upstream packages.
 - Renaming or deleting upstream files, or gating upstream behaviour behind a fork flag.
 
-If a change seems to need one of these, build it as a package under `apps/rumi/brand/`-style
-directories and compose it into Rumi's profile. The slot system exists for this: `ctx.slots` replaces UI,
-a bundle patch replaces loader rows, and neither needs a fork.
+If a change seems to need one of these, build it as a package under `apps/rumi/brand/`-style directories and compose it into Rumi's profile. The slot system exists for this: `ctx.slots` replaces UI, a bundle patch replaces loader rows, and neither needs a fork.
 
 ### Product facts
 
-| | |
-|---|---|
-| package | `dsh-rumi` (`apps/rumi`) |
-| bundle id | `com.nadirmuzaffar.rumi` |
-| URL scheme | `rumi` |
-| home | `~/.rumi` (`DSH_RUMI_HOME` overrides it) |
-| profile | `~/.rumi/profiles/rumi` |
-| state | `~/.rumi/sessions`, `~/.rumi/storages` |
-| config | Rumi's own: `~/.rumi/.credentials.yaml`, `AGENTS.md`, skills, presets |
-| window title | `Rumi` |
-| icon | `apps/rumi/resources/icon*.png` — the word "rumi" |
-
-Rumi and DeepSeek Harness run at the same time and share no directory. The Electron
-main process sets `DSH_HOME` to `~/.rumi` before the first path resolves, so nothing
-the app reads or writes lands under `~/.dsh`. Earlier builds did share that home; the
-one-time migration in `apps/rumi/src/rumi-home-migration.ts` moves what they wrote.
-Product terms — "Rumi home", "Rumi project", "project instructions" — are defined once
-in [RUMI.md](RUMI.md#terms); append there rather than restating them.
+[RUMI.md](RUMI.md#what-differs-from-upstream) owns app identity and home isolation; [Terms](RUMI.md#terms) owns product terminology. Append facts there rather than restating them.
 
 ### Plugin UI
 
-Every Rumi plugin follows the stock plugin-settings surface; a bespoke form is a
-regression even when it works. These rules apply to every plugin under
-`apps/rumi/brand/**`.
+Before changing `apps/rumi/brand/**`, read and follow [Rumi's plugin UI requirements](RUMI.md#plugin-ui-requirements).
 
-- Register the settings page as `plugins.item` in the client half. The page's
-  `view === 'summary'` returns one plain sentence; `view === 'page'` returns the
-  form. The card title comes from the registration label.
-- Build the page from the shared primitives: `SettingsForm`,
-  `SettingsValueField`, `SettingsSecretField`, `Switch`, `Button`, and `Tag` from
-  `@deepseek-ai/dsh-client-ui-primitives`. Do not hand-roll inputs, buttons,
-  save bars, labels, or status tags.
-- Use `SettingsForm`'s `state`, `labels`, `onSave`, and `onDiscard` for staging
-  and saving. The form's footer is the only save control.
-- Use theme tokens (`var(--dsw-alias-…)`) or shared component styles, never
-  literal colors and ad-hoc spacing.
-- Put every visible string in a `ctx.locale` dictionary with `en` and `zh`;
-  never inline copy in the component.
-- Prefer automatic discovery and app-owned state over a setup form. Ask only for
-  a fact that cannot be discovered, and keep secrets in `ctx.credentials`, never
-  in the profile patch or a settings response.
+### Build and verification
 
-### Build
-
-```sh
-export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk
-pnpm install --no-frozen-lockfile
-pnpm build
-pnpm --filter dsh-rumi run build
-
-export DSH_DESKTOP_APP_ID=com.nadirmuzaffar.rumi
-export npm_execpath="$PWD/node_modules/pnpm/bin/pnpm.mjs"
-node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64 --unsigned
-```
-
-Then copy `apps/rumi/.desktop-build/targets/mac-arm64/unsigned-artifacts/mac-arm64/Rumi.app`
-to `/Applications/` and open it.
-
-Environment traps, all of them real:
-
-- **macOS 27 SDK** — the native addon fails to link; pin `MacOSX15.sdk`.
-- **`npm_execpath`** — `package-target` spawns `node $npm_execpath`, and a standalone pnpm
-  binary is not a JS file. Point it at `node_modules/pnpm/bin/pnpm.mjs`.
-- **`ELECTRON_RUN_AS_NODE=1`** — every DSH shell sets it. Launch with
-  `env -u ELECTRON_RUN_AS_NODE open -a …`, or Electron runs as plain Node and exits 0 in
-  silence. This costs an hour if forgotten.
-- **Commit hooks** — upstream lefthook checks translation pairing and fails on a fork.
-  `git commit --no-verify` is expected here.
-
-### Verifying UI changes
-
-Screen recording is denied to the agent shell, so `screencapture` fails. Verify the
-rendered DOM instead:
-
-```sh
-env -u ELECTRON_RUN_AS_NODE "/Applications/Rumi.app/Contents/MacOS/Rumi" \
-  --remote-debugging-port=9222 &
-curl -s http://127.0.0.1:9222/json/list   # webSocketDebuggerUrl
-```
-
-Then drive `Runtime.evaluate` over that socket (`ws` lives in
-`node_modules/.pnpm/ws@*/node_modules/ws`) and read `document.querySelector…`. This is
-how the sidebar layout was confirmed: the More button's ancestry ends in
-`footArea`, no `nav` renders, and its menu reads "Plugins | Automation tasks".
-
-Two traps that produced false confidence here:
-
-- `pkill -f "MacOS/Rumi$"` does not match an instance launched with extra argv.
-  Kill with `pkill -9 -f "Rumi.app/Contents"` and confirm `pgrep` is empty, or you
-  will keep looking at the old build.
-- The packaged app bundles `apps/rumi/lib` and the workspace packages as sealed
-  tarballs. Editing `apps/rumi/src/preload-app.ts` or any `packages/client/*` source
-  requires `pnpm --filter dsh-rumi run build` and `pnpm run build:official`
-  respectively before packaging; the root `pnpm build` rebuilds neither. The mesh
-  viewer's browser half is the same story: `apps/rumi/brand/print-studio/viewer/` is
-  bundled into `lib/client.js` by `pnpm --filter dsh-rumi run build`, not served as source.
-
-### Verify before claiming done
-
-1. `Rumi.app` is in `/Applications` and `codesign -v` passes.
-2. It launches and stays running (`pgrep -f "MacOS/Rumi$"`).
-3. `~/Library/Application Support/dsh-rumi` and `~/.rumi/profiles/rumi` exist, and the
-   profile patch carries the Rumi policy block.
-4. `~/.rumi/sessions` grows when Rumi runs, and no Rumi process has a path under
-   `~/.dsh`: `lsof -p $(pgrep -f "MacOS/Rumi$") | grep -c '\.dsh/'` is zero.
-5. The stock app still builds: `pnpm --filter @deepseek-ai/dsh-desktop run build`.
+Before building, packaging, installing, or verifying Rumi, read and follow [Build](RUMI.md#build), [Package](RUMI.md#package), [Install and run](RUMI.md#install-and-run), [build constraints](RUMI.md#build-constraints), and the [completion checks](RUMI.md#verify-before-claiming-done). These requirements apply to every Rumi change.
 
 ---
 
@@ -179,97 +63,11 @@ Record each externally perceptible breaking change immediately in an [upgrade gu
 
 ## Repository layout
 
-```
-vendor/      Vendored Cordis (vendor/README.md)
-packages/    @deepseek-ai/dsh-<pkg> workspaces at packages/<group>/<pkg>/
-  core/                 agent/session API
-  api/                  remote BFF
-  typert/               type graphs
-  llm/                  model providers
-  shell/                command execution
-  subprocess/           child-process management
-  ssh/                  SSH execution providers
-  terminal/             persistent terminals
-  ptc-runtime/          PTC execution
-  sandbox/              process confinement
-  deliverables/         turn deliverables
-  fs/                   filesystem access
-  lsp/                  language servers
-  skill/                skill loading
-  web/                  search/fetch tools
-  computer-use/         computer interaction
-  browser-use/          browser interaction
-  compaction/           context compaction
-  context/              request context
-  subagent/             delegated agents
-  jobs/                 background jobs
-  bundle/               profile bundles
-  workflow/             workflow execution
-  todo/                 todo_write tool
-  plan/                 logged planning
-  goal/                 session goals
-  schedule/             scheduled follow-ups
-  preset/               agent composition
-  guard/                loop/tool guards
-  extensions/           runtime self-modification
-  session/              durable sessions
-  session-query/        browsing/search/export
-  attachment/           binary attachments
-  spill/                output spill
-  storage/              non-session storage
-  workspace/            workspace entities
-  feedback/             human feedback
-  identity/             anonymous identity
-  settings/             user settings
-  credentials/          credentials/authorization
-  acp/                  automation-only ACP
-  interaction/          human interaction
-  boot/                 application boot
-  sdk/                  JSON-RPC SDK
-  host/                 GUI host
-  client/               GUI client
-  mcp/                  external tools
-  experimental/         evaluated capabilities without a product-support commitment
-  test-support/         test infrastructure
-  util/                 zero-dependency utilities
-python/      Python SDK/runtime (python/README.md)
-native/      @deepseek-ai/node-addon-system source (native/README.md)
-benchmarks/  performance gates
-.agents/     Agent workflows/notes
-docs/        Documentation (docs/AGENTS.md)
-scripts/     gates and generators
-website/     VitePress documentation projection
-```
-
-Package groups: [packages/README.md](packages/README.md). [Experimental status](packages/experimental/README.md#status) is independent of optional delivery; nonexperimental packages need product use or an explicit [classification](scripts/product-package-policy.ts).
+Use the [repository map](RUMI.md#repository-layout-reference) and [package-group guide](packages/README.md) to locate owners. Nonexperimental packages need product use or an explicit [classification](scripts/product-package-policy.ts); [experimental status](packages/experimental/README.md#status) is independent of optional delivery.
 
 ## Commands
 
-```sh
-pnpm install            # pnpm workspaces, node ^22.19 || >=24
-pnpm run clean           # remove build outputs and safe residue from deleted packages
-pnpm run test           # unit tests
-pnpm run test:coverage  # CI coverage gate: per-file 100% on packages/*/*/src
-pnpm run test:e2e       # real-API tests; self-skip without DEEPSEEK_API_KEY
-pnpm run test:expected  # owner-local process expectations
-pnpm run test:snapshot  # keyless recorded-session replay through shipped profiles; filter: -t <name>
-pnpm run test:snapshot:record  # re-record expected outputs (needs key)
-pnpm run typecheck
-pnpm run lint
-pnpm run duplication    # cross-file TypeScript clone detection
-pnpm run build          # build:artifacts + build:check, concurrently
-pnpm run build:artifacts # artifacts: tsc emits lib/types, tsdown bundles runtime, Web
-pnpm run build:check    # typecheck aggregate tests/scripts against current build:artifacts output
-pnpm run hygiene        # publint + workspace/package/dependency checks + NodeNext consumer check
-pnpm run check:windows-wine  # ONLY when diagnosing a known Windows failure (needs wine); CI owns this signal
-pnpm run doc-sync       # documentation gates (scripts/run-gates.ts)
-pnpm run test:docs      # quick documentation checks (no build; doc-quick aggregate)
-pnpm run website:build  # VitePress build (doubles as dead-link check)
-pnpm dsh --profile headless "task"  # run one task from source (needs DEEPSEEK_API_KEY)
-pnpm run demo:ptc -- "task"  # headless PTC mode run (needs key)
-pnpm run dev:web | dev:desktop  # build:artifacts, then launch; Web also rebuilds client bundles on edits. start:web | start:desktop skip the build
-make web|dev-web|desktop|dev-desktop|build  # the same commands; ARGS='--no-open' forwards options
-```
+Read the [shared command reference](RUMI.md#shared-development-commands) before running repository commands; the checks below still apply.
 
 ### Host sandbox failures
 
@@ -337,7 +135,7 @@ Read [docs/defensive-patterns/README.md](docs/defensive-patterns/README.md) befo
 
 Everything compiles under `strict: true` with `noImplicitAny`; every remaining `any` explains why narrowing is infeasible. Every module and export has concise JSDoc for its non-obvious contract; function-like exports include `@param`/`@returns`, as enforced by `verify-export-jsdoc`. Heritage-declared members, plugin-protocol slots, and constructors keep their docs at the declaring Service Definition, protocol, or class.
 
-Comments and docs state complete contracts and context, not reasoning transcripts. Use direct, concrete terms. Do not use metaphors. Before writing `contract`, `boundary`, or `shape`, ask whether a more exact term names the subject: write `response fields`, `JSON validation`, or `ESM exports` instead of `response shape`, `validation boundary`, or `module shape`. Keep `contract` for preconditions, postconditions, invariants, compatibility promises, and other obligations that callers, callees, implementers, providers, producers, or consumers rely on. Keep a literal process, wire, security, transaction, or lifecycle boundary. Do not narrate control flow or tests, preserve review history, or restate code. Keep behavior, failure, timing, ownership, and safe-use facts; link the rationale. Use [dsh-prose-standard](.agents/skills/dsh-prose-standard/SKILL.md) for decisions. Wire mechanically checkable invariants into an executed top-level gate and prove each changed acceptance path rejects an invalid case. Use narrow, justified exceptions instead of disabling a rule globally.
+Before writing comments or documentation, follow the [prose requirements](RUMI.md#prose-requirements) and [dsh-prose-standard](.agents/skills/dsh-prose-standard/SKILL.md).
 
 Docs accompany every code change: update affected README and JSDoc contracts together. Routine bilingual work follows [docs/AGENTS.md](docs/AGENTS.md); only explicit user invocation may run `dsh-translate-docs`. Current-state prose, one physical line per paragraph, one home per fact, and word budgets live there.
 

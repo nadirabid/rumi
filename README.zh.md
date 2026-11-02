@@ -1,6 +1,33 @@
-# DeepSeek Harness
+# Rumi
 
 [English](README.md) | 中文
+
+Rumi 是一个基于 DeepSeek Harness、为我的孩子构建的应用，让他们在智能体陪伴下玩耍、创作和学习。它使用相同的底层框架、智能体、工具和会话格式；区别在于面向孩子使用电脑方式的产品体验：独立的应用、名称、图标、配置档案、状态，以及逐步完善的界面。
+
+Rumi 与 DeepSeek Harness 可以在同一台电脑上**同时运行**。两者分别使用独立的主目录、凭据、指令、技能、会话、工作区和配置档案。
+
+```sh
+# build
+export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk
+pnpm install --no-frozen-lockfile && pnpm build
+pnpm --filter dsh-rumi run build
+
+# package (unsigned, local)
+export DSH_DESKTOP_APP_ID=com.nadirmuzaffar.rumi
+export npm_execpath="$PWD/node_modules/pnpm/bin/pnpm.mjs"
+node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64 --unsigned
+```
+
+然后将 `apps/rumi/.desktop-build/targets/mac-arm64/unsigned-artifacts/mac-arm64/Rumi.app` 复制到 `/Applications` 并打开。
+
+- [`AGENTS.md`](AGENTS.md) — 分支目标、允许修改的路径和构建注意事项。修改前必读。
+- [`RUMI.md`](RUMI.md) — 与上游的区别及各部分所在位置。
+
+以下为 Rumi 所基于的上游项目。
+
+---
+
+# DeepSeek Harness
 
 DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 

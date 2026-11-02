@@ -59,6 +59,13 @@ function createProductApi(): DshDesktopProductApi {
 }
 
 if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
+  contextBridge.exposeInMainWorld('__RUMI_SETTINGS__', {
+    subscribe: (listener: (page: 'settings' | 'plugins') => void) => {
+      const handle = (_event: Electron.IpcRendererEvent, page: 'settings' | 'plugins'): void => { listener(page) }
+      ipcRenderer.on('rumi:settings:open', handle)
+      return () => { ipcRenderer.off('rumi:settings:open', handle) }
+    },
+  })
   contextBridge.exposeInMainWorld('__RUMI_BAMBU_LOGIN__', { open: () => ipcRenderer.invoke('rumi:bambu:login') })
   contextBridge.exposeInMainWorld('dshOnboarding', {
     hasApiKey: () => ipcRenderer.invoke(DESKTOP_IPC.onboardingApiKey) as Promise<boolean>,

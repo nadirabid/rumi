@@ -72,6 +72,23 @@ describe('unique object-name prefix search', () => {
 })
 
 describe('maintained repository reference policy', () => {
+  it('accepts uv artifact byte counts while still checking references in the lockfile', () => {
+    const numeric = '1'.repeat(7)
+    const commits = new Set([numeric])
+    const artifact = `{ url = "https://files.pythonhosted.org/example.whl", size = ${numeric}, upload-time = "2026-01-01" }`
+    for (const file of ['uv.lock', 'python/sdk/uv.lock']) {
+      expect(findRepositoryReferences(file, artifact, commits)).toEqual([])
+      expect(findRepositoryReferences(file, `${artifact}\nrevision = "${numeric}"`, commits))
+        .toEqual([{ file, line: 2, kind: 'commit-hash' }])
+      expect(findRepositoryReferences(file, `{ size = ${numeric}, revision = "${numeric}" }`, commits))
+        .toEqual([{ file, line: 1, kind: 'commit-hash' }])
+      expect(findRepositoryReferences(file, `${artifact}\nsource = "${organizationUrl}"`, commits))
+        .toEqual([{ file, line: 2, kind: 'organization-url' }])
+    }
+    expect(findRepositoryReferences('README.md', artifact, commits))
+      .toEqual([{ file: 'README.md', line: 1, kind: 'commit-hash' }])
+  })
+
   it('permits only the independent kit repository and its source URLs', () => {
     for (const suffix of ['', '.git', '/tree/main/packages/entry']) {
       expect(findRepositoryReferences('package.json', `${organizationUrl}/libreoffice-kit${suffix}`, new Set())).toEqual([])

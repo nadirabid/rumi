@@ -1,30 +1,25 @@
 # Rumi
 
-A DeepSeek Harness app built for my kids — somewhere to play, make things, and learn
-alongside an agent. `apps/rumi` is a copy of `apps/desktop` rebranded as its own
-product; everything else is upstream, unmodified.
+A DeepSeek Harness app built for my kids — somewhere to play, make things, and learn alongside an agent. `apps/rumi` is a copy of `apps/desktop` rebranded as its own product; everything else is upstream, unmodified.
 
 ## What differs from upstream
 
 | Thing | Value |
 |---|---|
 | product name | `Rumi` |
+| package | `dsh-rumi` (`apps/rumi`) |
 | bundle id | `com.nadirmuzaffar.rumi` |
 | URL scheme | `rumi` |
 | home | `~/.rumi` (override: `DSH_RUMI_HOME`) |
 | profile | `~/.rumi/profiles/rumi` |
 | sessions and storages | `~/.rumi/sessions`, `~/.rumi/storages` |
+| configuration | `~/.rumi/.credentials.yaml`, plus Rumi’s own `AGENTS.md`, skills, and presets under `~/.rumi` |
 | projects | `~/.rumi/workspace` |
 | data root | `~/Library/Application Support/dsh-rumi` |
 | icon | `apps/rumi/resources/icon*.png` — the word "rumi" |
 | window title | `Rumi` (set by `DSH_CLIENT_TITLE` in `scripts/client-build-environment.ts`) |
 
-Both apps run at the same time and share nothing: separate bundle ids, single-instance
-locks, homes, profiles, Sessions, credentials, instructions, and plugin sets. The
-Electron main process points `DSH_HOME` at `~/.rumi` before the first path resolves, so
-the profile, Session and storage roots, credentials, `AGENTS.md`, skills, presets,
-provisioned runtimes, and every bundled plugin that reads the home all land under
-Rumi's own directory. Nothing resolves `~/.dsh`, which belongs to DeepSeek Harness.
+Both apps run at the same time and share nothing: separate bundle ids, single-instance locks, homes, profiles, Sessions, credentials, instructions, and plugin sets. The Electron main process points `DSH_HOME` at `~/.rumi` before the first path resolves, so the profile, Session and storage roots, credentials, `AGENTS.md`, skills, presets, provisioned runtimes, and every bundled plugin that reads the home all land under Rumi's own directory. Nothing resolves `~/.dsh`, which belongs to DeepSeek Harness.
 
 ## Build
 
@@ -51,11 +46,9 @@ export npm_execpath="$PWD/node_modules/pnpm/bin/pnpm.mjs"
 node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64 --unsigned
 ```
 
-Artifacts land in `apps/rumi/.desktop-build/targets/mac-arm64/unsigned-artifacts/`
-(`Rumi.app` and a `.dmg`).
+Artifacts land in `apps/rumi/.desktop-build/targets/mac-arm64/unsigned-artifacts/` (`Rumi.app` and a `.dmg`).
 
-Distribution builds need a Developer ID plus notarization credentials and drop
-`--unsigned`; that path is upstream's and unchanged.
+Distribution builds need a Developer ID plus notarization credentials and drop `--unsigned`; that path is upstream's and unchanged.
 
 Before macOS code signing, Rumi scopes the copied Electron app and helper build UUIDs to their application identities. This keeps local-network permissions distinct from other installed Electron apps; see [Apple TN3178](https://developer.apple.com/documentation/technotes/tn3178-checking-for-and-resolving-build-uuid-problems). The packaging hook supports the separate arm64 and x64 targets and rejects unsupported executable formats. Executable debug symbols, if distributed, must carry the rewritten UUID too.
 
@@ -66,29 +59,21 @@ cp -R apps/rumi/.desktop-build/targets/mac-arm64/unsigned-artifacts/mac-arm64/Ru
 open -a /Applications/Rumi.app
 ```
 
-Launch from Finder. If you launch from inside a DSH shell, unset
-`ELECTRON_RUN_AS_NODE` first — the harness sets it for its own children, and
-Electron then runs as plain Node and exits silently.
+Launch from Finder. If you launch from inside a DSH shell, unset `ELECTRON_RUN_AS_NODE` first — the harness sets it for its own children, and Electron then runs as plain Node and exits silently.
 
 ## Moving an earlier install
 
-Builds before Rumi owned `~/.rumi` kept their profile and state under `~/.dsh`,
-beside DeepSeek Harness. Move that data once before launching a newer build, or the
-app opens empty:
+Builds before Rumi owned `~/.rumi` kept their profile and state under `~/.dsh`, beside DeepSeek Harness. Move that data once before launching a newer build, or the app opens empty:
 
 ```sh
 node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/migrate-rumi-home.ts
 ```
 
-It moves the profile, Sessions, storages, and Print Studio state, copies the
-credentials and the Live Voice key, and repoints the profile's Session and storage
-roots. Each path moves only when Rumi's home does not already hold it, so rerunning is
-safe. The shared Python and Node runtimes are not copied; the app provisions them under
-`~/.rumi/dsh-runtimes` the first time a task asks for them.
+It moves the profile, Sessions, storages, and Print Studio state, copies the credentials and the Live Voice key, and repoints the profile's Session and storage roots. Each path moves only when Rumi's home does not already hold it, so rerunning is safe. The shared Python and Node runtimes are not copied; the app provisions them under `~/.rumi/dsh-runtimes` the first time a task asks for them.
 
 ## Bundled plugins
 
-`apps/rumi/brand/` holds the packages Rumi carries inside its own runtime and enables in every new profile. `@rumi/brand` draws the wordmark and owns the Live Voice key page; `@rumi/live-voice` adds full-duplex voice, and contributes the project's instructions to the voice model through `ctx.liveVoice`. Packaging installs them beside `dsh` and declares them in the bundled installation manifest, so the profile resolves them without a package manager. The key page appears as a built-in card on the Plugins page (Plugins → Live Voice) and writes the key file the voice plugin reads (`~/.rumi/live-voice.key`).
+`apps/rumi/brand/` holds the packages Rumi carries inside its own runtime and enables in every new profile. `@rumi/brand` draws the wordmark and owns the Live Voice key page; `@rumi/settings` exposes the stock settings dialog and Plugins page through Rumi → Settings… (⌘,) and Rumi → Plugins…. `@rumi/live-voice` adds full-duplex voice and contributes the project's instructions through `ctx.liveVoice`. Packaging installs these bundles beside `dsh` and declares them in the bundled installation manifest, so the profile resolves them without a package manager. See [native settings integration](apps/rumi/brand/settings/README.md) for the menu wiring.
 
 A package that ships skills keeps them at `skills/<name>/SKILL.md` and publishes them by mounting the stock `@deepseek-ai/dsh-skill-filesystem` provider on that directory, so the frontmatter is parsed and the body loads on demand. `@rumi/print-studio` is the reference: `skills/print-studio-setup/` with a `providerName` of its own and `includeDefaultRoots` off.
 
@@ -136,3 +121,146 @@ Because the person will eventually drag objects themselves, placement belongs to
 Pass a build volume when the scene is headed for a printer: the panel then draws the plate and the checks add fit, a suggested scale, whether a rotation would fit, and an explicit pending slicer check. The conservative H2D two-nozzle envelope is 300 × 320 × 320 mm. Checks cover fit, flat or degenerate geometry, duplicate faces, open or non-manifold edges, inconsistent winding, disconnected shells, and possible overhangs. The exact printer profile, material, plate, nozzle clearances, thin walls, self-intersections, and actual slicability still require slicer verification. Geometry checks never grant print readiness.
 
 The viewer accepts editable Three.js models through `viewer_load`; see the [model interface](apps/rumi/brand/print-studio/README.md#editable-threejs-models). STL imports retain a 20 MiB file limit and 200,000-triangle cap. For STL imports, the host publishes canonical binary STL and measures geometry once per command. Editable Three.js models are built and measured in the renderer. Scenes are session-scoped, held in memory for up to eight conversations, and cleared when the plugin unloads. Three.js is bundled privately by the plugin’s client build; no shared DSH package changes are needed. Rebuild that bundle after renderer edits (`pnpm --filter dsh-rumi run build:print-studio-client`); Rumi’s build and packaging preparation run it automatically.
+
+## Plugin UI requirements
+
+Every Rumi plugin follows the stock plugin-settings surface; a bespoke form is a regression even when it works. These rules apply to every plugin under `apps/rumi/brand/**`.
+
+- Register the settings page as `plugins.item` in the client half. The page's `view === 'summary'` returns one plain sentence; `view === 'page'` returns the form. The card title comes from the registration label.
+- Build the page from the shared primitives: `SettingsForm`, `SettingsValueField`, `SettingsSecretField`, `Switch`, `Button`, and `Tag` from `@deepseek-ai/dsh-client-ui-primitives`. Do not hand-roll inputs, buttons, save bars, labels, or status tags.
+- Use `SettingsForm`'s `state`, `labels`, `onSave`, and `onDiscard` for staging and saving. The form's footer is the only save control.
+- Use theme tokens (`var(--dsw-alias-…)`) or shared component styles, never literal colors and ad-hoc spacing.
+- Put every visible string in a `ctx.locale` dictionary with `en` and `zh`; never inline copy in the component.
+- Prefer automatic discovery and app-owned state over a setup form. Ask only for a fact that cannot be discovered, and keep secrets in `ctx.credentials`, never in the profile patch or a settings response.
+
+## Build constraints
+
+Environment traps, all of them real:
+
+- **macOS 27 SDK** — the native addon fails to link; pin `MacOSX15.sdk`.
+- **`npm_execpath`** — `package-target` spawns `node $npm_execpath`, and a standalone pnpm binary is not a JS file. Point it at `node_modules/pnpm/bin/pnpm.mjs`.
+- **`ELECTRON_RUN_AS_NODE=1`** — every DSH shell sets it. Launch with `env -u ELECTRON_RUN_AS_NODE open -a …`, or Electron runs as plain Node and exits 0 in silence. This costs an hour if forgotten.
+- **Commit hooks** — upstream lefthook checks translation pairing and fails on a fork. `git commit --no-verify` is expected here.
+
+## Verifying UI changes
+
+Screen recording is denied to the agent shell, so `screencapture` fails. Verify the rendered DOM instead:
+
+```sh
+env -u ELECTRON_RUN_AS_NODE "/Applications/Rumi.app/Contents/MacOS/Rumi" \
+  --remote-debugging-port=9222 &
+curl -s http://127.0.0.1:9222/json/list   # webSocketDebuggerUrl
+```
+
+Then drive `Runtime.evaluate` over that socket (`ws` lives in `node_modules/.pnpm/ws@*/node_modules/ws`) and read `document.querySelector…`. This is how the sidebar layout was confirmed: the More button's ancestry ends in `footArea`, no `nav` renders, and its menu reads "Plugins | Automation tasks".
+
+Two traps that produced false confidence here:
+
+- `pkill -f "MacOS/Rumi$"` does not match an instance launched with extra argv. Kill with `pkill -9 -f "Rumi.app/Contents"` and confirm `pgrep` is empty, or you will keep looking at the old build.
+- The packaged app bundles `apps/rumi/lib` and the workspace packages as sealed tarballs. Editing `apps/rumi/src/preload-app.ts` or any `packages/client/*` source requires `pnpm --filter dsh-rumi run build` and `pnpm run build:official` respectively before packaging; the root `pnpm build` rebuilds neither. The mesh viewer's browser half is the same story: `apps/rumi/brand/print-studio/viewer/` is bundled into `lib/client.js` by `pnpm --filter dsh-rumi run build`, not served as source.
+
+## Verify before claiming done
+
+1. `Rumi.app` is in `/Applications` and `codesign -v` passes.
+2. It launches and stays running (`pgrep -f "MacOS/Rumi$"`).
+3. `~/Library/Application Support/dsh-rumi` and `~/.rumi/profiles/rumi` exist, and the profile patch carries the Rumi policy block.
+4. `~/.rumi/sessions` grows when Rumi runs, and no Rumi process has a path under `~/.dsh`: `lsof -p $(pgrep -f "MacOS/Rumi$") | grep -c '\.dsh/'` is zero.
+5. The stock app still builds: `pnpm --filter @deepseek-ai/dsh-desktop run build`.
+
+## Repository layout reference
+
+```
+vendor/      Vendored Cordis (vendor/README.md)
+packages/    @deepseek-ai/dsh-<pkg> workspaces at packages/<group>/<pkg>/
+  core/                 agent/session API
+  api/                  remote BFF
+  typert/               type graphs
+  llm/                  model providers
+  shell/                command execution
+  subprocess/           child-process management
+  ssh/                  SSH execution providers
+  terminal/             persistent terminals
+  ptc-runtime/          PTC execution
+  sandbox/              process confinement
+  deliverables/         turn deliverables
+  fs/                   filesystem access
+  lsp/                  language servers
+  skill/                skill loading
+  web/                  search/fetch tools
+  computer-use/         computer interaction
+  browser-use/          browser interaction
+  compaction/           context compaction
+  context/              request context
+  subagent/             delegated agents
+  jobs/                 background jobs
+  bundle/               profile bundles
+  workflow/             workflow execution
+  todo/                 todo_write tool
+  plan/                 logged planning
+  goal/                 session goals
+  schedule/             scheduled follow-ups
+  preset/               agent composition
+  guard/                loop/tool guards
+  extensions/           runtime self-modification
+  session/              durable sessions
+  session-query/        browsing/search/export
+  attachment/           binary attachments
+  spill/                output spill
+  storage/              non-session storage
+  workspace/            workspace entities
+  feedback/             human feedback
+  identity/             anonymous identity
+  settings/             user settings
+  credentials/          credentials/authorization
+  acp/                  automation-only ACP
+  interaction/          human interaction
+  boot/                 application boot
+  sdk/                  JSON-RPC SDK
+  host/                 GUI host
+  client/               GUI client
+  mcp/                  external tools
+  experimental/         evaluated capabilities without a product-support commitment
+  test-support/         test infrastructure
+  util/                 zero-dependency utilities
+python/      Python SDK/runtime (python/README.md)
+native/      @deepseek-ai/node-addon-system source (native/README.md)
+benchmarks/  performance gates
+.agents/     Agent workflows/notes
+docs/        Documentation (docs/AGENTS.md)
+scripts/     gates and generators
+website/     VitePress documentation projection
+```
+
+Package groups: [packages/README.md](packages/README.md). Classification requirements remain in [AGENTS.md](AGENTS.md#repository-layout).
+
+## Shared development commands
+
+```sh
+pnpm install            # pnpm workspaces, node ^22.19 || >=24
+pnpm run clean           # remove build outputs and safe residue from deleted packages
+pnpm run test           # unit tests
+pnpm run test:coverage  # CI coverage gate: per-file 100% on packages/*/*/src
+pnpm run test:e2e       # real-API tests; self-skip without DEEPSEEK_API_KEY
+pnpm run test:expected  # owner-local process expectations
+pnpm run test:snapshot  # keyless recorded-session replay through shipped profiles; filter: -t <name>
+pnpm run test:snapshot:record  # re-record expected outputs (needs key)
+pnpm run typecheck
+pnpm run lint
+pnpm run duplication    # cross-file TypeScript clone detection
+pnpm run build          # build:artifacts + build:check, concurrently
+pnpm run build:artifacts # artifacts: tsc emits lib/types, tsdown bundles runtime, Web
+pnpm run build:check    # typecheck aggregate tests/scripts against current build:artifacts output
+pnpm run hygiene        # publint + workspace/package/dependency checks + NodeNext consumer check
+pnpm run check:windows-wine  # ONLY when diagnosing a known Windows failure (needs wine); CI owns this signal
+pnpm run doc-sync       # documentation gates (scripts/run-gates.ts)
+pnpm run test:docs      # quick documentation checks (no build; doc-quick aggregate)
+pnpm run website:build  # VitePress build (doubles as dead-link check)
+pnpm dsh --profile headless "task"  # run one task from source (needs DEEPSEEK_API_KEY)
+pnpm run demo:ptc -- "task"  # headless PTC mode run (needs key)
+pnpm run dev:web | dev:desktop  # build:artifacts, then launch; Web also rebuilds client bundles on edits. start:web | start:desktop skip the build
+make web|dev-web|desktop|dev-desktop|build  # the same commands; ARGS='--no-open' forwards options
+```
+
+## Prose requirements
+
+Comments and docs state complete contracts and context, not reasoning transcripts. Use direct, concrete terms. Do not use metaphors. Before writing `contract`, `boundary`, or `shape`, ask whether a more exact term names the subject: write `response fields`, `JSON validation`, or `ESM exports` instead of `response shape`, `validation boundary`, or `module shape`. Keep `contract` for preconditions, postconditions, invariants, compatibility promises, and other obligations that callers, callees, implementers, providers, producers, or consumers rely on. Keep a literal process, wire, security, transaction, or lifecycle boundary. Do not narrate control flow or tests, preserve review history, or restate code. Keep behavior, failure, timing, ownership, and safe-use facts; link the rationale. Use [dsh-prose-standard](.agents/skills/dsh-prose-standard/SKILL.md) for decisions. Wire mechanically checkable invariants into an executed top-level gate and prove each changed acceptance path rejects an invalid case. Use narrow, justified exceptions instead of disabling a rule globally.

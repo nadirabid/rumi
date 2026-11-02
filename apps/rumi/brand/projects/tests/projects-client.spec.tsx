@@ -233,3 +233,16 @@ it('shows the opened project name in the header and keeps New available', async 
   expect(screen.getByRole('button', { name: COPY.new })).toBeTruthy()
   expect(screen.getByRole('button', { name: COPY.back })).toBeTruthy()
 })
+
+it('loads saved covers as lazy images and falls back when a cover cannot be read', async () => {
+  const view = fixture({ projects: [project({ thumbnailVersion: '42' })] })
+  const { container } = render(view.view('main:projects'))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  const image = container.querySelector('.rumi-project-cover img')!
+  expect(image.getAttribute('src')).toBe('/api/rumi-projects/thumbnail?projectId=p1&v=42')
+  expect(image.getAttribute('loading')).toBe('lazy')
+  expect(container.querySelector('canvas')).toBeNull()
+  fireEvent.error(image)
+  expect(container.querySelector('.rumi-project-cover img')).toBeNull()
+  expect(container.querySelector('.rumi-project-initial')).not.toBeNull()
+})

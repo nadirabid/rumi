@@ -9,7 +9,7 @@
  * This half owns the filesystem and nothing else: the browser creates the DSH
  * session (it has the session controller) and records the id here.
  */
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile, stat, rename, unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -127,7 +127,7 @@ function normalizeName(name) {
 /**
  * The project directory store.
  * @param {string} root - Directory that holds one subdirectory per project.
- * @returns {{list: () => Promise<object[]>, create: (name?: string) => Promise<object>, attachSession: (id: string, sessionId: string) => Promise<object>}} the store.
+ * @returns {object} Project listing, creation, session association, and persistent PNG cover operations.
  */
 export function createProjectStore(root) {
   const directoryOf = (id) => {
@@ -136,10 +136,13 @@ export function createProjectStore(root) {
   }
   const read = async (id) => {
     const raw = await readFile(join(directoryOf(id), 'project.json'), 'utf8')
-    return { ...JSON.parse(raw), path: directoryOf(id) }
+    let thumbnailVersion = null
+    try { thumbnailVersion = String((await stat(join(directoryOf(id), '.preview.png'))).mtimeMs) }
+    catch (error) { if (error.code !== 'ENOENT') throw error }
+    return { ...JSON.parse(raw), path: directoryOf(id), thumbnailVersion }
   }
   const write = async (project) => {
-    const { path: _, ...metadata } = project
+    const { path: _, thumbnailVersion: _thumbnail, ...metadata } = project
     await writeFile(join(directoryOf(project.id), 'project.json'), `${JSON.stringify(metadata, undefined, 2)}\n`)
     return { ...metadata, path: directoryOf(project.id) }
   }
@@ -209,6 +212,24 @@ export function createProjectStore(root) {
       }
       return write({ ...project, path: directory })
     },
+    /** Read the saved cover; project metadata must exist before serving a file. */
+    async thumbnail(id) {
+      await read(id)
+      return readFile(join(directoryOf(id), '.preview.png'))
+    },
+    /** Atomically replace a session's project cover without rewriting project metadata. */
+    async saveThumbnail(sessionId, bytes) {
+      const project = (await this.list()).find(item => item.sessionIds.includes(sessionId))
+      if (!project) return false
+      const temporary = join(directoryOf(project.id), `.preview-${randomUUID()}.tmp`)
+      try {
+        await writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 })
+        await rename(temporary, join(directoryOf(project.id), '.preview.png'))
+      } finally {
+        await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error })
+      }
+      return true
+    },
     async attachSession(id, sessionId, workspaceId) {
       const project = await read(id)
       if (!project.sessionIds.includes(sessionId)) project.sessionIds.push(sessionId)
@@ -265,6 +286,35 @@ export function apply(ctx, config = {}) {
         instructions: projectName => renderProjectInstructions({ name: projectName, templates }),
       }),
     }, 201)
+  })
+  route('/thumbnail', ['GET', 'POST'], async (request) => {
+    const url = new URL(request.url)
+    if (request.method === 'POST') {
+      const sessionId = url.searchParams.get('sessionId')
+      if (!sessionId) return json({ error: 'session_required' }, 400)
+      const bytes = Buffer.from(await request.arrayBuffer())
+      // Only the fixed-size viewport PNG is accepted; never serve arbitrary uploaded content.
+      if (bytes.length < 24 || bytes.length > 512 * 1024
+        || !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+        || bytes.toString('ascii', 12, 16) !== 'IHDR'
+        || bytes.readUInt32BE(16) !== 480 || bytes.readUInt32BE(20) !== 320) {
+        return json({ error: 'invalid_thumbnail' }, 400)
+      }
+      return await store.saveThumbnail(sessionId, bytes)
+        ? new Response(null, { status: 204 }) : json({ error: 'project_not_found' }, 404)
+    }
+    try {
+      const bytes = await store.thumbnail(url.searchParams.get('projectId') ?? '')
+      return new Response(bytes, { headers: {
+        'content-type': 'image/png', 'cache-control': 'private, no-cache',
+        'x-content-type-options': 'nosniff',
+      } })
+    } catch (error) {
+      if (error.code === 'ENOENT' || !/^[A-Za-z0-9-]+$/u.test(url.searchParams.get('projectId') ?? '')) {
+        return json({ error: 'thumbnail_not_found' }, 404)
+      }
+      throw error
+    }
   })
   route('/session', ['POST'], async (request) => {
     const body = await request.json().catch(() => ({}))

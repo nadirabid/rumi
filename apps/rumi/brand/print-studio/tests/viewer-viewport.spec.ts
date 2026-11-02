@@ -14,7 +14,11 @@ vi.mock('three', async (importOriginal) => {
           width: 0, height: 0,
           setAttribute: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), remove: vi.fn(),
         }
-        this.setPixelRatio = vi.fn()
+        this.domElement.toDataURL = vi.fn(() => 'data:image/png;base64,cG5n')
+        this.ratio = 1
+        this.setPixelRatio = vi.fn(value => { this.ratio = value })
+        this.getPixelRatio = () => this.ratio
+        this.getSize = target => target.set(this.domElement.width, this.domElement.height)
         this.setSize = (width: number, height: number) => { this.domElement.width = width; this.domElement.height = height }
         this.render = vi.fn()
         this.dispose = vi.fn()
@@ -192,4 +196,30 @@ it('frames the current design before applying a requested camera angle', async (
   expect(camera.position.y).toBeLessThan(-100)
   expect(camera.position.z).toBeCloseTo(15)
   viewport.dispose()
+})
+
+
+it('captures loaded geometry at cover size and restores the viewport even when encoding fails', () => {
+  const viewport = createViewport(container(), vi.fn())
+  expect(viewport.thumbnail()).toBeNull()
+  viewport.apply({ volume: { x: 200, y: 200, z: 200 }, objects: [object('cover')] })
+  state.resize()
+  const scene = rendered()
+  const geometry = meshes()[0].geometry
+  const camera = state.renderer.render.mock.calls.at(-1)[1]
+  const position = camera.position.clone()
+  state.renderer.domElement.toDataURL.mockImplementation(() => {
+    expect(state.renderer.domElement.width).toBe(480)
+    expect(state.renderer.domElement.height).toBe(320)
+    expect(scene.children.filter(node => node.isLineSegments).every(node => !node.visible)).toBe(true)
+    throw new Error('encoding failed')
+  })
+  expect(() => viewport.thumbnail()).toThrow('encoding failed')
+  expect(state.renderer.domElement.width).toBe(400)
+  expect(state.renderer.domElement.height).toBe(300)
+  expect(scene.children.every(node => node.visible)).toBe(true)
+  expect(meshes()[0].geometry).toBe(geometry)
+  expect(camera.position.equals(position)).toBe(true)
+  viewport.dispose()
+  expect(viewport.thumbnail()).toBeNull()
 })

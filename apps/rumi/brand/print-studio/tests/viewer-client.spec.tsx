@@ -8,11 +8,11 @@ import { en, zh } from '../viewer/locales.js'
 import { encodeStl } from '../viewer/stl.js'
 
 vi.mock('../viewer/viewer.module.css', () => ({ default: '' }))
-const viewport = vi.hoisted(() => ({ apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn() }))
+const viewport = vi.hoisted(() => ({ apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
 vi.mock('../viewer/viewport/index.js', () => ({
   createViewport: (...args: unknown[]) => {
     viewport.create(...args)
-    return { apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose }
+    return { thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose }
   },
 }))
 
@@ -29,6 +29,7 @@ beforeEach(() => {
   viewport.create.mockClear()
   viewport.apply.mockClear()
   viewport.dispose.mockClear()
+  viewport.thumbnail.mockClear()
 })
 afterEach(async () => {
   cleanup()
@@ -196,4 +197,16 @@ it('reports a non-Error thrown by model code without losing the preview', async 
   await settle()
   expect(screen.getByRole('alert').textContent).toBe(en.buildFailed)
   expect(screen.getByTestId('print-viewport')).toBeTruthy()
+})
+
+
+it('captures once after a scene settles and does not recapture unchanged polling', async () => {
+  const view = fixture({ scene: scene([object()]) })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  await settle(800)
+  expect(viewport.thumbnail).toHaveBeenCalledTimes(1)
+  expect(view.fetch.mock.calls.some(([url]) => String(url).includes('/rumi-projects/thumbnail?sessionId=session-a'))).toBe(true)
+  await settle(4000)
+  expect(viewport.thumbnail).toHaveBeenCalledTimes(1)
 })

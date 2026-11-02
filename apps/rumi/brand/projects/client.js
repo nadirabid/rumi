@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
 .rumi-projects-count{margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary)}
 .rumi-projects-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:40px 24px;align-items:start}
 .rumi-project{display:flex;flex-direction:column;gap:8px;min-width:0;padding:0;border:0;background:none;text-align:left;cursor:pointer;color:inherit}
-/* Empty projects appear as blank boards until a project preview is available. */
+.rumi-project-cover img{display:block;width:100%;height:100%;object-fit:contain}
 .rumi-project-cover{box-sizing:border-box;position:relative;display:flex;align-items:center;justify-content:center;width:100%;aspect-ratio:3/2;border-radius:12px;border:1px solid var(--dsw-alias-border-l2);overflow:hidden;background:radial-gradient(circle,color-mix(in srgb,var(--dsw-alias-label-tertiary) 18%,transparent) .6px,transparent .7px) 0 0/12px 12px,var(--dsw-alias-bg-layer-1);transition:border-color 140ms ease,box-shadow 140ms ease}
 .rumi-project-initial{width:40px;height:30px;border:1px solid var(--dsw-alias-border-l2);border-radius:4px;background:var(--dsw-alias-bg-base);box-shadow:0 2px 6px color-mix(in srgb,var(--dsw-alias-label-primary) 5%,transparent)}
 .rumi-project:hover .rumi-project-cover{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 55%,var(--dsw-alias-border-l2));box-shadow:0 8px 20px rgba(0,0,0,.07);transform:none}
@@ -190,6 +190,7 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
         const list = createProjectList(ctx);
 
         function ProjectCard({ project, t, onOpen }) {
+          const [failedImage, setFailedImage] = React.useState(null);
           const updated = new Date(project.updatedAt);
           const when = Number.isNaN(updated.valueOf()) ? '' : updated.toLocaleDateString();
           return h('button', {
@@ -197,7 +198,11 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
             'aria-label': project.name,
           },
             h('span', { className: 'rumi-project-cover', 'aria-hidden': 'true' },
-              h('span', { className: 'rumi-project-initial' })),
+              project.thumbnailVersion && failedImage !== project.thumbnailVersion
+                ? h('img', { src: `${ROUTE}/thumbnail?projectId=${encodeURIComponent(project.id)}&v=${encodeURIComponent(project.thumbnailVersion)}`,
+                  alt: '', width: 480, height: 320, loading: 'lazy', decoding: 'async',
+                  onError: () => setFailedImage(project.thumbnailVersion) })
+                : h('span', { className: 'rumi-project-initial' })),
             h('p', { className: 'rumi-project-name' }, project.name),
             when === '' ? null : h('p', { className: 'rumi-project-meta' }, t('updated', { when })),
           );

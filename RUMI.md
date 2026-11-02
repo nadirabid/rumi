@@ -125,6 +125,8 @@ The setup status checks MQTT authentication, not authorization to start a print.
 
 ### Mesh preview
 
+Document tabs use rounded glass controls, with separate space for the title and close button. Tabs size to their contents up to 280px; longer titles fade only at the clipped edge, and an overflowing tab strip scrolls horizontally.
+
 The **3D preview** tab shows a scene the agent builds for the current conversation. Open it from the right sidebar’s new-tab guide, ask Rumi for it, or open an STL file link. Coordinates are millimetres and the model is Z up. The scene fills the pane, with drag-to-orbit and scroll-to-zoom; a small pill appears only when the checks found something. Only an agent adds objects; there is no file picker, so the person asks Rumi.
 
 The scene works like a Blender file. A mesh datablock is the geometry; an object places it with a scale, a rotation, and a position; opening the same file twice places a second object that shares the same geometry. `mesh_open` adds the first object (and the build volume, when given), `mesh_transform` places one, `mesh_remove` takes one out, and `mesh_state` reads the scene back. Scaling and turning happen around the object’s centre and the position says where its bottom centre sits, so a part that grows or turns upward keeps its base on the plate. Placement is a command, not an edit: turning or resizing never rewrites the mesh or the file, undo is the earlier scene, and the panel updates in place with the camera left where the person put it.

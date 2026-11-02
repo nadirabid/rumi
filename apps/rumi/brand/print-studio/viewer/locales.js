@@ -1,5 +1,8 @@
 /** Copy shared by the mesh preview tab and the STL document preview. */
 export const en = {
+  models: 'Models',
+  catalogFailed: 'Saved models could not be loaded. Ask Rumi to check the model files.',
+  selectionFailed: 'This model could not be opened. Try again or ask Rumi to check its files.',
   title: '3D preview',
   buildFailed: 'The model could not update. Ask Rumi to fix the design.',
   sourceFailed: 'The design files could not be read. Ask Rumi to restore them.',
@@ -17,6 +20,9 @@ export const en = {
 }
 
 export const zh = {
+  models: '模型',
+  catalogFailed: '无法加载已保存的模型。请让 Rumi 检查模型文件。',
+  selectionFailed: '无法打开此模型。请重试，或让 Rumi 检查模型文件。',
   title: '3D 预览',
   buildFailed: '模型无法更新。请让 Rumi 修复设计',
   sourceFailed: '无法读取设计文件。请让 Rumi 恢复文件',

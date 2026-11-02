@@ -26,7 +26,7 @@ import { applyViewer } from './viewer/host.js'
 export const name = 'print-studio'
 
 /** Services this host half reaches. */
-export const inject = ['connection', 'tools', 'credentials', 'fs', 'workingDirectory']
+export const inject = ['connection', 'tools', 'credentials', 'fs', 'workingDirectory', 'sessionQuery']
 
 const ROUTE = '/api/print-studio'
 const SKILL_NAME = 'print-studio-setup'

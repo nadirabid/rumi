@@ -85,6 +85,28 @@ window.__ModuleLoader__.load({
       return () => { style.remove(); };
     }
 
+    /** Rumi document tabs reserve separate space for their title and close control. */
+    function styleDocumentTabs() {
+      const style = document.createElement('style');
+      style.id = 'rumi-document-tabs';
+      style.textContent = `
+[data-sidebar-right-session] [data-dockkit-strip]{box-sizing:border-box;height:auto;min-height:50px;padding:4px 8px 4px var(--dsh-dockkit-strip-inline-start,8px)}
+[data-sidebar-right-session] [data-dockkit-strip-tabs]{gap:8px;padding:4px}
+[data-sidebar-right-session] [data-dockkit-strip-tabs]>div:not([data-dockkit-tab]):not([data-dockkit-caret]){display:none}
+[data-sidebar-right-session] [data-dockkit-strip] [data-dockkit-tab]{box-sizing:border-box;flex:0 0 auto;width:max-content;min-width:0;max-width:280px;height:34px;gap:8px;padding:0 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:999px;corner-shape:round;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 78%,transparent);backdrop-filter:blur(24px) saturate(180%);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--dsw-alias-label-primary-foreground) 55%,transparent),0 1px 3px var(--dsw-alias-bg-mask-2)}
+[data-sidebar-right-session] [data-dockkit-strip] [data-dockkit-tab][aria-selected="true"]{background:color-mix(in srgb,var(--dsw-alias-label-primary) 6%,var(--dsw-alias-bg-layer-2));color:var(--dsw-alias-label-primary)}
+[data-sidebar-right-session] [data-dockkit-strip] [data-dockkit-tab]:hover{background:var(--dsw-alias-interactive-bg-hover)}
+[data-sidebar-right-session] [data-dockkit-strip] [data-dockkit-tab-title]{mask-image:none}
+[data-sidebar-right-session] [data-dockkit-strip] [data-dockkit-tab-title][data-dockkit-tab-clipped]{mask-image:linear-gradient(to right,var(--dsw-alias-label-primary) calc(100% - 16px),transparent)}
+[data-sidebar-right-session] [data-dockkit-strip] [data-dockkit-tab-close]{position:static;flex:none;width:20px;height:20px;opacity:1;pointer-events:auto;border-radius:50%;corner-shape:round}
+[data-sidebar-right-session] [data-dockkit-strip]>button{width:34px;height:34px;border:1px solid var(--dsw-alias-border-l2);border-radius:50%;corner-shape:round;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 78%,transparent);box-shadow:0 1px 3px var(--dsw-alias-bg-mask-2)}
+[data-sidebar-right-session] [data-dockkit-strip] [data-dockkit-tab]:focus-visible,[data-sidebar-right-session] [data-dockkit-strip] button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}
+@media(pointer:coarse){[data-sidebar-right-session] [data-dockkit-strip] [data-dockkit-tab],[data-sidebar-right-session] [data-dockkit-strip]>button{min-height:44px}[data-sidebar-right-session] [data-dockkit-strip] [data-dockkit-tab-close]{width:28px;height:28px}}
+`;
+      document.head.append(style);
+      return () => { style.remove(); };
+    }
+
     /**
      * The Session header's open-in-finder split button and its overflow menu
      * (Session download and feedback) are developer affordances. Shadowing
@@ -232,6 +254,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       apply(ctx) {
         ctx.effect(hideChrome, 'rumi-brand: hide developer chrome');
+        ctx.effect(styleDocumentTabs, 'rumi-brand: document tab glass');
         ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'rumi-brand: live voice copy');
         ctx.slots.inject('conversation.session.header.utilities', function* () {
           yield ctx.slots.register({

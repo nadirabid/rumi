@@ -1,4 +1,14 @@
 .rumi-print-viewer{position:relative;display:flex;flex-direction:column;width:100%;height:100%;min-height:0;min-width:0;overflow:hidden;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base)}
+.rumi-print-viewer .pv-models{display:flex;flex-wrap:wrap;gap:8px;padding:4px 12px 8px;flex-shrink:0}
+.rumi-print-viewer .pv-model-button{display:block;max-width:100%;height:34px;padding:0 14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:999px;corner-shape:round;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 78%,transparent);backdrop-filter:blur(24px) saturate(180%);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--dsw-alias-label-primary-foreground) 55%,transparent),0 1px 3px var(--dsw-alias-bg-mask-2);transition:background-color 120ms ease,box-shadow 120ms ease}
+.rumi-print-viewer .pv-model-button[aria-pressed="true"]{background:color-mix(in srgb,var(--dsw-alias-label-primary) 6%,var(--dsw-alias-bg-layer-2));color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l1);font-weight:500}
+.rumi-print-viewer .pv-model-button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--dsw-alias-label-primary-foreground) 55%,transparent),0 2px 5px var(--dsw-alias-bg-mask-2)}
+.rumi-print-viewer .pv-model-button:active:not(:disabled){background:var(--dsw-alias-interactive-bg-active);box-shadow:inset 0 1px 2px var(--dsw-alias-bg-mask-2)}
+.rumi-print-viewer .pv-model-button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){.rumi-print-viewer .pv-model-button{transition:none}}
+@media(pointer:coarse){.rumi-print-viewer .pv-model-button{min-height:44px}}
+.rumi-print-viewer .pv-content{position:relative;flex:1;min-height:0}
+.rumi-print-viewer .pv-catalog-error{margin:0;padding:8px 12px;font-size:12px;color:var(--dsw-alias-state-error-primary)}
 .rumi-print-viewer .pv-stage{position:absolute;inset:0;overflow:hidden;touch-action:none}
 .rumi-print-viewer .pv-stage canvas{display:block;width:100%;height:100%}
 .rumi-print-viewer .pv-empty{display:flex;flex-direction:column;gap:6px;max-width:260px;margin:auto;padding:24px;text-align:center}

@@ -12,6 +12,7 @@ import { LIVE_ENDPOINT, parseEvent, sessionStart } from './protocol.js';
 export class LiveClient {
   #socket = null;
   #opened = false;
+  #closing = null;
 
   /**
    * @param {object} options
@@ -130,20 +131,17 @@ export class LiveClient {
     return this.send({ type: 'session.input_audio.append', audio: base64Pcm16 });
   }
 
+  /** Release the transport and resolve only after its close event. */
   close() {
-    if (!this.#socket) return;
+    if (this.#closing) return this.#closing;
     const socket = this.#socket;
-    this.#socket = null;
+    if (!socket || socket.readyState === WebSocket.CLOSED) return Promise.resolve();
     this.#opened = false;
-    try {
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'session.close' }));
-    } catch {
-      // closing anyway
-    }
-    try {
-      socket.close();
-    } catch {
-      // already closed
-    }
+    this.#closing = new Promise((resolve) => {
+      socket.once('close', resolve);
+      // Local teardown must not wait for an unresponsive peer's close handshake.
+      socket.terminate();
+    });
+    return this.#closing;
   }
 }

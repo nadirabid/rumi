@@ -6,19 +6,21 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    ".": "./lib/index.js",
+    ".": "./src/index.js",
     "./client": "./client/index.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
   "files": [
-    "lib",
+    "src",
     "client",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
     "README.md",
+    "README.zh.md",
+    "README.i18n.yaml",
     "LICENSE"
   ],
   "dsh": {

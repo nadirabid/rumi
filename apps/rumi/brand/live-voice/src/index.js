@@ -15,19 +15,22 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import z from '@deepseek-ai/schemastery';
+import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment';
+import { SessionId } from '@deepseek-ai/dsh-session';
+import { conversationContext, conversationText, contextChunks } from './context.js';
 import { LiveBridge } from './bridge.js';
 import { composeInstructions, createLiveVoiceRegistry } from './registry.js';
 import { LiveClient } from './live-client.js';
-import { DEFAULT_INSTRUCTIONS, DEFAULT_MODEL, DEFAULT_VOICE, LIVE_ENDPOINT, VOICES } from './protocol.js';
+import { DEFAULT_INSTRUCTIONS, DEFAULT_MODEL, DEFAULT_VOICE, LIVE_ENDPOINT } from './protocol.js';
 
 export const name = 'live-voice';
 // bundle-rev: 2
 
-export const inject = ['connection', 'sessionController', 'sessions'];
+export const inject = ['connection', 'sessionController', 'sessions', 'credentials'];
 
 const ROUTE = '/api/live-voice';
 
@@ -47,6 +50,8 @@ export const Config = z.object({
   voice: z.string(),
   /** Standing instructions for the voice model. */
   instructions: z.string(),
+  /** Maximum characters of recent session conversation included at startup. */
+  contextMaxCharacters: z.natural().min(1).max(64_000).default(16_000),
   /** Hard cap on one live session, in minutes. */
   maxSessionMinutes: z.number(),
   /** Append transport diagnostics to this file; `~` is expanded. */
@@ -66,8 +71,16 @@ export function apply(ctx, config) {
   const liveSessions = new Map();
   /** @type {Map<string, string>} One live session per DSH session, at most. */
   const liveIdBySession = new Map();
-  /** @type {{id: string, order: number, instructions?: Function}[]} */
-  const contributors = [];
+  const starting = new Set();
+  const requests = new Set();
+  const closing = new Set();
+  const lifetime = new AbortController();
+  ctx.effect(() => async () => {
+    lifetime.abort();
+    await Promise.all([...liveSessions.keys()].map(stop));
+    await Promise.allSettled([...requests]);
+    await Promise.allSettled([...closing]);
+  }, 'live-voice sessions');
 
 
   const registry = createLiveVoiceRegistry();
@@ -86,7 +99,13 @@ export function apply(ctx, config) {
         path: `${ROUTE}${path}`,
         methods,
         requestBody: 'buffered',
-        fetch,
+        fetch(request) {
+          if (lifetime.signal.aborted) return json({ error: 'live voice: stopped' }, 503);
+          const task = Promise.resolve().then(() => fetch(request));
+          requests.add(task);
+          void task.then(() => requests.delete(task), () => requests.delete(task));
+          return task;
+        },
       }),
       `live-voice: ${ROUTE}${path}`,
     );
@@ -99,27 +118,40 @@ export function apply(ctx, config) {
     // calls this again, and a live entry here would recurse.
     liveSessions.delete(liveId);
     if (liveIdBySession.get(entry.sessionId) === liveId) liveIdBySession.delete(entry.sessionId);
-    entry.close();
+    const task = entry.close();
+    closing.add(task);
+    void task.then(() => closing.delete(task), () => closing.delete(task));
+    return task;
   };
 
   register('/session', ['POST'], async (request) => {
     const body = await readJson(request);
     const sessionId = body?.sessionId;
     if (typeof sessionId !== 'string' || sessionId === '') return json({ error: 'live voice: no session id' }, 400);
-    const apiKey = await resolveApiKey(ctx, config);
-    debugLog(config, `start session=${sessionId} key=${apiKey ? 'yes' : 'no'}`);
-    if (!apiKey) return json({ error: `live voice: no OpenAI API key in ${config.apiKeyEnv ?? 'OPENAI_API_KEY'}` }, 503);
-    // One live session per Session: a second start replaces the first rather
-    // than leaving two sockets appending into the same conversation.
-    const existing = liveIdBySession.get(sessionId);
-    if (existing !== undefined) {
-      debugLog(config, `replacing live session ${existing} for session=${sessionId}`);
-      stop(existing);
-    }
+    if (starting.has(sessionId)) return json({ error: 'live voice: session is starting' }, 409);
+    starting.add(sessionId);
     try {
+      const apiKey = await resolveApiKey(ctx, config);
+      debugLog(config, `start session=${sessionId} key=${apiKey ? 'yes' : 'no'}`);
+      if (!apiKey) return json({ error: `live voice: no OpenAI API key in ${config.apiKeyEnv ?? 'OPENAI_API_KEY'}` }, 503);
+      // One live session per Session: a second start replaces the first rather
+      // than leaving two sockets appending into the same conversation.
+      const existing = liveIdBySession.get(sessionId);
+      if (existing !== undefined) {
+        debugLog(config, `replacing live session ${existing} for session=${sessionId}`);
+        await stop(existing);
+      }
+      const resolved = await ctx.sessionController.resolveAgent(SessionId(sessionId));
+      if ('error' in resolved) return json({ error: resolved.error.message }, 404);
+      const session = resolved.agent.session;
       const instructions = await compose(sessionId);
+      lifetime.signal.throwIfAborted();
       const liveId = randomUUID();
-      const entry = await createEntry({ ctx, config, logger, apiKey, sessionId, liveId, instructions, onClosed: () => stop(liveId) });
+      const entry = await createEntry({ ctx, config, logger, apiKey, sessionId, liveId, instructions, session, signal: lifetime.signal, onClosed: () => stop(liveId) });
+      if (lifetime.signal.aborted || entry.closed) {
+        await entry.close();
+        return json({ error: 'live voice: stopped' }, 503);
+      }
       liveSessions.set(liveId, entry);
       liveIdBySession.set(sessionId, liveId);
       return json({ liveId, model: config.model ?? DEFAULT_MODEL, voice: config.voice ?? DEFAULT_VOICE });
@@ -127,6 +159,8 @@ export function apply(ctx, config) {
       const message = error instanceof Error ? error.message : String(error);
       debugLog(config, `start-failed session=${sessionId} ${message}`);
       return json({ error: message }, 502);
+    } finally {
+      starting.delete(sessionId);
     }
   });
 
@@ -148,7 +182,7 @@ export function apply(ctx, config) {
   register('/close', ['POST'], async (request) => {
     const body = await readJson(request);
     debugLog(config, `close requested reason=${body?.reason ?? 'user'}`);
-    if (typeof body?.liveId === 'string') stop(body.liveId);
+    if (typeof body?.liveId === 'string') await stop(body.liveId);
     return new Response(null, { status: 204 });
   });
 
@@ -166,7 +200,7 @@ export function apply(ctx, config) {
       const candidate = typeof body?.apiKey === 'string' ? body.apiKey.trim() : '';
       if (candidate === '') return json({ error: 'live voice: empty key' }, 400);
       try {
-        writeFileSync(expandHome(keyFilePath(config)), candidate, { mode: 0o600 });
+        await ctx.credentials.set(credentialRef(config.apiKeyEnv ?? 'OPENAI_API_KEY'), candidate);
         debugLog(config, 'settings key saved from the UI');
       } catch (error) {
         return json({ error: error instanceof Error ? error.message : String(error) }, 500);
@@ -175,9 +209,8 @@ export function apply(ctx, config) {
     const key = await resolveApiKey(ctx, config);
     return json({
       hasKey: Boolean(key),
-      key: key ?? '',
-      hint: key === undefined ? '' : `${key.slice(0, 7)}…${key.slice(-4)}`,
-      file: keyFilePath(config),
+      hint: key === undefined ? '' : key.length < 12 ? '••••' : `${key.slice(0, 7)}…${key.slice(-4)}`,
+      file: '~/.rumi/.credentials.yaml',
     });
   });
 }
@@ -218,13 +251,17 @@ function narrate(ctx, sessionId, note) {
  * One live session: the GPT-Live socket, the bridge, and the event queue the
  * browser polls.
  */
-async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, instructions, onClosed }) {
+async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, instructions, session, signal, onClosed }) {
   const queue = [];
   let waiter = null;
   let isClosed = false;
   let muted = false;
+  let cap;
+  const turns = new Set();
   /** Stop the session-event narration; runs before the socket closes. */
   let stopNarration = () => {};
+  let stopContext = () => {};
+  const pendingContext = [];
 
   const push = (message) => {
     queue.push(message);
@@ -235,7 +272,9 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, ins
   const bridge = new LiveBridge({
     dispatch: (task) => {
       push({ type: 'status', state: 'thinking', detail: task.text });
-      void runHarnessTurn(ctx, sessionId, task, bridge, logger);
+      const turn = runHarnessTurn(ctx, sessionId, task, bridge, logger);
+      turns.add(turn);
+      void turn.then(() => turns.delete(turn));
     },
     commentary: (delegationId, content) => {
       live.send({ type: 'session.commentary.append', delegation_id: delegationId, content });
@@ -252,7 +291,7 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, ins
     url: config.endpoint ?? LIVE_ENDPOINT,
     model: config.model ?? DEFAULT_MODEL,
     voice: config.voice ?? DEFAULT_VOICE,
-    instructions,
+    instructions: `${instructions}\n\n${conversationContext(session, config.contextMaxCharacters ?? 16_000)}`,
     onEvent: (event) => {
       if (event.type === 'session.output_audio.delta') {
         push({ type: 'audio', data: event.delta });
@@ -262,7 +301,7 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, ins
         push({ type: 'transcript', role: 'assistant', text: event.delta });
       } else if (event.type === 'session.closed') {
         debugLog(config, `session-closed reason=${event.reason}`);
-        push({ type: 'closed', reason: event.reason });
+        end(event.reason ?? 'server_closed');
       } else if (event.type === 'session.input_audio.muted' || event.type === 'session.input_audio.unmuted') {
         muted = event.type === 'session.input_audio.muted';
         push({ type: 'muted', muted });
@@ -272,16 +311,52 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, ins
       bridge.handleLiveEvent(event);
     },
     onClose: (detail) => {
-      isClosed = true;
-      stopNarration();
+      end('socket_closed');
       debugLog(config, `socket-closed code=${detail?.code ?? '-'} reason=${detail?.reason || '-'}`);
-      push({ type: 'closed', reason: 'socket_closed' });
-      onClosed?.();
+
     },
     onError: (error) => push({ type: 'error', message: error.message }),
   });
 
-  await live.connect();
+  const end = (reason) => {
+    if (isClosed) return;
+    isClosed = true;
+    bridge.close();
+    stopNarration();
+    stopContext();
+    pendingContext.length = 0;
+    clearTimeout(cap);
+    signal.removeEventListener('abort', abort);
+    void live.close();
+    push({ type: 'closed', reason });
+    onClosed?.();
+  };
+  const abort = () => end('plugin_disposed');
+  // Subscribe in the same synchronous acquisition as the history snapshot so no
+  // committed messages are lost while the WebSocket handshake is pending.
+  stopContext = ctx.on('session/event', (changed, event) => {
+    if (isClosed || changed.id !== sessionId) return;
+    const message = event.type === 'user/message' ? event.data
+      : event.type === 'assistant/message' ? event.data.message : null;
+    if (message === null) return;
+    for (const content of contextChunks(conversationText(message))) {
+      const frame = { type: 'session.thinking.append', delegation_id: null, content };
+      if (live.open) live.send(frame);
+      else pendingContext.push(frame);
+    }
+  });
+  signal.addEventListener('abort', abort, { once: true });
+  try {
+    signal.throwIfAborted();
+    await live.connect();
+    signal.throwIfAborted();
+    if (isClosed) throw new Error('live voice: session closed during startup');
+  } catch (error) {
+    end('start_failed');
+    await live.close();
+    throw error;
+  }
+  for (const frame of pendingContext.splice(0)) live.send(frame);
   push({ type: 'ready', model: config.model ?? DEFAULT_MODEL, voice: config.voice ?? DEFAULT_VOICE });
 
   /** The delegation whose work is running, or null between tasks. */
@@ -300,40 +375,36 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, ins
 
   stopNarration = narrate(ctx, sessionId, noteProgress);
 
-  let cap;
-  const end = (reason) => {
-    if (isClosed) return;
-    isClosed = true;
-    stopNarration();
-    clearTimeout(cap);
-    live.close();
-    push({ type: 'closed', reason });
-    waiter?.();
-    waiter = null;
-    onClosed?.();
-  };
-
   cap = setTimeout(() => end('max_session_minutes'), (config.maxSessionMinutes ?? 60) * 60_000);
   cap.unref?.();
 
   return {
     sessionId,
     liveId,
+    get closed() { return isClosed; },
     sendAudio: (data) => live.sendAudio(data),
     /** Mute or unmute caller audio on the wire; the server confirms with an event. */
     mute(next) {
       if (next === muted) return;
       live.send({ type: next ? 'session.input_audio.mute' : 'session.input_audio.unmute' });
     },
-    close() {
+    async close() {
       end('close_requested');
+      await live.close();
+      await Promise.allSettled([...turns]);
     },
     /** Return everything queued, waiting up to `timeoutMs` for the first item. */
     async poll(timeoutMs) {
       if (queue.length === 0 && !isClosed) {
         await new Promise((resolve) => {
-          waiter = resolve;
-          setTimeout(resolve, timeoutMs).unref?.();
+          const timer = setTimeout(finish, timeoutMs);
+          timer.unref?.();
+          function finish() {
+            clearTimeout(timer);
+            if (waiter === finish) waiter = null;
+            resolve();
+          }
+          waiter = finish;
         });
       }
       const events = queue.splice(0, queue.length);
@@ -354,6 +425,7 @@ async function runHarnessTurn(ctx, sessionId, task, bridge, logger) {
       bridge.turnFinished({ ok: false, text: resolved.error?.message ?? 'session unavailable' });
       return;
     }
+    if (bridge.closed) return;
     const agent = resolved.agent;
     const firstSeq = agent.session.seq;
     agent.followup(createUserMessage({
@@ -403,26 +475,19 @@ export function readOutcome(session, firstSeq) {
 }
 
 /**
- * Resolve the key the way other host plugins do: explicit config, then a key
- * file, then the credential service, then the launch environment.
+ * Resolve saved credentials first, then explicit configuration, a legacy key
+ * file, and the launch environment. Credential failures are reported to callers.
  * @param {import('@deepseek-ai/cordis').Context} ctx
  * @param {z.infer<typeof Config>} config
  */
 export async function resolveApiKey(ctx, config) {
+  const ref = config.apiKeyEnv ?? 'OPENAI_API_KEY';
+  const stored = await ctx.credentials.resolve(credentialRef(ref));
+  if (stored?.value) return stored.value;
   if (config.apiKey) return config.apiKey;
   if (config.apiKeyFile) {
     const fromFile = readKeyFile(config.apiKeyFile);
     if (fromFile) return fromFile;
-  }
-  const ref = config.apiKeyEnv ?? 'OPENAI_API_KEY';
-  const credentials = ctx.get?.('credentials');
-  if (credentials && typeof credentials.resolve === 'function') {
-    try {
-      const hit = await credentials.resolve(ref);
-      if (hit?.value) return hit.value;
-    } catch {
-      // fall through to the ambient environment
-    }
   }
   try {
     const ambient = launchEnvironmentOf(ctx).get(ref);
@@ -431,11 +496,6 @@ export async function resolveApiKey(ctx, config) {
     // no launcher snapshot; read the process environment directly
   }
   return process.env[ref] || undefined;
-}
-
-/** Where the settings card stores a key: the configured file, or the default. */
-function keyFilePath(config) {
-  return config.apiKeyFile || '~/.dsh/live-voice.key';
 }
 
 function expandHome(path) {

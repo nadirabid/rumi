@@ -21,8 +21,6 @@ export class LiveBridge {
   #queue = [];
   /** @type {Set<string>} */
   #seen = new Set();
-  /** @type {{key: string, at: number}[]} */
-  #recent = [];
   #closed = false;
 
   /**
@@ -32,18 +30,15 @@ export class LiveBridge {
    * @param {(delegationId: string | null, content: string) => void} options.thinking
    * @param {() => number} [options.now]
    * @param {(message: string) => void} [options.log]
-   * @param {number} [options.dedupeWindowMs]
    * @param {number} [options.maxBufferChars]
    */
-  constructor({ dispatch, commentary, thinking, now = Date.now, log = () => {}, dedupeWindowMs = 60_000, maxBufferChars = 4_000, maxTaskChars = 300 }) {
+  constructor({ dispatch, commentary, thinking, now = Date.now, log = () => {}, maxBufferChars = 4_000 }) {
     this.dispatch = dispatch;
     this.commentary = commentary;
     this.thinking = thinking;
     this.now = now;
     this.log = log;
-    this.dedupeWindowMs = dedupeWindowMs;
     this.maxBufferChars = maxBufferChars;
-    this.maxTaskChars = maxTaskChars;
   }
 
   get busy() {
@@ -78,7 +73,7 @@ export class LiveBridge {
       case 'session.delegation.created':
         return this.#onDelegation(event);
       case 'session.closed':
-        this.#closed = true;
+        this.close();
         return 'ignored';
       case 'error':
         this.log(`live error: ${event.error?.code ?? ''} ${event.error?.message ?? ''}`.trim());
@@ -105,7 +100,15 @@ export class LiveBridge {
     this.#drain();
   }
 
+  /** Stop accepting requests and discard work that has not started. */
+  close() {
+    this.#closed = true;
+    this.#queue = [];
+    this.#buffer = "";
+  }
+
   #drain() {
+    if (this.#closed) return;
     const next = this.#queue.shift();
     if (next) this.#start(next);
   }
@@ -121,7 +124,6 @@ export class LiveBridge {
       this.thinking(id, 'The user asked for nothing actionable in this delegation; stay conversational and do not claim work.');
       return 'ignored';
     }
-    if (this.#isDuplicate(task.text)) return 'ignored';
 
     if (this.#inFlight) {
       this.#queue.push({ delegationId: id, text: task.text, raw: task.raw });
@@ -139,34 +141,13 @@ export class LiveBridge {
     this.dispatch(task);
   }
 
-  /**
-   * Consume the speech since the previous delegation as one task.
-   *
-   * The buffer can hold unrelated talk that arrived before the request (a TV,
-   * another person, the previous sentence). Only the tail of it is the request,
-   * so the task is the last `maxTaskChars`, started at a sentence boundary.
-   */
+  /** Consume the complete buffered request, including single-word commands. */
   #takeTask() {
-    let raw = this.#buffer.replace(/\s+/g, ' ').trim();
+    const text = this.#buffer.replace(/\s+/g, ' ').trim();
     this.#buffer = '';
-    let text = raw;
-    if (text.length > this.maxTaskChars) {
-      const tail = text.slice(-this.maxTaskChars);
-      const boundary = tail.search(/[.!?]\s/);
-      text = boundary >= 0 ? tail.slice(boundary + 2).trim() : tail.trim();
-    }
-    if (text.split(' ').filter(Boolean).length < 2) return '';
-    return { text, raw };
+    return text === '' ? '' : { text, raw: text };
   }
 
-  #isDuplicate(text) {
-    const now = this.now();
-    const key = text.toLowerCase().replace(/[^a-z0-9 ]+/g, '').replace(/\s+/g, ' ').trim();
-    this.#recent = this.#recent.filter((entry) => now - entry.at < this.dedupeWindowMs);
-    if (this.#recent.some((entry) => entry.key === key)) return true;
-    this.#recent.push({ key, at: now });
-    return false;
-  }
 }
 
 /**

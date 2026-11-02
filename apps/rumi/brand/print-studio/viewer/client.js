@@ -33,7 +33,7 @@ const EMPTY = Object.freeze({ scene: null, view: null })
  */
 export function installViewer(ctx, React, primitives) {
   const h = React.createElement
-  const { PluginArtworkDefault } = primitives
+  const { PluginArtworkDefault, Button } = primitives
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'print viewer: copy')
   ctx.effect(() => {
@@ -98,6 +98,10 @@ export function installViewer(ctx, React, primitives) {
       if (scene === null) { publish(sessionId, EMPTY); return }
       const unchanged = current?.scene != null && current.scene.revision === scene.revision
         && JSON.stringify(current.scene.design) === JSON.stringify(scene.design)
+        && JSON.stringify(current.scene.models) === JSON.stringify(scene.models)
+        && current.scene.selectedModel === scene.selectedModel
+        && current.scene.catalogFailed === scene.catalogFailed
+        && !current.scene.failed
       const complete = scene.objects.every(object => geometry.has(object.datablockId))
       if (unchanged && complete && current.view !== null) return
       // Publish the scene before its geometry so a failed fetch is reportable.
@@ -223,8 +227,37 @@ export function installViewer(ctx, React, primitives) {
     return null
   }
 
-  function MeshPane({ useScene, t }) {
+  function MeshPane({ useScene, t, selectModel }) {
     const state = useScene(value => value)
+    const scene = state.scene
+    const [busy, setBusy] = React.useState(false)
+    const [failed, setFailed] = React.useState(false)
+    const request = React.useRef(null)
+    React.useEffect(() => () => request.current?.abort(), [])
+    async function select(path) {
+      request.current?.abort()
+      const controller = new AbortController()
+      request.current = controller
+      setBusy(true)
+      setFailed(false)
+      try { await selectModel(path, controller.signal) }
+      catch (_error) { if (!controller.signal.aborted) setFailed(true) }
+      finally { if (!controller.signal.aborted) setBusy(false) }
+    }
+    return h('section', { className: 'rumi-print-viewer', 'aria-label': t('title') },
+      scene?.models?.length ? h('div', { className: 'pv-models', role: 'group', 'aria-label': t('models') },
+        scene.models.map(model => h(Button, {
+          key: model.path, variant: 'ghost', size: 'sm', disabled: busy,
+          className: 'pv-model-button', title: model.name,
+          'aria-pressed': scene.selectedModel === model.path,
+          onClick: () => { void select(model.path) },
+        }, model.name))) : null,
+      failed || scene?.catalogFailed ? h('p', { className: 'pv-catalog-error', role: 'alert' },
+        t(failed ? 'selectionFailed' : 'catalogFailed')) : null,
+      h('div', { className: 'pv-content' }, h(MeshContent, { state, t })))
+  }
+
+  function MeshContent({ state, t }) {
     const scene = state.scene
     if (scene === null || (scene.objects.length === 0 && !scene.design)) {
       return h('section', { className: 'rumi-print-viewer', 'aria-label': t('title') },
@@ -286,7 +319,16 @@ export function installViewer(ctx, React, primitives) {
   }), 'print viewer: tab type')
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
     name: 'sidebar.right.pane.tab', key: ID, locale: NS,
-    inject: sessionId => ({ hooks: { scene: { subscribe, getSnapshot: () => read(sessionId) } } }),
+    inject: sessionId => ({
+      hooks: { scene: { subscribe, getSnapshot: () => read(sessionId) } },
+      selectModel: async (path, signal) => {
+        const response = await fetch(`${ROUTE}/select?sessionId=${encodeURIComponent(sessionId)}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ path }), signal,
+        })
+        if (!response.ok) throw new Error('Model selection failed')
+      },
+    }),
   }, MeshPane)), 'print viewer: tab body')
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
     name: 'sidebar.right.pane.tab.title', key: ID,

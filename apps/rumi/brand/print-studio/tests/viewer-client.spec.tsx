@@ -1,6 +1,6 @@
 /** The pane follows the host's scene: geometry loads once, placement updates reuse the viewport. */
 import * as React from 'react'
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import { installViewer } from '../viewer/client.js'
@@ -83,7 +83,7 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
         return () => { entries.delete(options.name) }
       },
     },
-  }, React, { PluginArtworkDefault: () => null })
+  }, React, { PluginArtworkDefault: () => null, Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant: string; size: string }) => React.createElement('button', props) })
   return {
     opened, fetch,
     setScene: (next: object | null) => { state.scene = next },
@@ -103,6 +103,31 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
 async function settle(ms = 0) {
   await act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 }
+
+it('discovers new model controls without a geometry revision and selects the requested entry', async () => {
+  const base = { ...scene([]), models: [{ name: 'helmet', path: 'models/helmet/model.js' }], selectedModel: 'models/helmet/model.js' }
+  const view = fixture({ scene: base })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  expect(screen.getByRole('button', { name: 'helmet' }).getAttribute('aria-pressed')).toBe('true')
+  view.setScene({ ...base, models: [...base.models, { name: 'gloves', path: 'models/gloves/model.js' }] })
+  await settle(2000)
+  fireEvent.click(screen.getByRole('button', { name: 'gloves' }))
+  await settle()
+  expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/select?sessionId=session-a', expect.objectContaining({
+    method: 'POST', body: JSON.stringify({ path: 'models/gloves/model.js' }),
+  }))
+})
+
+it('keeps model controls usable and reports a selection failure', async () => {
+  const view = fixture({ modelOk: false, scene: { ...scene([]), models: [{ name: 'helmet', path: 'models/helmet/model.js' }] } })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  fireEvent.click(screen.getByRole('button', { name: 'helmet' }))
+  await settle()
+  expect(screen.getByRole('alert').textContent).toBe(en.selectionFailed)
+  expect(screen.getByRole('button', { name: 'helmet' }).hasAttribute('disabled')).toBe(false)
+})
 
 it('invites the reader to ask for a model instead of offering controls', async () => {
   const view = fixture()

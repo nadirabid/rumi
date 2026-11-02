@@ -1,7 +1,7 @@
 /** A session's scene is edited by commands; geometry is read once and never rewritten by placement. */
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, expect, it } from 'vitest'
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -34,6 +34,15 @@ function stl(positions: Float32Array) {
 const owners: Context[] = []
 afterEach(async () => { await Promise.all(owners.splice(0).map(owner => owner.fiber.dispose())) })
 
+it('documents creating multiple models and bringing a named entry into view', async () => {
+  const f = fixture()
+  expect({
+    instructions: await readFile(new URL('../AGENTS_TEMPLATE.md', import.meta.url), 'utf8'),
+    load: f.raw('viewer_load').description,
+    state: f.raw('mesh_state').description,
+  }).toMatchSnapshot()
+})
+
 function fixture(source: Uint8Array = stl(box()), cwd = '/workspace') {
   const routes = new Map<string, (request: Request) => Promise<Response>>()
   const tools = new Map<string, any>() // The fixture captures dynamically registered JavaScript tool definitions.
@@ -47,6 +56,7 @@ function fixture(source: Uint8Array = stl(box()), cwd = '/workspace') {
     } } },
     tools: { register: (tool: any) => { tools.set(tool.name, tool); return () => {} } },
     workingDirectory: { ensure: async () => cwd },
+    sessionQuery: { observeSession: async () => ({ header: { cwd }, [Symbol.dispose]() {} }) },
     fs: { resolve: async (path: string) => ({ path, displayPath: path }), readBytes: async () => source },
   }
   applyViewer(ctx, defineTool)
@@ -64,6 +74,97 @@ function fixture(source: Uint8Array = stl(box()), cwd = '/workspace') {
     dispose: () => owner.fiber.dispose(),
   }
 }
+
+it('discovers model folders, switches through UI and tool, and restores the selection after restart', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-models-'))
+  const f = fixture(undefined, root)
+  try {
+    for (const name of ['helmet', 'gloves']) {
+      await mkdir(join(root, 'models', name), { recursive: true })
+      await writeFile(join(root, 'models', name, 'model.js'), 'export function build(T) { return new T.Group() }')
+      await writeFile(join(root, 'models', name, 'helper.js'), 'export const size = 1')
+    }
+    let state = await f.state()
+    expect(state.catalogFailed).toBe(false)
+    expect(state.models).toEqual([
+      { name: 'gloves', path: 'models/gloves/model.js' },
+      { name: 'helmet', path: 'models/helmet/model.js' },
+    ])
+    expect(state.selectedModel).toBe('models/gloves/model.js')
+    const volume = { x: 256, y: 256, z: 256 }
+    await f.run('viewer_load', { path: 'models/gloves/model.js', buildVolume: volume })
+    const select = f.routes.get('/api/print-studio/viewer/select')!
+    expect((await select(new Request('http://rumi/api/print-studio/viewer/select?sessionId=session-a', {
+      method: 'POST', body: JSON.stringify({ path: 'models/helmet/model.js' }),
+    }))).status).toBe(200)
+    state = await f.state()
+    expect(state.selectedModel).toBe('models/helmet/model.js')
+    expect(state.design.path).toContain('helmet/model.js')
+    expect(state.volume).toEqual(volume)
+    await f.dispose()
+    const restarted = fixture(undefined, root)
+    expect(await restarted.state()).toMatchObject({ selectedModel: 'models/helmet/model.js', volume })
+    const report = await restarted.run('viewer_load', { path: 'models/gloves/model.js' })
+    expect(report.selectedModel).toBe('models/gloves/model.js')
+    expect(report.volume).toEqual(volume)
+    expect(JSON.parse(await readFile(join(root, '.rumi-viewer.json'), 'utf8')).path).toBe('models/gloves/model.js')
+    await mkdir(join(root, 'models', 'boots'))
+    await writeFile(join(root, 'models', 'boots', 'model.mjs'), 'export function build(T) { return new T.Group() }')
+    expect((await restarted.state()).models).toHaveLength(3)
+    await rm(join(root, 'models', 'gloves', 'model.js'))
+    expect((await restarted.state()).design.error.kind).toBe('source')
+    await restarted.dispose()
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it('rejects unknown selection paths, excludes symlink entries, and reports broken restore state', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-models-'))
+  const f = fixture(undefined, root)
+  try {
+    await mkdir(join(root, 'source'))
+    await writeFile(join(root, 'source', 'model.js'), 'export function build(T) { return new T.Group() }')
+    await mkdir(join(root, 'models'))
+    await symlink(join(root, 'source'), join(root, 'models', 'linked'))
+    expect((await f.state()).models).toEqual([{ name: 'model', path: 'source/model.js' }])
+    const response = await f.routes.get('/api/print-studio/viewer/select')!(new Request('http://rumi/api/print-studio/viewer/select?sessionId=session-a', {
+      method: 'POST', body: JSON.stringify({ path: '../outside/model.js' }),
+    }))
+    expect(response.status).toBe(409)
+    expect((await f.state()).selectedModel).toBe('source/model.js')
+    await writeFile(join(root, '.rumi-viewer.json'), '{broken')
+    expect((await f.state('new-session')).catalogFailed).toBe(true)
+    await writeFile(join(root, '.rumi-viewer.json'), JSON.stringify({ version: 1, path: 'source/model.js', volume: { x: -1, y: 256, z: 256 } }))
+    expect((await f.state('invalid-volume')).catalogFailed).toBe(true)
+    await writeFile(join(root, '.rumi-viewer.json'), JSON.stringify({ version: 1, path: 'source/model.js' }))
+    expect(await f.state('legacy-selection')).toMatchObject({ selectedModel: 'source/model.js', volume: null, catalogFailed: false })
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it('keeps an explicit selection after an overlapping automatic restore', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-model-race-'))
+  const f = fixture(undefined, root)
+  const entered = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  try {
+    for (const name of ['a', 'b']) {
+      await mkdir(join(root, 'models', name), { recursive: true })
+      await writeFile(join(root, 'models', name, 'model.js'), 'export function build(T) { return new T.Group() }')
+    }
+    f.ctx.sessionQuery.observeSession = async () => {
+      entered.resolve()
+      await release.promise
+      return { header: { cwd: root }, [Symbol.dispose]() {} }
+    }
+    const restore = f.state()
+    await entered.promise
+    const selection = f.run('viewer_load', { path: 'models/b/model.js' })
+    release.resolve()
+    await restore
+    await selection
+    expect((await f.state()).selectedModel).toBe('models/b/model.js')
+    expect(JSON.parse(await readFile(join(root, '.rumi-viewer.json'), 'utf8')).path).toBe('models/b/model.js')
+  } finally { release.resolve(); await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
 
 it('opens a mesh into a scene the browser can draw and the agent can talk about', async () => {
   const f = fixture()

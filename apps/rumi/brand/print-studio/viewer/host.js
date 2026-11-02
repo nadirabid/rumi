@@ -8,13 +8,14 @@
  * resizing never rewrites a mesh, and the browser renders the same geometry it
  * already fetched.
  */
-import { basename, extname, resolve } from 'node:path'
+import { basename, extname, relative, resolve, sep } from 'node:path'
 import { analyzeMesh } from './checks.js'
 import { createHistory } from './document.js'
 import { STL_LIMITS, encodeStl, parseStl } from './stl.js'
 import { placeMesh } from './transform.js'
 
 import { createSource } from './source.js'
+import { discoverModels, readSelection, saveSelection } from './catalog.js'
 
 const ROUTE = '/api/print-studio/viewer'
 const JSON_HEADERS = { 'cache-control': 'private, no-store', 'content-type': 'application/json', 'x-content-type-options': 'nosniff' }
@@ -142,6 +143,9 @@ function sceneReport(record) {
     objectCount: scene.objects.length,
     ...summaryOf(record),
     design: record.source?.state() ?? null,
+    models: record.models ?? [],
+    selectedModel: record.selectedModel ?? null,
+    discoveryError: record.catalogError ?? null,
     objects: scene.objects.map((object) => {
       const { report } = record.measurements.get(object.id)
       return {
@@ -168,7 +172,11 @@ function sceneReport(record) {
 export function applyViewer(ctx, defineTool) {
   const sessions = new Map()
   let closed = false
-  ctx.effect(() => () => { closed = true; sessions.clear() }, 'print-studio: preview scenes')
+  ctx.effect(() => async () => {
+    closed = true
+    await Promise.all([...sessions.values()].map(record => record.pending))
+    sessions.clear()
+  }, 'print-studio: preview scenes')
   const route = (path, fetch) => ctx.effect(() => ctx.connection.fetch.register({
     path: `${ROUTE}${path}`, methods: ['GET'], requestBody: 'buffered', fetch,
   }), `print-studio: preview ${path || 'state'}`)
@@ -186,10 +194,11 @@ export function applyViewer(ctx, defineTool) {
       sessions.set(sessionId, existing)
       return existing
     }
-    const record = { history: createHistory(), datablocks: new Map(), byPath: new Map(), measurements: new Map() }
+    const record = { history: createHistory(), datablocks: new Map(), byPath: new Map(), measurements: new Map(), pending: Promise.resolve() }
     sessions.set(sessionId, record)
     while (sessions.size > MAX_SESSIONS) {
-      const key = sessions.keys().next().value
+      const key = [...sessions.keys()].find(id => id !== sessionId && !sessions.get(id).busy)
+      if (key === undefined) break
       const source = sessions.get(key).source
       if (source) ctx.effect(async () => { await source.dispose(); return () => {} }, 'print viewer: evict source')
       sessions.delete(key)
@@ -197,13 +206,101 @@ export function applyViewer(ctx, defineTool) {
     return record
   }
 
+  // Selection and discovery share a queue so a late automatic load cannot replace a user's selection.
+  function serialize(record, operation) {
+    record.busy = (record.busy ?? 0) + 1
+    const result = record.pending.then(() => {
+      if (closed) throw new Error('Model preview is closed')
+      return operation()
+    })
+    record.pending = result.then(() => {}, () => {}).finally(() => { record.busy-- })
+    return result
+  }
+
+  async function directoryFor(sessionId, record) {
+    if (record.cwd) return record.cwd
+    const observation = await ctx.sessionQuery.observeSession(sessionId)
+    try {
+      const cwd = observation.projections?.values.workingDirectory ?? observation.header.cwd
+      if (!cwd) throw new Error('Model preview requires a project directory')
+      record.cwd = cwd
+      return cwd
+    } finally { observation[Symbol.dispose]() }
+  }
+
+  async function loadSource(record, cwd, path, volume, signal) {
+    signal?.throwIfAborted()
+    if (closed) throw new Error('Model preview is closed')
+    const source = await createSource(ctx, resolve(cwd, path), cwd)
+    try {
+      signal?.throwIfAborted()
+      if (closed) throw new Error('Model preview is closed')
+      const selected = relative(cwd, resolve(cwd, path)).split(sep).join('/')
+      await saveSelection(cwd, selected, volume === undefined ? record.history.current().volume : volume)
+      if (closed) throw new Error('Model preview is closed')
+      await record.source?.dispose()
+      record.source = source
+      record.cwd = cwd
+      record.selectedModel = selected
+      record.catalogError = null
+      if (volume !== undefined) {
+        record.history.apply({ type: 'setVolume', volume })
+        refresh(record)
+      }
+    } catch (error) {
+      await source.dispose()
+      throw error
+    }
+  }
+
+  async function discover(sessionId, record) {
+    const cwd = await directoryFor(sessionId, record)
+    record.models = await discoverModels(cwd)
+    if (!record.source && record.history.current().objects.length === 0) {
+      const saved = await readSelection(cwd)
+      const path = saved?.path ?? record.models[0]?.path
+      if (path) await loadSource(record, cwd, path, saved?.volume)
+    }
+    await record.source?.poll()
+    record.catalogError = null
+  }
+
   route('/state', async (request) => {
     const sessionId = new URL(request.url).searchParams.get('sessionId')
     if (!sessionId) return json({ error: 'session_required' }, 400)
     const record = recordFor(sessionId)
-    await record.source?.poll()
-    return json({ scene: { ...sceneState(record), design: record.source?.state() ?? null } })
+    await serialize(record, async () => {
+      try { await discover(sessionId, record) }
+      catch (error) { record.catalogError = String(error) }
+    })
+    return json({ scene: {
+      ...sceneState(record), design: record.source?.state() ?? null,
+      models: record.models ?? [], selectedModel: record.selectedModel ?? null,
+      catalogFailed: Boolean(record.catalogError),
+    } })
   })
+
+  ctx.effect(() => ctx.connection.fetch.register({
+    path: `${ROUTE}/select`, methods: ['POST'], requestBody: 'buffered',
+    fetch: async request => {
+      const sessionId = new URL(request.url).searchParams.get('sessionId')
+      if (!sessionId) return json({ error: 'session_required' }, 400)
+      let value
+      try { value = JSON.parse(await request.text()) }
+      catch (_error) { return json({ error: 'invalid_selection' }, 400) }
+      if (typeof value?.path !== 'string') return json({ error: 'invalid_selection' }, 400)
+      const record = recordFor(sessionId)
+      try {
+        await serialize(record, async () => {
+          const cwd = await directoryFor(sessionId, record)
+          record.models = await discoverModels(cwd)
+          if (!record.models.some(model => model.path === value.path)) throw new Error('Model entry not found')
+          await loadSource(record, cwd, value.path)
+        })
+        return json({ ok: true })
+      } catch (_error) { return json({ error: 'selection_failed' }, 409) }
+    },
+  }), 'print viewer: select model')
 
   route('/model', async (request) => {
     const query = new URL(request.url).searchParams
@@ -231,13 +328,13 @@ export function applyViewer(ctx, defineTool) {
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_load',
-    description: 'Load a project JavaScript model into the 3D viewer. Export synchronous build(THREE) returning a Mesh or Group. '
+    description: 'Select and show a project JavaScript model in the 3D viewer. Organize independent models as models/<name>/model.js; the viewer discovers them automatically. Export synchronous build(THREE) returning a Mesh or Group. '
       + 'Use millimetres and Z up. Relative .js/.mjs imports inside the entry file’s folder are supported; pass THREE to helpers. '
       + 'The visible viewer automatically reloads source edits. The viewer owns camera, lighting and controls; do not edit its implementation. '
       + 'Code executes in the renderer: keep builds synchronous and free of DOM access, timers and other side effects. '
       + 'Read mesh_state for build errors and measurements after the viewer loads it. Loading does not certify print readiness.',
     parameters: {
-      path: { type: 'string', required: true, description: 'Project model entry, usually source/model.js.' },
+      path: { type: 'string', required: true, description: 'Model entry to bring into view, for example models/helmet/model.js.' },
       buildVolume: {
         type: 'object', additionalProperties: false,
         description: 'Printable volume in millimetres. Omit to retain the scene’s current print context.',
@@ -254,27 +351,17 @@ export function applyViewer(ctx, defineTool) {
       if (!exec.agent) throw new Error('Model preview requires a conversation')
       const volume = args.buildVolume === undefined ? undefined
         : createHistory().apply({ type: 'setVolume', volume: args.buildVolume }).volume
-      let record, source
-      const disposeLoad = ctx.effect(async function* () {
+      const record = recordFor(exec.agent.session.id)
+      const disposeLoad = ctx.effect(async () => {
         const cwd = await ctx.workingDirectory.ensure(exec.agent, exec.signal)
         exec.signal.throwIfAborted()
         if (closed) throw new Error('Model preview is closed')
-        source = await createSource(ctx, resolve(cwd, args.path), cwd)
-        yield source.dispose
-        exec.signal.throwIfAborted()
-        if (closed) throw new Error('Model preview is closed')
-        record = recordFor(exec.agent.session.id)
-        await record.source?.dispose()
-        if (closed) throw new Error('Model preview is closed')
-        if (volume !== undefined) {
-          record.history.apply({ type: 'setVolume', volume })
-          refresh(record)
-        }
-        record.source = source
+        await serialize(record, () => loadSource(record, cwd, args.path, volume, exec.signal))
+        return () => {}
       }, 'print viewer: load model')
       await disposeLoad
       if (closed) throw new Error('Model preview is closed')
-      record.source = { ...source, dispose: disposeLoad }
+      record.models = await discoverModels(record.cwd)
       return JSON.stringify(sceneReport(record), undefined, 2)
     },
   })), 'print viewer: load source')
@@ -318,7 +405,7 @@ export function applyViewer(ctx, defineTool) {
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'mesh_state',
     description: 'Read the 3D preview scene without changing it: every object, its placement, and the measurements of its composed mesh. '
-      + 'The scene is held in memory for the conversation, so it is empty after Rumi restarts; read it instead of assuming what is on screen.',
+      + 'Includes discovered models and the selected model. Saved JavaScript models reload when the viewer opens; STL scene objects remain in memory. Read this tool instead of assuming what is on screen.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     isConcurrencySafe: () => true,
@@ -326,7 +413,10 @@ export function applyViewer(ctx, defineTool) {
     async execute(_args, exec) {
       const agent = exec.agent
       if (agent === undefined) throw new Error('Mesh preview requires a conversation')
-      return JSON.stringify(sceneReport(recordFor(agent.session.id)), undefined, 2)
+      const record = recordFor(agent.session.id)
+      const cwd = await ctx.workingDirectory.ensure(agent, exec.signal)
+      record.models = await discoverModels(cwd)
+      return JSON.stringify(sceneReport(record), undefined, 2)
     },
   })), 'print-studio: read scene tool')
 
@@ -363,7 +453,11 @@ export function applyViewer(ctx, defineTool) {
       exec.signal.throwIfAborted()
       if (closed) throw new Error('Mesh preview is closed')
       const record = recordFor(agent.session.id)
-      if (args.buildVolume !== undefined) record.history.apply({ type: 'setVolume', volume: args.buildVolume })
+      if (args.buildVolume !== undefined) {
+        const volume = createHistory().apply({ type: 'setVolume', volume: args.buildVolume }).volume
+        if (record.source) await saveSelection(cwd, record.selectedModel, volume)
+        record.history.apply({ type: 'setVolume', volume })
+      }
       const datablockId = datablockFor(record, target.displayPath ?? args.path, positions, encodeStl(positions))
       const scene = record.history.apply({ type: 'addObject', datablockId, name: basename(args.path) })
       refresh(record, [scene.objects.at(-1).id])

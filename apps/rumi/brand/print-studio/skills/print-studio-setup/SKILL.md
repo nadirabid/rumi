@@ -50,8 +50,8 @@ ask the adult to update it.
 
 ## Before any print
 
-- Call `mesh_state` before saying what the preview shows; the scene is in memory and is
-  empty after Rumi restarts, whatever the conversation remembers.
+- Call `mesh_state` before saying what the preview shows. Saved JavaScript models reload
+  when the viewer opens; imported STL scene objects do not survive a restart.
 - Show the model with `mesh_open` and pass the envelope you are printing in:
   `buildVolume: { x: 300, y: 320, z: 320 }` for the dual nozzle, or
   `{ x: 325, y: 320, z: 325 }` for a single nozzle. The panel opens for the person and

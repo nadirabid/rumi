@@ -1,0 +1,28 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`documents creating multiple models and bringing a named entry into view 1`] = `
+{
+  "instructions": "### Project type
+
+This project is for designing and creating 3d prints.
+
+### Project plugin
+
+The primary plugin to enable that is print-studio, a Cordis plugin.
+
+The plugin provides the ability to design, iteratively, the 3d mesh through its accompanying renderer.
+
+The plugin provides the ability to prep and print the mesh to the user's personal 3D printer.
+
+### Editable designs
+
+Create and organize independent models in \`models/<name>/model.js\`, with each model's helpers beside it. The viewer automatically discovers these folders and shows model-selection controls. Call \`viewer_load\` with a model's path to bring it into view; use \`mesh_state\` to see the available models and current selection. Keep existing models when adding another.
+
+Each entry exports synchronous \`build(THREE)\` returning a fresh Mesh or Group. Use millimetres and Z up. Edits to \`.js\` and \`.mjs\` files under the entry directory reload automatically while the preview is open. Relative imports need file extensions; pass THREE into helpers instead of importing a package. Keep named parts and adjustable dimensions in source. Do not modify the viewer or create cameras, lights, controls, DOM elements, timers, or background work in the model.
+
+Use \`viewer_transform\` for whole-design placement and \`viewer_camera\` for the viewing angle. Read \`mesh_state\` for build errors and measurements. A failed edit keeps the last successful preview; fix the source to recover. Preview checks do not establish print readiness.
+",
+  "load": "Select and show a project JavaScript model in the 3D viewer. Organize independent models as models/<name>/model.js; the viewer discovers them automatically. Export synchronous build(THREE) returning a Mesh or Group. Use millimetres and Z up. Relative .js/.mjs imports inside the entry file’s folder are supported; pass THREE to helpers. The visible viewer automatically reloads source edits. The viewer owns camera, lighting and controls; do not edit its implementation. Code executes in the renderer: keep builds synchronous and free of DOM access, timers and other side effects. Read mesh_state for build errors and measurements after the viewer loads it. Loading does not certify print readiness.",
+  "state": "Read the 3D preview scene without changing it: every object, its placement, and the measurements of its composed mesh. Includes discovered models and the selected model. Saved JavaScript models reload when the viewer opens; STL scene objects remain in memory. Read this tool instead of assuming what is on screen.",
+}
+`;

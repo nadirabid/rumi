@@ -9,7 +9,7 @@ export const CONTRIBUTOR_FIELDS = ['instructions', 'thinking', 'commentary'];
  * The host owns the wire: delegation ids, channel caps, and timing. A
  * contributor supplies content and never touches the socket. Registration is
  * ordered and disposable; a duplicate id fails rather than silently replacing.
- * @returns {{register: (contributor: object) => () => void, contributors: () => object[]}} the registry.
+ * @returns {{register: (contributor: object) => () => void, contributors: () => {id: string, order: number}[]}} the registry.
  */
 export function createLiveVoiceRegistry() {
   /** @type {{id: string, order: number}[]} */

@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/rumi/brand/live-voice/README.md
+/live-voice:
+  en: 2e4497d867965f3f
+  zh: e056c83dccb4c69a
+/live-voice/configuration:
+  en: 13b4a02b719f35af
+  zh: 0b591c132704a2c2
+/live-voice/session-lifetime:
+  en: 9d3bfacb57d063ea
+  zh: bffca0a6a62c83fd
+/live-voice/context:
+  en: ea8a495e6e48bdd6
+  zh: b9786d5dcd1c3523
+/live-voice/verification:
+  en: 2eed2902cec53fa0
+  zh: 00a5be11128a22cc

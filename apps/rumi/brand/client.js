@@ -71,6 +71,8 @@ window.__ModuleLoader__.load({
       // ours, so it follows with an offset that composes with the orb's own
       // hover scale instead of replacing it.
       '.lv-orb, .lv-mic { position: relative; top: -2px; }',
+      // An empty activity slot still has a wrapper; hide it to avoid a second toolbar gap.
+      'div:has(> [data-slot="conversation.input.activity"]:only-child:empty) { display: none; }',
     ].join('\n');
 
     /** Hide composer and header chrome; the disposer removes the rules again. */

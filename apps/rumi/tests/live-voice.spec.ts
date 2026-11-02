@@ -1,8 +1,8 @@
 /** Live Voice keeps one session per DSH session and takes context from contributors. */
 import { describe, expect, it } from 'vitest'
-import { composeInstructions, createLiveVoiceRegistry } from '../brand/live-voice/lib/registry.js'
-import { speakable, summarize } from '../brand/live-voice/lib/bridge.js'
-import { DEFAULT_INSTRUCTIONS, VOICES } from '../brand/live-voice/lib/protocol.js'
+import { composeInstructions, createLiveVoiceRegistry } from '../brand/live-voice/src/registry.js'
+import { LiveBridge, speakable, summarize } from '../brand/live-voice/src/bridge.js'
+import { DEFAULT_INSTRUCTIONS, VOICES } from '../brand/live-voice/src/protocol.js'
 import { createProjectStore, projectInstructionsFor, renderProjectInstructions } from '../brand/projects/index.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -44,7 +44,7 @@ describe('speakable', () => {
 
 describe('summarize', () => {
   it('cuts a long answer on a sentence boundary within the cap', () => {
-    const text = summarize(`${'A sentence. '.repeat(300)}`, 200)
+    const text = summarize('A sentence. '.repeat(300), 200)
     expect(text.length).toBeLessThanOrEqual(202)
     expect(text.endsWith('…')).toBe(true)
   })
@@ -92,11 +92,11 @@ describe('composeInstructions', () => {
       const store = createProjectStore(root)
       const project = await store.create('Dragon cup', {
         type: 'print',
-        instructions: name => renderProjectInstructions({ name, templates: ['## What this project makes'] }),
-      })
+        instructions: (name: string) => renderProjectInstructions({ name, templates: ['## What this project makes'] }),
+      }) as { id: string }
       await store.attachSession(project.id, 'session-42')
       const registry = createLiveVoiceRegistry()
-      registry.register({ id: 'project', instructions: sessionId => projectInstructionsFor(store, sessionId) })
+      registry.register({ id: 'project', instructions: (sessionId: string) => projectInstructionsFor(store, sessionId) })
       const text = await composeInstructions({ base: DEFAULT_INSTRUCTIONS, contributors: registry.contributors(), sessionId: 'session-42' })
       expect(text.startsWith(DEFAULT_INSTRUCTIONS)).toBe(true)
       expect(text).toContain('# Dragon cup')
@@ -104,5 +104,49 @@ describe('composeInstructions', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+describe('voice delegation lifecycle', () => {
+  function fixture() {
+    const tasks: string[] = []
+    const replies: string[] = []
+    const bridge = new LiveBridge({
+      dispatch: (task: { text: string }) => tasks.push(task.text),
+      commentary: (_id: string, text: string) => replies.push(text),
+      thinking: () => {},
+    })
+    const delegate = (text: string, id: string) => {
+      bridge.handleLiveEvent({ type: 'session.input_transcript.delta', delta: text })
+      return bridge.handleLiveEvent({ type: 'session.delegation.created', delegation: { id, target: 'client' } })
+    }
+    return { bridge, delegate, tasks, replies }
+  }
+
+  it('discards queued work on close, including when the running turn finishes later', () => {
+    const f = fixture()
+    f.delegate('Make a cube', 'first')
+    f.delegate('Make a sphere', 'second')
+    f.bridge.handleLiveEvent({ type: 'session.closed' })
+    f.bridge.turnFinished({ text: 'Done' })
+    expect(f.tasks).toEqual(['Make a cube'])
+    expect(f.replies).toEqual([])
+    expect(f.bridge.snapshot()).toMatchObject({ closed: true, queued: 0 })
+  })
+
+  it.each(['Stop', '做一个红色的杯子', `Keep the wall 2 mm thick. ${'Add a handle. '.repeat(30)}`])('preserves the full request: %s', (text) => {
+    const f = fixture()
+    expect(f.delegate(text, 'first')).toBe('dispatched')
+    expect(f.tasks).toEqual([text.trim()])
+  })
+
+  it('deduplicates delegation IDs, but allows the user to repeat a command', () => {
+    const f = fixture()
+    f.delegate('Rotate left', 'first')
+    f.bridge.turnFinished({ text: 'Done' })
+    f.delegate('Rotate left', 'second')
+    f.bridge.turnFinished({ text: 'Done' })
+    f.bridge.handleLiveEvent({ type: 'session.delegation.created', delegation: { id: 'second', target: 'client' } })
+    expect(f.tasks).toEqual(['Rotate left', 'Rotate left'])
   })
 })

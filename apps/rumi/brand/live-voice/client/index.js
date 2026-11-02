@@ -27,721 +27,799 @@ window.__ModuleLoader__.load({
       createPortal = null;
     }
 
-    /**
-     * Speech as it is decoded, shared by the orb and the dictation strip. The
-     * strip shows the words while they arrive; the chat row takes over once a
-     * delegation hands the request to the harness.
-     */
-    const dictation = (() => {
-      let state = { active: false, user: '', assistant: '' };
-      const listeners = new Set();
-      const emit = () => { for (const listener of listeners) listener(); };
-      const set = (next) => {
-        const merged = { ...state, ...next };
-        if (merged.active === state.active && merged.user === state.user && merged.assistant === state.assistant) return;
-        state = merged;
-        emit();
-      };
-      return {
-        subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-        get: () => state,
-        start() { set({ active: true, user: '', assistant: '' }); },
-        stop() { set({ active: false, user: '', assistant: '' }); },
-        clearUser() { set({ user: '' }); },
-        append(role, text) {
-          if (typeof text !== 'string' || text === '') return;
-          const key = role === 'user' ? 'user' : 'assistant';
-          set({ [key]: (state[key] + text).slice(-800) });
-        },
-      };
-    })();
-
-    const CAPTURE_RATE = 24_000;
-    const FRAME_SAMPLES = 480; // 20 ms at 24 kHz
-    const FLUSH_MS = 100;
-    const WORKLET_SOURCE = `
-      class LiveVoiceCapture extends AudioWorkletProcessor {
-        constructor() { super(); this.frame = new Float32Array(${FRAME_SAMPLES}); this.filled = 0; }
-        process(inputs) {
-          const channel = inputs[0] && inputs[0][0];
-          if (!channel) return true;
-          for (let i = 0; i < channel.length; i++) {
-            this.frame[this.filled++] = channel[i];
-            if (this.filled === this.frame.length) {
-              this.port.postMessage(this.frame.slice(0));
-              this.filled = 0;
-            }
-          }
-          return true;
-        }
-      }
-      registerProcessor('live-voice-capture', LiveVoiceCapture);
-    `;
-
-    async function api(path, body) {
-      const response = await fetch(`/api/live-voice${path}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-        credentials: 'same-origin',
-        cache: 'no-store',
-      });
-      if (response.status === 204) return undefined;
-      let payload;
-      try {
-        payload = await response.json();
-      } catch {
-        payload = undefined;
-      }
-      if (!response.ok && !payload?.error) {
-        throw new Error(`live voice: ${response.status}`);
-      }
-      return payload;
-    }
-
-    function resample(input, from, to) {
-      if (from === to) return input;
-      const ratio = from / to;
-      const length = Math.max(1, Math.round(input.length / ratio));
-      const out = new Float32Array(length);
-      for (let i = 0; i < length; i++) {
-        const pos = i * ratio;
-        const base = Math.floor(pos);
-        const frac = pos - base;
-        const a = input[base] ?? 0;
-        const b = input[Math.min(base + 1, input.length - 1)] ?? a;
-        out[i] = a * (1 - frac) + b * frac;
-      }
-      return out;
-    }
-
-    function toPcm16(samples) {
-      const pcm = new Int16Array(samples.length);
-      for (let i = 0; i < samples.length; i++) {
-        const value = Math.max(-1, Math.min(1, samples[i]));
-        pcm[i] = value < 0 ? value * 0x8000 : value * 0x7fff;
-      }
-      return pcm;
-    }
-
-    function pcm16ToBase64(pcm) {
-      const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-      let binary = '';
-      const chunk = 0x8000;
-      for (let offset = 0; offset < bytes.length; offset += chunk) {
-        binary += String.fromCharCode.apply(null, bytes.subarray(offset, offset + chunk));
-      }
-      return btoa(binary);
-    }
-
-    function base64ToFloat(base64) {
-      const binary = atob(base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const pcm = new Int16Array(bytes.buffer, 0, Math.floor(bytes.length / 2));
-      const out = new Float32Array(pcm.length);
-      for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 32768;
-      return out;
-    }
-
-    /** Everything one live session owns, so teardown is one call. */
-    function createEngine({ onAudio, onStatus, onTranscript, onError, onClosed, onMuted }) {
-      let liveId = null;
-      let audioContext = null;
-      let worklet = null;
-      let stream = null;
-      let source = null;
-      let flushTimer = null;
-      let pending = [];
-      let nextPlaybackAt = 0;
-      let stopped = false;
-      let polling = false;
-
-      async function start(sessionId) {
-        const started = await api('/session', { sessionId });
-        if (started?.error) throw new Error(started.error);
-        liveId = started.liveId;
-
-        audioContext = new AudioContext();
-        await audioContext.resume();
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        });
-        const moduleUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'text/javascript' }));
-        await audioContext.audioWorklet.addModule(moduleUrl);
-        URL.revokeObjectURL(moduleUrl);
-        source = audioContext.createMediaStreamSource(stream);
-        worklet = new AudioWorkletNode(audioContext, 'live-voice-capture');
-        const captureRate = audioContext.sampleRate;
-        worklet.port.onmessage = (event) => {
-          if (stopped) return;
-          pending.push(toPcm16(resample(event.data, captureRate, CAPTURE_RATE)));
-        };
-        source.connect(worklet);
-        const sink = audioContext.createGain();
-        sink.gain.value = 0;
-        worklet.connect(sink).connect(audioContext.destination);
-
-        flushTimer = setInterval(() => { void flush(); }, FLUSH_MS);
-        void poll();
-      }
-
-      async function flush() {
-        if (stopped || !liveId || pending.length === 0) return;
-        const total = pending.reduce((sum, part) => sum + part.length, 0);
-        const merged = new Int16Array(total);
-        let offset = 0;
-        for (const part of pending) {
-          merged.set(part, offset);
-          offset += part.length;
-        }
-        pending = [];
-        try {
-          await api('/audio', { liveId, data: pcm16ToBase64(merged) });
-        } catch {
-          // a dropped audio chunk is preferable to tearing down the session
-        }
-      }
-
-      async function poll() {
-        if (polling || stopped) return;
-        polling = true;
-        let failures = 0;
-        while (!stopped && liveId) {
-          let result;
-          try {
-            result = await api('/poll', { liveId });
-            failures = 0;
-          } catch {
-            if (stopped) return;
-            failures += 1;
-            if (failures >= 4) {
-              onError('live voice: connection lost');
-              await stop('poll-error');
-              return;
-            }
-            await new Promise((resolve) => setTimeout(resolve, 800));
-            continue;
-          }
-          if (stopped) return;
-          for (const event of result?.events ?? []) handle(event);
-          if (result?.closed) {
-            await stop('server-closed');
-            onClosed('closed');
-            return;
-          }
-        }
-        polling = false;
-      }
-
-      function handle(message) {
-        if (message.type === 'audio') {
-          play(message.data);
-          onStatus('speaking');
-        } else if (message.type === 'ready') {
-          onStatus('listening');
-        } else if (message.type === 'status') {
-          onStatus(message.state === 'thinking' ? 'thinking' : 'listening');
-        } else if (message.type === 'transcript') {
-          onTranscript(message.role, message.text);
-        } else if (message.type === 'muted') {
-          onMuted(message.muted === true);
-        } else if (message.type === 'error') {
-          onError(message.message);
-        } else if (message.type === 'closed') {
-          void stop();
-          onClosed(message.reason);
-        }
-      }
-
-      function play(base64) {
-        if (!audioContext) return;
-        const samples = base64ToFloat(base64);
-        if (samples.length === 0) return;
-        const buffer = audioContext.createBuffer(1, samples.length, CAPTURE_RATE);
-        buffer.copyToChannel(samples, 0);
-        const player = audioContext.createBufferSource();
-        player.buffer = buffer;
-        player.connect(audioContext.destination);
-        const at = Math.max(audioContext.currentTime + 0.03, nextPlaybackAt);
-        player.start(at);
-        nextPlaybackAt = at + buffer.duration;
-        onAudio();
-      }
-
-      async function stop(reason = 'user') {
-        if (stopped && !liveId) return;
-        stopped = true;
-        clearInterval(flushTimer);
-        flushTimer = null;
-        const id = liveId;
-        liveId = null;
-        if (id) {
-          try { await api('/close', { liveId: id, reason }); } catch {}
-        }
-        try { worklet?.disconnect(); } catch {}
-        try { source?.disconnect(); } catch {}
-        worklet = null;
-        source = null;
-        for (const track of stream?.getTracks() ?? []) track.stop();
-        stream = null;
-        try { await audioContext?.close(); } catch {}
-        audioContext = null;
-        pending = [];
-        nextPlaybackAt = 0;
-      }
-
-      /** Ask the host to mute or unmute caller audio; the server confirms. */
-      async function setMuted(next) {
-        if (!liveId) return;
-        try { await api('/mute', { liveId, muted: next }); } catch {}
-      }
-
-      return { start, stop, setMuted };
-    }
-
-    const STATUS_TEXT = {
-      connecting: 'Connecting',
-      listening: 'Listening',
-      thinking: 'Working',
-      speaking: 'Speaking',
-      error: 'Error',
-    };
-
-    const STYLE_ID = 'dsh-live-voice-style';
-
-    function ensureStyle() {
-      if (document.getElementById(STYLE_ID)) return;
-      const style = document.createElement('style');
-      style.id = STYLE_ID;
-      style.textContent = `
-        .lv-orb { transition: transform .12s ease, opacity .12s ease; }
-        .lv-orb:hover { transform: scale(1.06); }
-        .lv-orb:disabled { opacity: .45; cursor: default; transform: none; }
-        .lv-bar {
-          transform-box: fill-box; transform-origin: center; transform: scaleY(.62);
-        }
-        .lv-orb-on .lv-bar { animation: lv-pulse 900ms ease-in-out infinite; }
-        .lv-orb-thinking .lv-bar { animation-duration: 1600ms; }
-        .lv-caret {
-          display: inline-block; width: 2px; height: 1.05em; margin-left: 2px;
-          vertical-align: text-bottom; background: currentColor; opacity: .5;
-          animation: lv-blink 1.1s ease-in-out infinite;
-        }
-        @keyframes lv-blink {
-          0%, 100% { opacity: .25; }
-          50% { opacity: 1; }
-        }
-        @keyframes lv-pulse {
-          0%, 100% { transform: scaleY(.35); }
-          50% { transform: scaleY(1); }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .lv-orb-on .lv-bar { animation: none; transform: scaleY(.8); }
-          .lv-caret { animation: none; }
-        }
-      `;
-      document.head.append(style);
-    }
-
-    function LiveVoice({ sessionId }) {
-      const [status, setStatus] = useState('idle');
-      const [muted, setMuted] = useState(false);
-      const [error, setError] = useState('');
-      const engineRef = useRef(null);
-      const idleTimer = useRef(null);
-
-      useEffect(() => { ensureStyle(); }, []);
-
-      const settle = useCallback(() => {
-        clearTimeout(idleTimer.current);
-        idleTimer.current = setTimeout(() => {
-          setStatus((current) => (current === 'speaking' ? 'listening' : current));
-        }, 600);
-      }, []);
-
-      const stop = useCallback(async () => {
-        clearTimeout(idleTimer.current);
-        const engine = engineRef.current;
-        engineRef.current = null;
-        setStatus('idle');
-        setMuted(false);
-        dictation.stop();
-        await engine?.stop();
-      }, []);
-
-      useEffect(() => () => { void engineRef.current?.stop(); }, []);
-
-      const start = useCallback(async () => {
-        if (!sessionId || engineRef.current) return;
-        setError('');
-        setStatus('connecting');
-        dictation.start();
-        const engine = createEngine({
-          onAudio: () => { setStatus('speaking'); settle(); },
-          onStatus: (next) => {
-            setStatus(next);
-            if (next === 'thinking') dictation.clearUser();
-          },
-          onTranscript: (role, text) => { dictation.append(role, text); },
-          onMuted: (next) => setMuted(next),
-          onError: (message) => {
-            setError(message);
-            setStatus('error');
-            dictation.stop();
-            const running = engineRef.current;
-            engineRef.current = null;
-            void running?.stop();
-          },
-          onClosed: (reason) => {
-            engineRef.current = null;
-            setStatus('idle');
-            dictation.stop();
-            setError(`live session ended (${reason})`);
-          },
-        });
-        engineRef.current = engine;
-        try {
-          await engine.start(sessionId);
-        } catch (cause) {
-          setError(cause instanceof Error ? cause.message : String(cause));
-          setStatus('error');
-          engineRef.current = null;
-          await engine.stop();
-        }
-      }, [sessionId, settle]);
-
-      const active = status !== 'idle' && status !== 'error';
-      const title = active
-        ? 'End live voice session'
-        : sessionId ? 'Start live voice session' : 'Open a session first';
-      const className = ['lv-orb', active ? 'lv-orb-on' : '', status === 'thinking' ? 'lv-orb-thinking' : '']
-        .filter(Boolean).join(' ');
-
-      return h('div', { style: { display: 'inline-flex', alignItems: 'center', gap: 8 } },
-        h('span', {
-          role: 'button',
-          tabIndex: sessionId ? 0 : -1,
-          'aria-label': title,
-          'aria-disabled': sessionId ? undefined : true,
-          title,
-          className,
-          onClick: () => { if (!sessionId) return; if (active) void stop(); else void start(); },
-          onKeyDown: (event) => {
-            if (event.key !== 'Enter' && event.key !== ' ') return;
-            event.preventDefault();
-            if (!sessionId) return;
-            if (active) void stop(); else void start();
-          },
-          style: {
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 34, height: 34, minWidth: 34, maxWidth: 34, flex: '0 0 auto',
-            padding: 0, margin: 0, background: 'transparent', border: 'none',
-            boxShadow: 'none', outline: 'none', cursor: sessionId ? 'pointer' : 'default',
-            opacity: sessionId ? 1 : 0.45, userSelect: 'none', lineHeight: 0,
-          },
-        },
-        h('svg', {
-          width: 34, height: 34, viewBox: '0 0 34 34',
-          'aria-hidden': true, style: { display: 'block' },
-        },
-        h('circle', {
-          cx: 17, cy: 17, r: 15.5,
-          fill: '#ffffff', stroke: 'rgba(0, 0, 0, 0.12)', strokeWidth: 1,
-        }),
-        [
-          [8.675 + 0 * 3.85, 8],
-          [8.675 + 1 * 3.85, 14],
-          [8.675 + 2 * 3.85, 20],
-          [8.675 + 3 * 3.85, 14],
-          [8.675 + 4 * 3.85, 8],
-        ].map(([x, height], index) => h('rect', {
-          key: index,
-          className: 'lv-bar',
-          x, y: 17 - height / 2, width: 1.25, height, rx: 0.625,
-          fill: '#0d0f12',
-          style: { animationDelay: `${index * 90}ms` },
-        })))),
-        active ? h('span', {
-          role: 'button',
-          tabIndex: 0,
-          'aria-label': muted ? 'Unmute microphone' : 'Mute microphone',
-          'aria-pressed': muted,
-          title: muted ? 'Unmute microphone' : 'Mute microphone',
-          className: 'lv-mic',
-          onClick: () => {
-            const next = !muted;
-            setMuted(next);
-            void engineRef.current?.setMuted(next);
-          },
-          onKeyDown: (event) => {
-            if (event.key !== 'Enter' && event.key !== ' ') return;
-            event.preventDefault();
-            const next = !muted;
-            setMuted(next);
-            void engineRef.current?.setMuted(next);
-          },
-          style: {
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 26, height: 26, minWidth: 26, padding: 0, margin: 0,
-            borderRadius: '50%', cursor: 'pointer', userSelect: 'none',
-            background: muted ? '#0d0f12' : 'transparent',
-            border: '1px solid rgba(0, 0, 0, 0.18)',
-            color: muted ? '#ffffff' : '#0d0f12',
-          },
-        }, h('svg', { width: 14, height: 14, viewBox: '0 0 16 16', 'aria-hidden': true },
-          h('path', {
-            d: muted
-              ? 'M3 2l10 12M6.5 4.5A2.5 2.5 0 0 1 10 7v1M10 11.4A3.5 3.5 0 0 1 4.5 8V7M8 12v2'
-              : 'M5 7v1a3 3 0 0 0 6 0V7M8 12v2M3.5 3.5l9 9',
-            stroke: 'currentColor', strokeWidth: 1.3, fill: 'none', strokeLinecap: 'round',
-          }))) : null,
-        error ? h('span', {
-          title: error,
-          style: { fontSize: 11, color: '#ff8a8a', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-        }, error) : null);
-    }
-
-
-
-    const NS = 'live-voice';
-
-    /** The one label this bundle still draws: the source under the dictation. */
-    const LABELS = {
-      en: { 'trigger.voice': 'Live Voice' },
-      zh: { 'trigger.voice': '实时语音' },
-    };
-
-    /**
-     * The dock is wider than the conversation column, so the fallback seat
-     * pins its row to the conversation's own content width and centres it.
-     */
-    const CHAT_COLUMN = {
-      width: '100%',
-      maxWidth: 'var(--dsh-chat-content-width, 748px)',
-      marginLeft: 'auto',
-      marginRight: 'auto',
-      boxSizing: 'border-box',
-    };
-
-    /**
-     * The dictation bubble borrows the conversation's own user-message chrome
-     * — the same surface, radius, type and width cap the chat draws a sent
-     * message with — so it reads as that message while it is still being said.
-     */
-    const DICTATION_BUBBLE = {
-      maxWidth: 'min(calc(var(--dsh-chat-content-width, 748px) * 0.702), 82%)',
-      background: 'var(--dsw-specific-bubble, rgba(128, 140, 160, 0.14))',
-      color: 'var(--dsw-alias-label-primary, inherit)',
-      borderRadius: 'var(--dsw-radius-xl, 18px)',
-      padding: '10px 16px',
-      fontSize: 'var(--dsh-content-font-size, 14px)',
-      lineHeight: 'calc(22px + var(--dsh-content-font-delta, 0px))',
-      whiteSpace: 'pre-wrap',
-      wordBreak: 'break-word',
-    };
-
-    function VoiceMark({ size = 14 }) {
-      return h('svg', { width: size, height: size, viewBox: '0 0 34 34', 'aria-hidden': true, style: { display: 'block' } },
-        h('circle', { cx: 17, cy: 17, r: 16, fill: '#ffffff', stroke: 'rgba(0,0,0,0.18)', strokeWidth: 1 }),
-        [[8.05, 8], [12.15, 14], [16.25, 20], [20.35, 14], [24.45, 8]].map(([x, height], index) => h('rect', {
-          key: index, x, y: 17 - height / 2, width: 1.5, height, rx: 0.75, fill: '#0d0f12',
-        })));
-    }
-
-    /**
-     * The chat column that owns this conversation's messages, resolved from
-     * the seat's own hidden node so the lookup never crosses into another
-     * Session. Re-resolves when the view under the composer changes.
-     */
-    function useChatColumn(anchor) {
-      const [column, setColumn] = useState(null);
-
-      useEffect(() => {
-        const root = anchor.current?.closest('[data-conversation-content]');
-        if (!root) return undefined;
-        let frame = 0;
-        const sync = () => {
-          frame = 0;
-          setColumn(root.querySelector('[data-chat-flow]'));
-        };
-        sync();
-        const observer = new MutationObserver(() => {
-          if (frame === 0) frame = requestAnimationFrame(sync);
-        });
-        observer.observe(root, { childList: true, subtree: true });
-        return () => {
-          observer.disconnect();
-          if (frame !== 0) cancelAnimationFrame(frame);
-        };
-      }, [anchor]);
-
-      return column;
-    }
-
-    /**
-     * Dictation tail: the words as they are decoded, seated at the end of the
-     * conversation as the user message being dictated. The bubble is the
-     * message; the mark and title beneath it name the source, and the caret
-     * inside it keeps the last word in place while more arrives.
-     *
-     * The row lives in the chat column, before the running indicator while a
-     * turn is in flight, so it scrolls with the transcript and clears when the
-     * request dispatches, at which point the committed voice row carries the
-     * same words. A view without a chat column (a document, a trajectory)
-     * keeps it in the dock above the composer.
-     */
-    function DictationTail({ t }) {
-      const view = useSyncExternalStore(dictation.subscribe, dictation.get);
-      const anchor = useRef(null);
-      const row = useRef(null);
-      const column = useChatColumn(anchor);
-      const live = view.active && view.user !== '';
-
-      useEffect(() => { ensureStyle(); }, []);
-
-      useEffect(() => {
-        const node = row.current;
-        if (!live || node === null || column === null) return undefined;
-        const place = () => {
-          const running = column.querySelector(':scope > [data-chat-running]');
-          if (node.parentNode !== column || node.nextElementSibling !== running) {
-            column.insertBefore(node, running);
-          }
-        };
-        place();
-        const observer = new MutationObserver(place);
-        observer.observe(column, { childList: true });
-        return () => {
-          observer.disconnect();
-          node.remove();
-        };
-      }, [column, live]);
-
-      const anchorNode = h('span', { ref: anchor, hidden: true, 'aria-hidden': true });
-      if (!live) return anchorNode;
-
-      const content = h('div', {
-        ref: row,
-        'data-live-voice-dictation': '',
-        style: {
-          display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
-          gap: 5, padding: '2px 0 4px',
-        },
-      },
-      h('div', { style: DICTATION_BUBBLE }, view.user, h('span', { className: 'lv-caret', 'aria-hidden': true })),
-      h('div', {
-        style: {
-          display: 'inline-flex', alignItems: 'center', gap: 5,
-          fontSize: 11.5, lineHeight: '16px', opacity: 0.45,
-        },
-      }, h(VoiceMark, { size: 12 }), h('span', null, t('trigger.voice'))));
-
-      return h(Fragment, null, anchorNode, column !== null && createPortal !== null
-        ? createPortal(content, column)
-        : h('div', { style: CHAT_COLUMN }, content));
-    }
-
-    function maskKey(key) {
-      return key.length <= 12 ? key : `${key.slice(0, 7)}…${key.slice(-4)}`;
-    }
-
-    /**
-     * The plugin's settings card. The host reads and writes the key in the
-     * owner-only key file; the card asks for the stored value on mount so the
-     * field always shows the key in use, masked by the password input itself.
-     */
-    function LiveVoiceSettings({ view }) {
-      const [state, setState] = useState(null);
-      const [value, setValue] = useState('');
-      const [dirty, setDirty] = useState(false);
-      const [busy, setBusy] = useState(false);
-      const [error, setError] = useState('');
-      const [note, setNote] = useState('');
-
-      const load = useCallback(async () => {
-        try {
-          const response = await fetch('/api/live-voice/settings', { credentials: 'same-origin', cache: 'no-store' });
-          const result = await response.json();
-          setState(result);
-          setValue((current) => (current === '' ? result.key ?? '' : current));
-        } catch {
-          setState(null);
-        }
-      }, []);
-
-      useEffect(() => { void load(); }, [load]);
-
-      const save = useCallback(async () => {
-        const key = value.trim();
-        if (key === '') return;
-        setBusy(true);
-        setError('');
-        setNote('');
-        try {
-          const response = await fetch('/api/live-voice/settings', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ apiKey: key }),
-            credentials: 'same-origin',
-          });
-          const result = await response.json();
-          if (!response.ok || result.error) throw new Error(result.error ?? `status ${response.status}`);
-          setState(result);
-          setValue(result.key ?? key);
-          setDirty(false);
-          setNote('Saved. The next live session uses it.');
-        } catch (cause) {
-          setError(cause instanceof Error ? cause.message : String(cause));
-        } finally {
-          setBusy(false);
-        }
-      }, [value]);
-
-      if (view === 'summary') {
-        return h('span', null, state?.hasKey ? `API key ${state.hint}` : 'No OpenAI API key yet');
-      }
-
-      return h('div', { style: { display: 'grid', gap: 8, padding: '4px 0 12px' } },
-        h('div', { style: { fontSize: 12, opacity: 0.75 } },
-          state === null
-            ? 'Reading the stored key…'
-            : state.hasKey
-              ? `Stored key ${state.hint} · ${state.file}`
-              : 'No key stored. Paste an OpenAI key with GPT-Live access.'),
-        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
-          h('input', {
-            type: 'password',
-            value,
-            placeholder: 'sk-...',
-            autoComplete: 'off',
-            spellCheck: false,
-            disabled: busy,
-            onChange: (event) => { setDirty(true); setValue(event.target.value); },
-            onKeyDown: (event) => { if (event.key === 'Enter') void save(); },
-            style: {
-              flex: '1 1 280px', height: 30, padding: '0 10px', borderRadius: 8,
-              border: '1px solid rgba(128, 140, 160, 0.4)', background: 'transparent',
-              color: 'inherit', fontFamily: 'monospace', fontSize: 12,
-            },
-          }),
-          h('button', {
-            type: 'button',
-            disabled: busy || value.trim() === '',
-            onClick: () => { void save(); },
-            style: {
-              height: 30, padding: '0 14px', borderRadius: 8, cursor: 'pointer',
-              border: '1px solid rgba(122, 208, 255, 0.45)', background: 'rgba(122, 208, 255, 0.12)',
-              color: 'inherit', fontSize: 12, opacity: busy ? 0.6 : 1,
-            },
-          }, busy ? 'Saving…' : 'Save key')),
-        error ? h('div', { style: { fontSize: 11, color: '#ff8a8a' } }, error) : null,
-        note ? h('div', { style: { fontSize: 11, opacity: 0.6 } }, note) : null);
-    }
-
     return {
       inject: ['slots', 'locale'],
       apply(ctx) {
+        const engines = new Set();
+        let disposed = false;
+        ctx.effect(() => async () => {
+          disposed = true;
+          await Promise.allSettled([...engines].map(engine => engine.stop()));
+          dictation.stop();
+        });
+        /**
+         * Speech as it is decoded, shared by the orb and the dictation strip. The
+         * strip shows the words while they arrive; the chat row takes over once a
+         * delegation hands the request to the harness.
+         */
+        const dictation = (() => {
+          let state = { active: false, user: '', assistant: '' };
+          const listeners = new Set();
+          const emit = () => { for (const listener of listeners) listener(); };
+          const set = (next) => {
+            const merged = { ...state, ...next };
+            if (merged.active === state.active && merged.user === state.user && merged.assistant === state.assistant) return;
+            state = merged;
+            emit();
+          };
+          return {
+            subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+            get: () => state,
+            start() { set({ active: true, user: '', assistant: '' }); },
+            stop() { set({ active: false, user: '', assistant: '' }); },
+            clearUser() { set({ user: '' }); },
+            append(role, text) {
+              if (typeof text !== 'string' || text === '') return;
+              const key = role === 'user' ? 'user' : 'assistant';
+              set({ [key]: (state[key] + text).slice(-800) });
+            },
+          };
+        })();
+
+        const CAPTURE_RATE = 24_000;
+        const FRAME_SAMPLES = 480; // 20 ms at 24 kHz
+        const FLUSH_MS = 100;
+        const WORKLET_SOURCE = `
+          class LiveVoiceCapture extends AudioWorkletProcessor {
+            constructor() { super(); this.frame = new Float32Array(${FRAME_SAMPLES}); this.filled = 0; }
+            process(inputs) {
+              const channel = inputs[0] && inputs[0][0];
+              if (!channel) return true;
+              for (let i = 0; i < channel.length; i++) {
+                this.frame[this.filled++] = channel[i];
+                if (this.filled === this.frame.length) {
+                  this.port.postMessage(this.frame.slice(0));
+                  this.filled = 0;
+                }
+              }
+              return true;
+            }
+          }
+          registerProcessor('live-voice-capture', LiveVoiceCapture);
+        `;
+
+        async function api(path, body, signal) {
+          const response = await fetch(`/api/live-voice${path}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+            credentials: 'same-origin',
+            cache: 'no-store',
+            signal,
+          });
+          if (response.status === 204) return undefined;
+          let payload;
+          try {
+            payload = await response.json();
+          } catch {
+            payload = undefined;
+          }
+          if (!response.ok && !payload?.error) {
+            throw new Error(`live voice: ${response.status}`);
+          }
+          return payload;
+        }
+
+        function resample(input, from, to) {
+          if (from === to) return input;
+          const ratio = from / to;
+          const length = Math.max(1, Math.round(input.length / ratio));
+          const out = new Float32Array(length);
+          for (let i = 0; i < length; i++) {
+            const pos = i * ratio;
+            const base = Math.floor(pos);
+            const frac = pos - base;
+            const a = input[base] ?? 0;
+            const b = input[Math.min(base + 1, input.length - 1)] ?? a;
+            out[i] = a * (1 - frac) + b * frac;
+          }
+          return out;
+        }
+
+        function toPcm16(samples) {
+          const pcm = new Int16Array(samples.length);
+          for (let i = 0; i < samples.length; i++) {
+            const value = Math.max(-1, Math.min(1, samples[i]));
+            pcm[i] = value < 0 ? value * 0x8000 : value * 0x7fff;
+          }
+          return pcm;
+        }
+
+        function pcm16ToBase64(pcm) {
+          const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+          let binary = '';
+          const chunk = 0x8000;
+          for (let offset = 0; offset < bytes.length; offset += chunk) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(offset, offset + chunk));
+          }
+          return btoa(binary);
+        }
+
+        function base64ToFloat(base64) {
+          const binary = atob(base64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          const pcm = new Int16Array(bytes.buffer, 0, Math.floor(bytes.length / 2));
+          const out = new Float32Array(pcm.length);
+          for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 32768;
+          return out;
+        }
+
+        /** Everything one live session owns, so teardown is one call. */
+        function createEngine({ onAudio, onStatus, onTranscript, onError, onClosed, onMuted }) {
+          let liveId = null;
+          let audioContext = null;
+          let worklet = null;
+          let stream = null;
+          let source = null;
+          let flushTimer = null;
+          let pending = [];
+          let nextPlaybackAt = 0;
+          let stopped = false;
+          let polling = false;
+          let startup;
+          let shutdown;
+          const transport = new AbortController();
+          const tasks = new Set();
+          function track(task) {
+            tasks.add(task);
+            void task.then(() => tasks.delete(task), () => tasks.delete(task));
+            return task;
+          }
+
+          function releaseAudio() {
+            clearInterval(flushTimer);
+            flushTimer = null;
+            for (const track of stream?.getTracks() ?? []) track.stop();
+            stream = null;
+            worklet?.disconnect();
+            source?.disconnect();
+            worklet = null;
+            source = null;
+            const context = audioContext;
+            audioContext = null;
+            pending = [];
+            nextPlaybackAt = 0;
+            return context?.close();
+          }
+
+          function start(sessionId) {
+            startup = acquire(sessionId);
+            return startup;
+          }
+
+          async function acquire(sessionId) {
+            const started = await api('/session', { sessionId }, AbortSignal.timeout(20_000));
+            if (started?.error) throw new Error(started.error);
+            liveId = started.liveId;
+            if (stopped) return;
+
+            audioContext = new AudioContext();
+            await audioContext.resume();
+            if (stopped) return;
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            });
+            if (stopped) { await releaseAudio(); return; }
+            const moduleUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'text/javascript' }));
+            try {
+              await audioContext.audioWorklet.addModule(moduleUrl);
+            } finally {
+              URL.revokeObjectURL(moduleUrl);
+            }
+            if (stopped) return;
+            source = audioContext.createMediaStreamSource(stream);
+            worklet = new AudioWorkletNode(audioContext, 'live-voice-capture');
+            const captureRate = audioContext.sampleRate;
+            worklet.port.onmessage = (event) => {
+              if (stopped) return;
+              pending.push(toPcm16(resample(event.data, captureRate, CAPTURE_RATE)));
+            };
+            source.connect(worklet);
+            const sink = audioContext.createGain();
+            sink.gain.value = 0;
+            worklet.connect(sink).connect(audioContext.destination);
+
+            flushTimer = setInterval(() => { void track(flush()); }, FLUSH_MS);
+            void track(poll());
+          }
+
+          async function flush() {
+            if (stopped || !liveId || pending.length === 0) return;
+            const total = pending.reduce((sum, part) => sum + part.length, 0);
+            const merged = new Int16Array(total);
+            let offset = 0;
+            for (const part of pending) {
+              merged.set(part, offset);
+              offset += part.length;
+            }
+            pending = [];
+            try {
+              await api('/audio', { liveId, data: pcm16ToBase64(merged) }, transport.signal);
+            } catch {
+              // a dropped audio chunk is preferable to tearing down the session
+            }
+          }
+
+          async function poll() {
+            if (polling || stopped) return;
+            polling = true;
+            let failures = 0;
+            while (!stopped && liveId) {
+              let result;
+              try {
+                result = await api('/poll', { liveId }, transport.signal);
+                failures = 0;
+              } catch {
+                if (stopped) return;
+                failures += 1;
+                if (failures >= 4) {
+                  onError('live voice: connection lost');
+                  void stop('poll-error');
+                  return;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 800));
+                continue;
+              }
+              if (stopped) return;
+              for (const event of result?.events ?? []) handle(event);
+              if (result?.closed) {
+                void stop('server-closed');
+                onClosed('closed');
+                return;
+              }
+            }
+            polling = false;
+          }
+
+          function handle(message) {
+            if (message.type === 'audio') {
+              play(message.data);
+              onStatus('speaking');
+            } else if (message.type === 'ready') {
+              onStatus('listening');
+            } else if (message.type === 'status') {
+              onStatus(message.state === 'thinking' ? 'thinking' : 'listening');
+            } else if (message.type === 'transcript') {
+              onTranscript(message.role, message.text);
+            } else if (message.type === 'muted') {
+              onMuted(message.muted === true);
+            } else if (message.type === 'error') {
+              onError(message.message);
+            } else if (message.type === 'closed') {
+              void stop();
+              onClosed(message.reason);
+            }
+          }
+
+          function play(base64) {
+            if (!audioContext) return;
+            const samples = base64ToFloat(base64);
+            if (samples.length === 0) return;
+            const buffer = audioContext.createBuffer(1, samples.length, CAPTURE_RATE);
+            buffer.copyToChannel(samples, 0);
+            const player = audioContext.createBufferSource();
+            player.buffer = buffer;
+            player.connect(audioContext.destination);
+            const at = Math.max(audioContext.currentTime + 0.03, nextPlaybackAt);
+            player.start(at);
+            nextPlaybackAt = at + buffer.duration;
+            onAudio();
+          }
+
+          function stop(reason = 'user') {
+            if (shutdown) return shutdown;
+            stopped = true;
+            transport.abort();
+            const audioReleased = releaseAudio();
+            shutdown = (async () => {
+              await audioReleased;
+              await Promise.allSettled([startup, ...tasks]);
+              await releaseAudio();
+              const id = liveId;
+              liveId = null;
+              if (id) {
+                try {
+                  await api('/close', { liveId: id, reason }, AbortSignal.timeout(5_000));
+                } catch (error) {
+                  // Local audio is released; the host session cap bounds a lost close request.
+                  console.warn('Live Voice could not confirm host shutdown', error);
+                }
+              }
+            })();
+            return shutdown;
+          }
+
+          /** Ask the host to mute or unmute caller audio; the server confirms. */
+          async function setMuted(next) {
+            if (stopped || !liveId) return;
+            try { await track(api('/mute', { liveId, muted: next }, transport.signal)); } catch {}
+          }
+
+          const engine = { start, stop, setMuted };
+          engines.add(engine);
+          const ownedStop = engine.stop;
+          engine.stop = (reason) => {
+            const task = ownedStop(reason);
+            void task.then(() => engines.delete(engine), () => engines.delete(engine));
+            return task;
+          };
+          return engine;
+        }
+
+        const STATUS_TEXT = {
+          connecting: 'Connecting',
+          listening: 'Listening',
+          thinking: 'Working',
+          speaking: 'Speaking',
+          error: 'Error',
+        };
+
+        const STYLE_ID = 'dsh-live-voice-style';
+
+        function ensureStyle() {
+          if (document.getElementById(STYLE_ID)) return;
+          const style = document.createElement('style');
+          style.id = STYLE_ID;
+          style.textContent = `
+            .lv-orb { transition: transform .12s ease, opacity .12s ease; }
+            .lv-orb:hover { transform: scale(1.06); }
+            .lv-orb:disabled { opacity: .45; cursor: default; transform: none; }
+            .lv-bar {
+              transform-box: fill-box; transform-origin: center; transform: scaleY(.62);
+            }
+            .lv-orb-on .lv-bar { animation: lv-pulse 900ms ease-in-out infinite; }
+            .lv-orb-connecting circle { transform-origin: center; animation: lv-connect 1s linear infinite; }
+            .lv-orb-connecting .lv-bar { opacity: .45; }
+            @keyframes lv-connect { to { transform: rotate(360deg); } }
+            .lv-orb-thinking .lv-bar { animation-duration: 1600ms; }
+            .lv-caret {
+              display: inline-block; width: 2px; height: 1.05em; margin-left: 2px;
+              vertical-align: text-bottom; background: currentColor; opacity: .5;
+              animation: lv-blink 1.1s ease-in-out infinite;
+            }
+            @keyframes lv-blink {
+              0%, 100% { opacity: .25; }
+              50% { opacity: 1; }
+            }
+            @keyframes lv-pulse {
+              0%, 100% { transform: scaleY(.35); }
+              50% { transform: scaleY(1); }
+            }
+            @media (prefers-reduced-motion: reduce) {
+              .lv-orb-on .lv-bar { animation: none; transform: scaleY(.8); }
+              .lv-caret, .lv-orb-connecting circle { animation: none; }
+            }
+          `;
+          document.head.append(style);
+          return () => style.remove();
+        }
+
+        function LiveVoice({ sessionId }) {
+          const [status, setStatus] = useState('idle');
+          const [muted, setMuted] = useState(false);
+          const [error, setError] = useState('');
+          const engineRef = useRef(null);
+          const idleTimer = useRef(null);
+
+
+
+          const settle = useCallback(() => {
+            clearTimeout(idleTimer.current);
+            idleTimer.current = setTimeout(() => {
+              setStatus((current) => (current === 'speaking' ? 'listening' : current));
+            }, 600);
+          }, []);
+
+          const stop = useCallback(async () => {
+            clearTimeout(idleTimer.current);
+            const engine = engineRef.current;
+            engineRef.current = null;
+            setStatus('idle');
+            setMuted(false);
+            dictation.stop();
+            await engine?.stop();
+          }, []);
+
+          useEffect(() => {
+            setStatus('idle');
+            setMuted(false);
+            setError('');
+            return () => {
+              clearTimeout(idleTimer.current);
+              const engine = engineRef.current;
+              engineRef.current = null;
+              dictation.stop();
+              void engine?.stop();
+            };
+          }, [sessionId]);
+
+          const start = useCallback(async () => {
+            if (disposed || !sessionId || engineRef.current) return;
+            setError('');
+            setStatus('connecting');
+            dictation.start();
+            const engine = createEngine({
+              onAudio: () => { if (engineRef.current !== engine) return; setStatus('speaking'); settle(); },
+              onStatus: (next) => {
+                if (engineRef.current !== engine) return;
+                setStatus(next);
+                if (next === 'thinking') dictation.clearUser();
+              },
+              onTranscript: (role, text) => { if (engineRef.current !== engine) return; dictation.append(role, text); },
+              onMuted: (next) => { if (engineRef.current === engine) setMuted(next); },
+              onError: (message) => {
+                if (engineRef.current !== engine) return;
+                setError(message);
+                setStatus('error');
+                dictation.stop();
+                const running = engineRef.current;
+                engineRef.current = null;
+                void running?.stop();
+              },
+              onClosed: (reason) => {
+                if (engineRef.current !== engine) return;
+                engineRef.current = null;
+                setStatus('idle');
+                dictation.stop();
+                setError(`live session ended (${reason})`);
+              },
+            });
+            engineRef.current = engine;
+            try {
+              await engine.start(sessionId);
+            } catch (cause) {
+              if (engineRef.current !== engine) return;
+              setError(cause instanceof Error ? cause.message : String(cause));
+              setStatus('error');
+              engineRef.current = null;
+              await engine.stop();
+            }
+          }, [sessionId, settle]);
+
+          const active = status !== 'idle' && status !== 'error';
+          const connecting = status === 'connecting';
+          const enabled = active && !connecting;
+          const title = active
+            ? 'End live voice session'
+            : sessionId ? 'Start live voice session' : 'Open a session first';
+          const className = ['lv-orb', enabled ? 'lv-orb-on' : '', connecting ? 'lv-orb-connecting' : '', status === 'thinking' ? 'lv-orb-thinking' : '']
+            .filter(Boolean).join(' ');
+
+          return h('div', { className: 'lv-controls', style: { display: 'inline-flex', alignItems: 'center', gap: 12 } },
+            error ? h('span', {
+              title: error,
+              style: { fontSize: 11, color: '#ff8a8a', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+            }, error) : null,
+            enabled ? h('span', {
+              role: 'button',
+              tabIndex: 0,
+              'aria-label': muted ? 'Unmute microphone' : 'Mute microphone',
+              'aria-pressed': muted,
+              title: muted ? 'Unmute microphone' : 'Mute microphone',
+              className: 'lv-mic',
+              onClick: () => {
+                const next = !muted;
+                setMuted(next);
+                void engineRef.current?.setMuted(next);
+              },
+              onKeyDown: (event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                const next = !muted;
+                setMuted(next);
+                void engineRef.current?.setMuted(next);
+              },
+              style: {
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 34, height: 34, minWidth: 34, boxSizing: 'border-box', padding: 0, margin: 0,
+                borderRadius: '50%', cursor: 'pointer', userSelect: 'none',
+                background: muted ? 'var(--dsw-alias-label-primary)' : 'transparent',
+                border: '1px solid var(--dsw-alias-border-l3)',
+                color: muted ? 'var(--dsw-alias-label-primary-foreground)' : 'var(--dsw-alias-label-primary)',
+              },
+            }, h('svg', { width: 14, height: 14, viewBox: '0 0 16 16', 'aria-hidden': true },
+              h('path', {
+                d: muted
+                  ? 'M3 2l10 12M6.5 4.5A2.5 2.5 0 0 1 10 7v1M10 11.4A3.5 3.5 0 0 1 4.5 8V7M8 12v2'
+                  : 'M5 7v1a3 3 0 0 0 6 0V7M8 12v2M3.5 3.5l9 9',
+                stroke: 'currentColor', strokeWidth: 1.3, fill: 'none', strokeLinecap: 'round',
+              }))) : null,
+            h('span', {
+              role: 'button',
+              tabIndex: sessionId ? 0 : -1,
+              'aria-label': title,
+              'aria-pressed': enabled,
+              'aria-busy': connecting,
+              'data-state': status,
+              'aria-disabled': sessionId ? undefined : true,
+              title,
+              className,
+              onClick: () => { if (!sessionId) return; if (active) void stop(); else void start(); },
+              onKeyDown: (event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                if (!sessionId) return;
+                if (active) void stop(); else void start();
+              },
+              style: {
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 34, height: 34, minWidth: 34, maxWidth: 34, flex: '0 0 auto',
+                padding: 0, margin: 0, background: 'transparent', border: 'none',
+                boxShadow: 'none', outline: 'none', cursor: sessionId ? 'pointer' : 'default',
+                opacity: sessionId ? 1 : 0.45, userSelect: 'none', lineHeight: 0,
+              },
+            },
+            h('svg', {
+              width: 34, height: 34, viewBox: '0 0 34 34',
+              'aria-hidden': true, style: { display: 'block' },
+            },
+            h('circle', {
+              cx: 17, cy: 17, r: 16.5,
+              fill: enabled ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-primary-foreground)',
+              stroke: connecting ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-border-l3)',
+              strokeWidth: 1, strokeDasharray: connecting ? '8 5' : undefined,
+            }),
+            [
+              [8.675 + 0 * 3.85, 8],
+              [8.675 + 1 * 3.85, 14],
+              [8.675 + 2 * 3.85, 20],
+              [8.675 + 3 * 3.85, 14],
+              [8.675 + 4 * 3.85, 8],
+            ].map(([x, height], index) => h('rect', {
+              key: index,
+              className: 'lv-bar',
+              x, y: 17 - height / 2, width: 1.25, height, rx: 0.625,
+              fill: enabled ? 'var(--dsw-alias-label-primary-foreground)' : 'var(--dsw-alias-label-primary)',
+              style: { animationDelay: `${index * 90}ms` },
+            })))));
+        }
+
+
+
+        const NS = 'live-voice';
+
+        /** The one label this bundle still draws: the source under the dictation. */
+        const LABELS = {
+          en: { 'trigger.voice': 'Live Voice' },
+          zh: { 'trigger.voice': '实时语音' },
+        };
+
+        /**
+         * The dock is wider than the conversation column, so the fallback seat
+         * pins its row to the conversation's own content width and centres it.
+         */
+        const CHAT_COLUMN = {
+          width: '100%',
+          maxWidth: 'var(--dsh-chat-content-width, 748px)',
+          marginLeft: 'auto',
+          marginRight: 'auto',
+          boxSizing: 'border-box',
+        };
+
+        /**
+         * The dictation bubble borrows the conversation's own user-message chrome
+         * — the same surface, radius, type and width cap the chat draws a sent
+         * message with — so it reads as that message while it is still being said.
+         */
+        const DICTATION_BUBBLE = {
+          maxWidth: 'min(calc(var(--dsh-chat-content-width, 748px) * 0.702), 82%)',
+          background: 'var(--dsw-specific-bubble, rgba(128, 140, 160, 0.14))',
+          color: 'var(--dsw-alias-label-primary, inherit)',
+          borderRadius: 'var(--dsw-radius-xl, 18px)',
+          padding: '10px 16px',
+          fontSize: 'var(--dsh-content-font-size, 14px)',
+          lineHeight: 'calc(22px + var(--dsh-content-font-delta, 0px))',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        };
+
+        function VoiceMark({ size = 14 }) {
+          return h('svg', { width: size, height: size, viewBox: '0 0 34 34', 'aria-hidden': true, style: { display: 'block' } },
+            h('circle', { cx: 17, cy: 17, r: 16, fill: '#ffffff', stroke: 'rgba(0,0,0,0.18)', strokeWidth: 1 }),
+            [[8.05, 8], [12.15, 14], [16.25, 20], [20.35, 14], [24.45, 8]].map(([x, height], index) => h('rect', {
+              key: index, x, y: 17 - height / 2, width: 1.5, height, rx: 0.75, fill: '#0d0f12',
+            })));
+        }
+
+        /**
+         * The chat column that owns this conversation's messages, resolved from
+         * the seat's own hidden node so the lookup never crosses into another
+         * Session. Re-resolves when the view under the composer changes.
+         */
+        function useChatColumn(anchor) {
+          const [column, setColumn] = useState(null);
+
+          useEffect(() => {
+            const root = anchor.current?.closest('[data-conversation-content]');
+            if (!root) return undefined;
+            let frame = 0;
+            const sync = () => {
+              frame = 0;
+              setColumn(root.querySelector('[data-chat-flow]'));
+            };
+            sync();
+            const observer = new MutationObserver(() => {
+              if (frame === 0) frame = requestAnimationFrame(sync);
+            });
+            observer.observe(root, { childList: true, subtree: true });
+            return () => {
+              observer.disconnect();
+              if (frame !== 0) cancelAnimationFrame(frame);
+            };
+          }, [anchor]);
+
+          return column;
+        }
+
+        /**
+         * Dictation tail: the words as they are decoded, seated at the end of the
+         * conversation as the user message being dictated. The bubble is the
+         * message; the mark and title beneath it name the source, and the caret
+         * inside it keeps the last word in place while more arrives.
+         *
+         * The row lives in the chat column, before the running indicator while a
+         * turn is in flight, so it scrolls with the transcript and clears when the
+         * request dispatches, at which point the committed voice row carries the
+         * same words. A view without a chat column (a document, a trajectory)
+         * keeps it in the dock above the composer.
+         */
+        function DictationTail({ t }) {
+          const view = useSyncExternalStore(dictation.subscribe, dictation.get);
+          const anchor = useRef(null);
+          const row = useRef(null);
+          const column = useChatColumn(anchor);
+          const live = view.active && view.user !== '';
+
+
+
+          useEffect(() => {
+            const node = row.current;
+            if (!live || node === null || column === null) return undefined;
+            const place = () => {
+              const running = column.querySelector(':scope > [data-chat-running]');
+              if (node.parentNode !== column || node.nextElementSibling !== running) {
+                column.insertBefore(node, running);
+              }
+            };
+            place();
+            const observer = new MutationObserver(place);
+            observer.observe(column, { childList: true });
+            return () => {
+              observer.disconnect();
+              node.remove();
+            };
+          }, [column, live]);
+
+          const anchorNode = h('span', { ref: anchor, hidden: true, 'aria-hidden': true });
+          if (!live) return anchorNode;
+
+          const content = h('div', {
+            ref: row,
+            'data-live-voice-dictation': '',
+            style: {
+              display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
+              gap: 5, padding: '2px 0 4px',
+            },
+          },
+          h('div', { style: DICTATION_BUBBLE }, view.user, h('span', { className: 'lv-caret', 'aria-hidden': true })),
+          h('div', {
+            style: {
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              fontSize: 11.5, lineHeight: '16px', opacity: 0.45,
+            },
+          }, h(VoiceMark, { size: 12 }), h('span', null, t('trigger.voice'))));
+
+          return h(Fragment, null, anchorNode, column !== null && createPortal !== null
+            ? createPortal(content, column)
+            : h('div', { style: CHAT_COLUMN }, content));
+        }
+
+        function maskKey(key) {
+          return key.length <= 12 ? key : `${key.slice(0, 7)}…${key.slice(-4)}`;
+        }
+
+        /**
+         * The settings card accepts a replacement secret and reads only its status.
+         */
+        function LiveVoiceSettings({ view }) {
+          const [state, setState] = useState(null);
+          const [value, setValue] = useState('');
+          const [dirty, setDirty] = useState(false);
+          const [busy, setBusy] = useState(false);
+          const [error, setError] = useState('');
+          const [note, setNote] = useState('');
+
+          const load = useCallback(async () => {
+            try {
+              const response = await fetch('/api/live-voice/settings', { credentials: 'same-origin', cache: 'no-store' });
+              const result = await response.json();
+              setState(result);
+            } catch {
+              setState(null);
+            }
+          }, []);
+
+          useEffect(() => { void load(); }, [load]);
+
+          const save = useCallback(async () => {
+            const key = value.trim();
+            if (key === '') return;
+            setBusy(true);
+            setError('');
+            setNote('');
+            try {
+              const response = await fetch('/api/live-voice/settings', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ apiKey: key }),
+                credentials: 'same-origin',
+              });
+              const result = await response.json();
+              if (!response.ok || result.error) throw new Error(result.error ?? `status ${response.status}`);
+              setState(result);
+              setValue('');
+              setDirty(false);
+              setNote('Saved. The next live session uses it.');
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : String(cause));
+            } finally {
+              setBusy(false);
+            }
+          }, [value]);
+
+          if (view === 'summary') {
+            return h('span', null, state?.hasKey ? `API key ${state.hint}` : 'No OpenAI API key yet');
+          }
+
+          return h('div', { style: { display: 'grid', gap: 8, padding: '4px 0 12px' } },
+            h('div', { style: { fontSize: 12, opacity: 0.75 } },
+              state === null
+                ? 'Reading the stored key…'
+                : state.hasKey
+                  ? `Stored key ${state.hint} · ${state.file}`
+                  : 'No key stored. Paste an OpenAI key with GPT-Live access.'),
+            h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+              h('input', {
+                type: 'password',
+                value,
+                placeholder: 'sk-...',
+                autoComplete: 'off',
+                spellCheck: false,
+                disabled: busy,
+                onChange: (event) => { setDirty(true); setValue(event.target.value); },
+                onKeyDown: (event) => { if (event.key === 'Enter') void save(); },
+                style: {
+                  flex: '1 1 280px', height: 30, padding: '0 10px', borderRadius: 8,
+                  border: '1px solid rgba(128, 140, 160, 0.4)', background: 'transparent',
+                  color: 'inherit', fontFamily: 'monospace', fontSize: 12,
+                },
+              }),
+              h('button', {
+                type: 'button',
+                disabled: busy || value.trim() === '',
+                onClick: () => { void save(); },
+                style: {
+                  height: 30, padding: '0 14px', borderRadius: 8, cursor: 'pointer',
+                  border: '1px solid rgba(122, 208, 255, 0.45)', background: 'rgba(122, 208, 255, 0.12)',
+                  color: 'inherit', fontSize: 12, opacity: busy ? 0.6 : 1,
+                },
+              }, busy ? 'Saving…' : 'Save key')),
+            error ? h('div', { style: { fontSize: 11, color: '#ff8a8a' } }, error) : null,
+            note ? h('div', { style: { fontSize: 11, opacity: 0.6 } }, note) : null);
+        }
+
+        ctx.effect(ensureStyle);
         ctx.effect(() => ctx.locale.register(NS, LABELS));
         ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
           name: 'conversation.input.dock',

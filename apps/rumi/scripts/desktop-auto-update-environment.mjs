@@ -133,7 +133,7 @@ function httpsOrigin(value, name) {
 }
 
 /**
- * Resolve the public updater URL and object prefixes for one release target.
+ * Resolve the public updater URL and object prefixes; Rumi GitHub releases use the latest release assets.
  * @param {NodeJS.ProcessEnv} env - Packaging or upload environment.
  * @param {NodeJS.Platform} platform - Target Node.js platform.
  * @param {string} arch - Target Node.js architecture.
@@ -144,6 +144,18 @@ export function resolveDesktopAutoUpdateConfig(env, platform, arch) {
   const channel = resolveDesktopUpdateChannel(env)
   const environment = resolveDesktopAutoUpdateEnvironment(env)
   const target = resolveDesktopAutoUpdateTarget(platform, arch)
+  if (env.RUMI_RELEASE_REPOSITORY !== undefined) {
+    const repository = env.RUMI_RELEASE_REPOSITORY
+    if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/u.test(repository)) {
+      throw new Error('Rumi release: RUMI_RELEASE_REPOSITORY must be owner/repository')
+    }
+    if (target !== 'mac-arm64' || environment !== 'production') {
+      throw new Error('Rumi GitHub releases require production mac-arm64')
+    }
+    const keyPrefix = `${repository}/releases/latest/download`
+    return { environment, channel, target, origin: 'https://github.com', keyPrefix,
+      binaryKeyPrefix: keyPrefix, publicUrl: `https://github.com/${keyPrefix}/` }
+  }
   const deployment = UPDATE_ENVIRONMENTS[environment]
   let origin = deployment.fixedOrigin
   if (origin === undefined) {
@@ -180,6 +192,7 @@ export function resolveDesktopAutoUpdateConfig(env, platform, arch) {
  * @throws {Error} When the selected deployment lacks a bucket or valid updater configuration.
  */
 export function resolveDesktopUploadConfig(env, platform, arch) {
+  if (env.RUMI_RELEASE_REPOSITORY !== undefined) throw new Error('Rumi releases must use the GitHub publisher, not COS')
   const update = resolveDesktopAutoUpdateConfig(env, platform, arch)
   const deployment = UPDATE_ENVIRONMENTS[update.environment]
   return {

@@ -43,6 +43,7 @@ export function installViewer(ctx, React, primitives) {
     return () => style.remove()
   }, 'print viewer: styles')
 
+  const captures = new Map()
   const snapshots = new Map()
   const opened = new Map()
   const geometry = new Map()
@@ -60,6 +61,7 @@ export function installViewer(ctx, React, primitives) {
   }
   const subscribe = (listener) => { listeners.add(listener); return () => listeners.delete(listener) }
 
+  let refreshScene
   ctx.effect(() => {
     const controller = new AbortController()
     let timer
@@ -68,7 +70,7 @@ export function installViewer(ctx, React, primitives) {
     const readScene = async (sessionId) => {
       const response = await fetch(`${ROUTE}/state?sessionId=${encodeURIComponent(sessionId)}`, { signal: controller.signal, cache: 'no-store' })
       if (!response.ok) throw new Error('preview state unavailable')
-      return (await response.json()).scene ?? null
+      return response.json()
     }
     const readPositions = async (sessionId, datablockId) => {
       const response = await fetch(
@@ -79,6 +81,7 @@ export function installViewer(ctx, React, primitives) {
       return parseStl(await response.arrayBuffer())
     }
     const viewOf = (scene, sessionId) => ({
+      revision: scene.revision,
       design: scene.design ?? null,
       sessionId,
       volume: scene.volume,
@@ -90,11 +93,25 @@ export function installViewer(ctx, React, primitives) {
         blocked: object.blocked,
       })),
     })
-    const tick = async () => {
-      const sessionId = ctx.sidebarRight.mounted.getSnapshot()
+    const tick = async (sessionId) => {
       if (sessionId === undefined) return
       const current = snapshots.get(sessionId)
-      const scene = await readScene(sessionId)
+      const response = await readScene(sessionId)
+      const scene = response.scene ?? null
+      if (stopped()) return
+      if (response.cursorRequest) {
+        let snapshot
+        try { snapshot = captures.get(sessionId)?.() ?? { status: 'viewer_unavailable' } }
+        catch (_error) { snapshot = { status: 'capture_failed' } }
+        try {
+          const posted = await fetch(`${ROUTE}/cursor?sessionId=${encodeURIComponent(sessionId)}`, {
+            method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
+            body: JSON.stringify({ requestId: response.cursorRequest.id, snapshot }),
+          })
+          if (!posted.ok && posted.status !== 409) console.warn('Cursor snapshot delivery failed', posted.status)
+        } catch (error) { if (!stopped()) console.warn('Cursor snapshot delivery failed', error) }
+        if (stopped()) return
+      }
       if (scene === null) { publish(sessionId, EMPTY); return }
       const unchanged = current?.scene != null && current.scene.revision === scene.revision
         && JSON.stringify(current.scene.design) === JSON.stringify(scene.design)
@@ -118,19 +135,28 @@ export function installViewer(ctx, React, primitives) {
       opened.set(sessionId, opening)
       ctx.sidebarRight.openTabIn(sessionId, KIND)
     }
-    const run = () => {
-      pending = tick().catch(() => {
+    const run = (sessionId = ctx.sidebarRight.mounted.getSnapshot()) => {
+      clearTimeout(timer)
+      // Serialize refreshes so an older poll cannot overwrite a selected model.
+      const task = Promise.resolve(pending).then(() => {
+        if (!stopped()) return tick(sessionId)
+      }).catch(() => {
         if (stopped()) return
-        const sessionId = ctx.sidebarRight.mounted.getSnapshot()
         const current = sessionId === undefined ? undefined : snapshots.get(sessionId)
         if (current?.scene) publish(sessionId, { scene: { ...current.scene, failed: true }, view: current.view })
-      }).finally(() => { if (!stopped()) timer = setTimeout(run, POLL_MS) })
+      }).finally(() => {
+        if (!stopped() && pending === task) timer = setTimeout(run, POLL_MS)
+      })
+      pending = task
+      return task
     }
+    refreshScene = run
     run()
     return async () => {
       controller.abort()
       clearTimeout(timer)
       await pending
+      captures.clear()
       snapshots.clear()
       opened.clear()
       geometry.clear()
@@ -156,32 +182,88 @@ export function installViewer(ctx, React, primitives) {
       return () => { viewport.current?.dispose(); viewport.current = null }
     }, [])
     React.useEffect(() => {
+      const sessionId = view?.sessionId
+      if (!sessionId) return
+      const capture = () => viewport.current?.captureCursor() ?? { status: 'viewer_unavailable' }
+      captures.set(sessionId, capture)
+      const controller = new AbortController()
+      let timer
+      const pump = async (after = 0) => {
+        try {
+          const response = await fetch(`${ROUTE}/events?sessionId=${encodeURIComponent(sessionId)}&after=${after}`, { signal: controller.signal, cache: 'no-store' })
+          if (!response.ok) throw new Error('Viewer events unavailable')
+          const event = await response.json()
+          if (controller.signal.aborted || event.closed) return
+          if (Number.isSafeInteger(event.version) && event.version !== after) {
+            await refreshScene(sessionId)
+            if (!controller.signal.aborted) void pump(event.version)
+          } else if (!controller.signal.aborted) timer = setTimeout(() => { void pump(after) }, 1000)
+        } catch (error) {
+          if (!controller.signal.aborted) timer = setTimeout(() => { void pump(after) }, 1000)
+        }
+      }
+      void pump()
+      return () => {
+        controller.abort()
+        clearTimeout(timer)
+        if (captures.get(sessionId) === capture) captures.delete(sessionId)
+      }
+    }, [view?.sessionId])
+    React.useEffect(() => {
       if (view !== null) viewport.current?.apply(view)
     }, [view])
     React.useEffect(() => {
       if (!viewport.current?.applyDesign) return
       let active = true
       const controller = new AbortController()
+      const receivedAt = performance.now()
+      const diagnostics = () => ({ hidden: document.hidden, receivedAt, elapsedMs: performance.now() - receivedAt, width: holder.current?.clientWidth ?? 0, height: holder.current?.clientHeight ?? 0 })
+      const trace = (phase) => {
+        if (!view?.design?.highlight?.id) return
+        void fetch(`${ROUTE}/trace?sessionId=${encodeURIComponent(view.sessionId)}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ highlightId: view.design.highlight.id, phase, ...diagnostics() }),
+        }).then(response => { if (!response.ok) throw new Error(`Trace status ${response.status}`) })
+          .catch(error => console.warn('Highlight diagnostics delivery failed', error))
+      }
       const feedback = async (value) => {
         if (!active || !view?.design) return
+        trace('feedback_started')
         const response = await fetch(`${ROUTE}/feedback?sessionId=${encodeURIComponent(view.sessionId)}`, {
           method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
-          body: JSON.stringify({ revision: view.design.revision, url: view.design.url, transform: view.design.transform, ...value }),
+          body: JSON.stringify({ revision: view.design.revision, url: view.design.url, transform: view.design.transform, diagnostics: diagnostics(), ...value }),
         })
-        if (!response.ok) throw new Error('Build feedback unavailable')
+        if (!response.ok) { trace('feedback_failed'); throw new Error(`Build feedback unavailable (${response.status})`) }
+        trace('feedback_delivered')
       }
+      trace('apply_started')
       designReady.current = viewport.current.applyDesign(view?.design ?? null, view?.volume ?? null)
+      const reportRendered = async () => {
+        await designReady.current
+        if (!active) return
+        const report = await viewport.current.applyDesign(view?.design ?? null, view?.volume ?? null)
+        if (!active || !report) return
+        const highlightId = viewport.current?.renderedHighlight?.() ?? null
+        await feedback({ report, highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })
+      }
+      const visible = () => {
+        if (!document.hidden) void reportRendered().catch(() => { if (active) setBuildError('feedbackFailed') })
+      }
+      document.addEventListener('visibilitychange', visible)
       designReady.current.then(async (report) => {
         if (!active || !report) return
         setBuildError(null)
-        await feedback({ report })
+        trace('apply_finished')
+        const highlightId = viewport.current?.renderedHighlight?.() ?? null
+        await feedback({ report, highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })
       }).catch(async (error) => {
         if (!active) return
+        trace('apply_or_feedback_failed')
         setBuildError('buildFailed')
-        try { await feedback({ error: error instanceof Error ? error.message : String(error) }) }
+        try { await feedback({ error: error instanceof Error ? error.message : String(error), requestedHighlightId: view?.design?.highlight?.id ?? null, highlightStatus: 'render_failed' }) }
         catch (_feedbackError) { if (active) setBuildError('feedbackFailed') }
       })
-      return () => { active = false; controller.abort() }
+      return () => { trace('effect_disposed'); active = false; controller.abort(); document.removeEventListener('visibilitychange', visible) }
     }, [
       view?.design?.highlight?.id, view?.design?.url, JSON.stringify(view?.design?.transform), view?.design?.camera?.id,
       view?.sessionId, JSON.stringify(view?.volume),
@@ -315,6 +397,7 @@ export function installViewer(ctx, React, primitives) {
           body: JSON.stringify({ path }), signal,
         })
         if (!response.ok) throw new Error('Model selection failed')
+        if (!signal.aborted) await refreshScene(sessionId)
       },
     }),
   }, MeshPane)), 'print viewer: tab body')

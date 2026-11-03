@@ -10,6 +10,8 @@
  */
 
 import { join } from 'node:path'
+import { homedir } from 'node:os'
+import z from '@deepseek-ai/schemastery'
 import * as skillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -25,8 +27,13 @@ import { applyViewer } from './viewer/host.js'
 /** The plugin row id, also the card identity. */
 export const name = 'print-studio'
 
+/** Local diagnostics for renderer acknowledgment failures. */
+export const Config = z.object({
+  viewerDiagnosticsDirectory: z.string().default(join(homedir(), '.rumi', 'viewer-logs')),
+})
+
 /** Services this host half reaches. */
-export const inject = ['connection', 'tools', 'credentials', 'fs', 'workingDirectory', 'sessionQuery']
+export const inject = ['connection', 'tools', 'credentials', 'fs', 'workingDirectory', 'sessionQuery', 'attachments']
 
 const ROUTE = '/api/print-studio'
 const SKILL_NAME = 'print-studio-setup'
@@ -190,9 +197,10 @@ const PRINT_TYPE = {
 /**
  * Register the status tool, the card routes, and the setup skill.
  * @param {object} ctx - host plugin context.
+ * @param {object} config - Resolved plugin configuration.
  */
-export function apply(ctx) {
-  applyViewer(ctx, defineTool)
+export function apply(ctx, config) {
+  applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory)
   // A project-type plugin contributes; it does not own the creation flow.
   ctx.inject(['rumiProjectTypes'], (scoped) => {
     scoped.effect(() => scoped.rumiProjectTypes.register(PRINT_TYPE), 'print-studio: project type')

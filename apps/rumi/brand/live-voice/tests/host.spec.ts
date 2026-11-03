@@ -3,6 +3,9 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, expect, it } from 'vitest'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { once } from 'node:events'
+import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { apply } from '../src/index.js'
@@ -17,6 +20,8 @@ const cleanups: (() => Promise<unknown>)[] = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 
 async function fixture(acknowledge = true) {
+  const diagnosticsDirectory = await mkdtemp(join(tmpdir(), 'rumi-voice-journal-'))
+  cleanups.push(() => rm(diagnosticsDirectory, { recursive: true, force: true }))
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
   cleanups.push(async () => {
     for (const client of server.clients) client.terminate()
@@ -63,16 +68,16 @@ async function fixture(acknowledge = true) {
       set: async (_ref: string, value: string) => { key = value },
     },
     sessionController: { resolveAgent: async (id: string) => ({ agent: {
-      session: id === 'other' ? other : session, followup: () => { entered.resolve(undefined) }, whenIdle: () => idle.promise,
+      session: id === 'other' ? other : session, steer: () => { entered.resolve(undefined) }, whenIdle: () => idle.promise,
     } }) },
     sessions: { flush: async () => { flushed = true } },
   }
   // The JavaScript plugin consumes only these service methods; Cordis owns the effects.
-  apply(ctx as Context, { endpoint: `ws://127.0.0.1:${address.port}` })
+  apply(ctx as Context, { diagnosticsDirectory, endpoint: `ws://127.0.0.1:${address.port}` })
   const request = (path: string, body?: object) => routes.get(`/api/live-voice${path}`)!(new Request(`http://rumi${path}`, {
     method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined,
   }))
-  return { owner, session, other, frames, request, started, entered, idle, flushed: () => flushed, key: () => key }
+  return { diagnosticsDirectory, owner, session, other, frames, request, started, entered, idle, flushed: () => flushed, key: () => key }
 }
 
 it('closes an established socket when its Cordis owner unloads', async () => {
@@ -173,4 +178,21 @@ it('retains context updates during the handshake and excludes events from other 
   const count = f.frames.length
   append(f.session, 'Do not send after disposal.')
   expect(f.frames).toHaveLength(count)
+})
+
+
+it('retains early delegation, suppresses its automatic acknowledgment, and journals actual acceptance', async () => {
+  const f = await fixture()
+  await f.request('/session', { sessionId: 's' })
+  const socket = await f.started.promise
+  socket.send(JSON.stringify({ type: 'session.delegation.created', delegation: { id: 'early', target: 'client' }, offset_ms: 1000 }))
+  await expect.poll(() => f.frames.some(frame => frame.type === 'session.thinking.append' && frame.content === '')).toBe(true)
+  socket.send(JSON.stringify({ type: 'session.input_transcript.delta', delta: 'Highlight this area', start_ms: 500, end_ms: 1000 }))
+  await f.entered.promise
+  await expect.poll(() => f.frames.some(frame => frame.content?.includes('accepted the request into its inbox'))).toBe(true)
+  const [name] = await readdir(f.diagnosticsDirectory)
+  const records = (await readFile(join(f.diagnosticsDirectory, name!), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+  expect(records.filter(record => record.type === 'handoff').map(record => record.data.state)).toEqual(['received', 'waiting', 'dispatching', 'accepted'])
+  expect(records.find(record => record.type === 'session.input_transcript.delta').data.delta).toBe('Highlight this area')
+  expect(records.some(record => record.type === 'session.delegation.created')).toBe(true)
 })

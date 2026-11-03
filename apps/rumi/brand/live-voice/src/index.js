@@ -3,8 +3,8 @@
  *
  * The browser half carries microphone audio and playback; this host half holds
  * the OpenAI key, speaks the Live protocol, and turns each GPT-Live delegation
- * into one harness turn. Results are appended back to the live session against
- * the delegation id that asked for them.
+ * into ordered steering messages. A running interval returns its final result
+ * to the latest delegation in that interval.
  *
  * The browser transport is the shared `/api` Fetch channel, not a WebSocket:
  * the desktop app runs the page on `dsh-app://app` and proxies `/api` requests
@@ -16,12 +16,16 @@
 
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createVoiceJournal } from './journal.js';
 import { homedir } from 'node:os';
 import z from '@deepseek-ai/schemastery';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { conversationContext, conversationText, contextChunks } from './context.js';
+import { createVoiceDispatcher } from './dispatch.js';
+import { createVoiceMessages } from './messages.js';
 import { LiveBridge } from './bridge.js';
 import { composeInstructions, createLiveVoiceRegistry } from './registry.js';
 import { LiveClient } from './live-client.js';
@@ -54,6 +58,14 @@ export const Config = z.object({
   contextMaxCharacters: z.natural().min(1).max(64_000).default(16_000),
   /** Hard cap on one live session, in minutes. */
   maxSessionMinutes: z.number(),
+  /** Maximum wait for words following an early delegation. */
+  transcriptWaitMs: z.natural().min(1).default(5000),
+  /** Maximum time to resolve the agent and prepare reference context before submission. */
+  handoffTimeoutMs: z.natural().min(1).default(10000),
+  /** Delay for automatic acknowledgments, allowing host progress to suppress them. */
+  acknowledgementDelayMs: z.natural().default(800),
+  /** Local transcript and handoff journals, without audio or credentials. */
+  diagnosticsDirectory: z.string().default(join(homedir(), '.rumi', 'voice-logs')),
   /** Append transport diagnostics to this file; `~` is expanded. */
   logFile: z.string(),
 });
@@ -147,7 +159,7 @@ export function apply(ctx, config) {
       const instructions = await compose(sessionId);
       lifetime.signal.throwIfAborted();
       const liveId = randomUUID();
-      const entry = await createEntry({ ctx, config, logger, apiKey, sessionId, liveId, instructions, session, signal: lifetime.signal, onClosed: () => stop(liveId) });
+      const entry = await createEntry({ ctx, registry, config, logger, apiKey, sessionId, liveId, instructions, session, signal: lifetime.signal, onClosed: () => stop(liveId) });
       if (lifetime.signal.aborted || entry.closed) {
         await entry.close();
         return json({ error: 'live voice: stopped' }, 503);
@@ -251,7 +263,11 @@ function narrate(ctx, sessionId, note) {
  * One live session: the GPT-Live socket, the bridge, and the event queue the
  * browser polls.
  */
-async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, instructions, session, signal, onClosed }) {
+async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, liveId, instructions, session, signal, onClosed }) {
+  const journal = createVoiceJournal(expandHome(config.diagnosticsDirectory ?? join(homedir(), '.rumi', 'voice-logs')), { sessionId, liveId }, error => {
+    push({ type: 'error', message: `Voice diagnostics could not be saved: ${error.message}` });
+    end('diagnostics_failed');
+  });
   const queue = [];
   let waiter = null;
   let isClosed = false;
@@ -269,19 +285,49 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, ins
     waiter = null;
   };
 
-  const bridge = new LiveBridge({
-    dispatch: (task) => {
-      push({ type: 'status', state: 'thinking', detail: task.text });
-      const turn = runHarnessTurn(ctx, sessionId, task, bridge, logger);
-      turns.add(turn);
-      void turn.then(() => turns.delete(turn));
+  const handoff = (delegationId, state, detail = null) => {
+    journal.record('handoff', { delegationId, state, detail });
+    if (!isClosed) push({ type: 'handoff', delegationId, state });
+  };
+  let speechContext = null;
+  const speechLifetime = new AbortController();
+  const submit = createVoiceDispatcher({
+    resolveAgent: async () => {
+      const resolved = await ctx.sessionController.resolveAgent(sessionId);
+      if ('error' in resolved) throw new Error(resolved.error?.message ?? 'session unavailable');
+      return resolved.agent;
     },
+    createMessages: createVoiceMessages,
+    timeoutMs: config.handoffTimeoutMs ?? 10000,
+    accepted: delegationId => {
+      handoff(delegationId, 'accepted');
+      const content = 'The modeling assistant has accepted the request into its inbox. Work is not yet complete. Do not claim a highlight is visible until the viewer reports rendered.';
+      journal.record('host.thinking', { delegationId, content });
+      live.send({ type: 'session.thinking.append', event_id: randomUUID(), delegation_id: delegationId, content });
+    },
+    failed: (delegationId, detail) => handoff(delegationId, 'failed', detail),
+    flush: session => ctx.sessions.flush(session), outcome: readOutcome,
+    finished: result => bridge.turnFinished(result), closed: () => bridge.closed,
+  });
+  const dispatch = task => {
+    const content = speechContext ?? Promise.resolve([]);
+    speechContext = null;
+    const turn = submit({ ...task, content });
+    turns.add(turn);
+    void turn.then(() => turns.delete(turn));
+  };
+  const bridge = new LiveBridge({
+    dispatch, steer: dispatch,
+    transcriptWaitMs: config.transcriptWaitMs ?? 5000,
+    state: handoff,
     commentary: (delegationId, content) => {
-      live.send({ type: 'session.commentary.append', delegation_id: delegationId, content });
+      journal.record('host.commentary', { delegationId, content });
+      live.send({ type: 'session.commentary.append', event_id: randomUUID(), delegation_id: delegationId, content });
       push({ type: 'transcript', role: 'assistant', text: content });
     },
     thinking: (delegationId, content) => {
-      live.send({ type: 'session.thinking.append', delegation_id: delegationId, content });
+      journal.record('host.thinking', { delegationId, content });
+      live.send({ type: 'session.thinking.append', event_id: randomUUID(), delegation_id: delegationId, content });
     },
     log: (message) => logger.info(message),
   });
@@ -291,11 +337,31 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, ins
     url: config.endpoint ?? LIVE_ENDPOINT,
     model: config.model ?? DEFAULT_MODEL,
     voice: config.voice ?? DEFAULT_VOICE,
+    acknowledgementDelayMs: config.acknowledgementDelayMs ?? 800,
     instructions: `${instructions}\n\n${conversationContext(session, config.contextMaxCharacters ?? 16_000)}`,
     onEvent: (event) => {
+      if (event.type === 'session.input_transcript.delta' || event.type === 'session.output_transcript.delta') {
+        journal.record(event.type, { delta: event.delta, start_ms: event.start_ms ?? null, end_ms: event.end_ms ?? null });
+      } else if (event.type === 'session.delegation.created') {
+        journal.record(event.type, { id: event.delegation?.id ?? null, target: event.delegation?.target ?? null, offset_ms: event.offset_ms ?? null });
+      } else if (event.type === 'session.thinking.appended') {
+        journal.record(event.type, { client_event_id: event.client_event_id ?? null });
+      }
       if (event.type === 'session.output_audio.delta') {
         push({ type: 'audio', data: event.delta });
       } else if (event.type === 'session.input_transcript.delta') {
+        if (!speechContext && typeof event.delta === 'string' && event.delta.trim()) {
+          if (!bridge.busy && !bridge.snapshot().waitingForTranscript) handoff(null, 'not_sent');
+          const requestedAt = new Date().toISOString();
+          speechContext = Promise.all(registry.contributors().map(async contributor => {
+            if (!contributor.captureRequest) return [];
+            try { return await contributor.captureRequest({ sessionId, requestedAt, signal: speechLifetime.signal }); }
+            catch (error) {
+              logger.warn(`Voice reference capture failed: ${contributor.id}`);
+              return [{ type: 'text', text: 'The visual reference for this spoken request could not be captured. Ask for a fresh pointing reference; do not guess.' }];
+            }
+          })).then(parts => parts.flat());
+        }
         push({ type: 'transcript', role: 'user', text: event.delta });
       } else if (event.type === 'session.output_transcript.delta') {
         push({ type: 'transcript', role: 'assistant', text: event.delta });
@@ -306,6 +372,7 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, ins
         muted = event.type === 'session.input_audio.muted';
         push({ type: 'muted', muted });
       } else if (event.type === 'error') {
+        journal.record('transport.error', { code: event.error?.code ?? null, message: event.error?.message ?? 'live error' });
         push({ type: 'error', message: event.error?.message ?? 'live error' });
       }
       bridge.handleLiveEvent(event);
@@ -315,13 +382,16 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, ins
       debugLog(config, `socket-closed code=${detail?.code ?? '-'} reason=${detail?.reason || '-'}`);
 
     },
-    onError: (error) => push({ type: 'error', message: error.message }),
+    onError: (error) => { journal.record('transport.error', { message: error.message }); push({ type: 'error', message: error.message }); },
   });
 
   const end = (reason) => {
     if (isClosed) return;
     isClosed = true;
+    journal.record('closed', { reason });
+    journal.close();
     bridge.close();
+    speechLifetime.abort();
     stopNarration();
     stopContext();
     pendingContext.length = 0;
@@ -348,6 +418,8 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, ins
   signal.addEventListener('abort', abort, { once: true });
   try {
     signal.throwIfAborted();
+    journal.record('opened', { model: config.model ?? DEFAULT_MODEL });
+    if (isClosed) throw new Error('Voice diagnostics could not be saved');
     await live.connect();
     signal.throwIfAborted();
     if (isClosed) throw new Error('live voice: session closed during startup');
@@ -370,7 +442,8 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, ins
    */
   const noteProgress = (content) => {
     if (content === '') return;
-    live.send({ type: 'session.thinking.append', delegation_id: currentDelegation(), content });
+    journal.record('host.progress', { delegationId: currentDelegation(), content });
+    live.send({ type: 'session.thinking.append', event_id: randomUUID(), delegation_id: currentDelegation(), content });
   };
 
   stopNarration = narrate(ctx, sessionId, noteProgress);
@@ -411,38 +484,6 @@ async function createEntry({ ctx, config, logger, apiKey, sessionId, liveId, ins
       return { events, closed: isClosed };
     },
   };
-}
-
-/**
- * One task runs as one follow-up turn in the attached harness session. The
- * turn's final assistant text is the answer spoken back to the caller.
- */
-async function runHarnessTurn(ctx, sessionId, task, bridge, logger) {
-  try {
-    const { createUserMessage } = await import('@deepseek-ai/dsh-llm');
-    const resolved = await ctx.sessionController.resolveAgent(sessionId);
-    if (resolved && 'error' in resolved) {
-      bridge.turnFinished({ ok: false, text: resolved.error?.message ?? 'session unavailable' });
-      return;
-    }
-    if (bridge.closed) return;
-    const agent = resolved.agent;
-    const firstSeq = agent.session.seq;
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: task.text }],
-      // A spoken request is the user's own message: recording it as one makes
-      // the transcript show the words in a normal user bubble, and the next
-      // dictation replaces the preview that showed the same text.
-      source: { kind: 'user' },
-    }));
-    await agent.whenIdle();
-    await ctx.sessions.flush(agent.session);
-    const outcome = readOutcome(agent.session, firstSeq);
-    bridge.turnFinished({ ok: outcome.reason?.kind !== 'error', text: outcome.text });
-  } catch (error) {
-    logger.warn(`turn failed: ${error instanceof Error ? error.message : String(error)}`);
-    bridge.turnFinished({ ok: false, text: error instanceof Error ? error.message : String(error) });
-  }
 }
 
 /**

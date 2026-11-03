@@ -150,3 +150,25 @@ describe('voice delegation lifecycle', () => {
     expect(f.tasks).toEqual(['Rotate left', 'Rotate left'])
   })
 })
+
+it('steers a spoken correction immediately and reports the shared interval to the latest delegation', () => {
+  const calls: string[] = []
+  const replies: string[] = []
+  const bridge = new LiveBridge({
+    dispatch: (task: { text: string }) => calls.push(`start:${task.text}`),
+    steer: (task: { text: string }) => calls.push(`steer:${task.text}`),
+    commentary: (id: string) => replies.push(id), thinking: () => {},
+  })
+  bridge.handleLiveEvent({ type: 'session.input_transcript.delta', delta: 'Flatten this area' })
+  bridge.handleLiveEvent({ type: 'session.delegation.created', delegation: { id: 'first' } })
+  bridge.handleLiveEvent({ type: 'session.input_transcript.delta', delta: 'No, where I am pointing now' })
+  expect(bridge.handleLiveEvent({ type: 'session.delegation.created', delegation: { id: 'correction' } })).toBe('steered')
+  expect(calls).toEqual(['start:Flatten this area', 'steer:No, where I am pointing now'])
+  expect(bridge.snapshot().queued).toBe(0)
+  bridge.turnFinished({ text: 'Please confirm the teal area.' })
+  expect(replies).toEqual(['correction'])
+})
+
+it('records the voice visual-reference requirements', () => {
+  expect(DEFAULT_INSTRUCTIONS).toMatchSnapshot()
+})

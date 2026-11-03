@@ -12,6 +12,7 @@ vi.mock('three', async (importOriginal) => {
       constructor() {
         this.domElement = {
           width: 0, height: 0,
+          getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 300 }),
           setAttribute: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), remove: vi.fn(),
         }
         this.domElement.toDataURL = vi.fn(() => 'data:image/png;base64,cG5n')
@@ -31,7 +32,8 @@ vi.mock('three', async (importOriginal) => {
 vi.mock('three/addons/controls/OrbitControls.js', () => ({
   OrbitControls: class {
     constructor() {
-      this.target = { copy: vi.fn() }
+      this.target = new THREE.Vector3()
+      vi.spyOn(this.target, 'copy')
       this.dispose = vi.fn()
       state.controls = this
     }
@@ -48,7 +50,8 @@ afterEach(() => {
 })
 
 function container() {
-  vi.stubGlobal('window', { devicePixelRatio: 1 })
+  vi.stubGlobal('window', { devicePixelRatio: 1, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+  vi.stubGlobal('document', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
   vi.stubGlobal('getComputedStyle', () => ({ getPropertyValue: () => '#888888' }))
   vi.stubGlobal('ResizeObserver', class {
     constructor(callback: () => void) { this.disconnect = vi.fn(); state.resize = callback }
@@ -78,13 +81,13 @@ it('shares one geometry between placements of the same datablock and disposes it
   const viewport = createViewport(container(), vi.fn())
   viewport.apply({ volume: null, objects: [object('o1'), object('o2')] })
   const [first, second] = meshes()
-  expect(first.geometry).toBe(second.geometry)
+  expect(first.geometry.getAttribute('position').array).toEqual(second.geometry.getAttribute('position').array)
   expect(dispose).not.toHaveBeenCalled()
   viewport.apply({ volume: null, objects: [object('o2')] })
   expect(meshes()).toHaveLength(1)
-  expect(dispose).not.toHaveBeenCalled()
-  viewport.apply({ volume: null, objects: [] })
   expect(dispose).toHaveBeenCalledTimes(1)
+  viewport.apply({ volume: null, objects: [] })
+  expect(dispose).toHaveBeenCalledTimes(3)
   viewport.dispose()
 })
 
@@ -144,9 +147,9 @@ it('reloads source models without resetting the camera and keeps the last build 
   await viewport.applyDesign({ ...spec, url: module(20) }, null)
   expect(camera.position.equals(position)).toBe(true)
   const scene = rendered()
-  expect(scene.getObjectByName('design').geometry.parameters.width).toBe(20)
+  expect(new THREE.Box3().setFromObject(scene.getObjectByName('design')).getSize(new THREE.Vector3()).x).toBe(20)
   await expect(viewport.applyDesign({ ...spec, url: 'data:text/javascript,export function build(){throw new Error("broken")}' }, null)).rejects.toThrow('broken')
-  expect(scene.getObjectByName('design').geometry.parameters.width).toBe(20)
+  expect(new THREE.Box3().setFromObject(scene.getObjectByName('design')).getSize(new THREE.Vector3()).x).toBe(20)
   viewport.dispose()
 })
 
@@ -183,7 +186,7 @@ it('keeps the latest revision when an older import completes later', async () =>
   expect(report.dimensions.x).toBe(50)
   release()
   expect(await first).toBeNull()
-  expect(rendered().getObjectByName('newest').geometry.parameters.width).toBe(50)
+  expect(new THREE.Box3().setFromObject(rendered().getObjectByName('newest')).getSize(new THREE.Vector3()).x).toBe(50)
   viewport.dispose()
 })
 
@@ -236,10 +239,12 @@ it('owns a temporary overlay separately from design geometry and excludes it fro
   const material = design.material
   expect(report.dimensions).toEqual({ x: 10, y: 20, z: 30 })
   expect(copy.getAttribute('rumiBarycentric')).toBeDefined()
+  expect(viewport.renderedHighlight()).toBe('region-1')
   const shader = { uniforms: { rumiReveal: { value: 1 } }, vertexShader: '#include <begin_vertex>', fragmentShader: '#include <opaque_fragment>' }
   material.onBeforeCompile(shader, state.renderer)
   expect(shader.fragmentShader).toContain('vec3(0.18, 0.40, 0.37)')
   viewport.setHighlightVisible(false)
+  expect(viewport.renderedHighlight()).toBeNull()
   expect(shader.uniforms.rumiReveal.value).toBe(0)
   viewport.setHighlightVisible(true)
   const visibility: number[] = []
@@ -250,9 +255,127 @@ it('owns a temporary overlay separately from design geometry and excludes it fro
   const disposeGeometry = vi.spyOn(copy, 'dispose')
   const disposeMaterial = vi.spyOn(material, 'dispose')
   await viewport.applyDesign({ ...spec, highlight: null }, null)
-  expect(disposeGeometry).toHaveBeenCalledOnce()
-  expect(disposeMaterial).toHaveBeenCalledOnce()
-  expect(design.geometry.getAttribute('rumiBarycentric')).toBeUndefined()
-  expect(design.material).not.toBe(material)
+  expect(disposeGeometry).not.toHaveBeenCalled()
+  expect(disposeMaterial).not.toHaveBeenCalled()
+  expect(design.geometry).toBe(copy)
+  expect(design.material).toBe(material)
+  expect(design.geometry.getAttribute('rumiBarycentric')).toBeDefined()
+  const hoverOnly = { uniforms: {}, vertexShader: '#include <begin_vertex>', fragmentShader: '#include <opaque_fragment>' }
+  design.material.onBeforeCompile(hoverOnly, state.renderer)
+  expect(hoverOnly.uniforms.rumiHover.value.w).toBe(0)
+  expect(design.material).toBe(material)
   viewport.dispose()
+})
+
+it('coalesces hover, follows placed surfaces, clears on leave, and cancels work on disposal', async () => {
+  const { createHover } = await import('../viewer/viewport/hover.js')
+  const listeners = new Map<string, (event?: object) => void>()
+  const frames = new Map<number, () => void>()
+  let nextFrame = 0
+  vi.stubGlobal('requestAnimationFrame', (callback: () => void) => { frames.set(++nextFrame, callback); return nextFrame })
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id))
+  vi.stubGlobal('window', new EventTarget())
+  vi.stubGlobal('document', new EventTarget())
+  const canvas = {
+    addEventListener: (name: string, callback: () => void) => listeners.set(name, callback),
+    removeEventListener: (name: string) => listeners.delete(name),
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 400 }),
+  }
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100)
+  camera.position.set(0, 0, 10)
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshStandardMaterial())
+  const render = vi.fn()
+  const hover = createHover(canvas, camera, () => [mesh], render)
+  const flush = () => { const queued = [...frames.values()]; frames.clear(); queued.forEach(callback => callback()) }
+  try {
+    listeners.get('pointermove')!({ clientX: 0, clientY: 0, pointerType: 'mouse' })
+    listeners.get('pointermove')!({ clientX: 200, clientY: 200, pointerType: 'mouse' })
+    expect(frames.size).toBe(1)
+    flush()
+    expect(render).toHaveBeenCalledOnce()
+    expect(hover.sphere.value.z).toBeCloseTo(1)
+    expect(hover.sphere.value.w).toBeGreaterThan(0)
+    mesh.position.z = 2
+    hover.invalidate()
+    flush()
+    expect(hover.sphere.value.z).toBeCloseTo(3)
+    mesh.visible = false
+    hover.invalidate()
+    flush()
+    expect(hover.sphere.value.w).toBe(0)
+    mesh.visible = true
+    listeners.get('pointermove')!({ clientX: -5, clientY: 200, pointerType: 'mouse' })
+    flush()
+    expect(hover.sphere.value.w).toBe(0)
+    listeners.get('pointermove')!({ clientX: 200, clientY: 200, pointerType: 'mouse' })
+    flush()
+    listeners.get('pointerleave')!()
+    expect(hover.sphere.value.w).toBe(0)
+    listeners.get('pointermove')!({ clientX: 200, clientY: 200, pointerType: 'touch' })
+    expect(frames.size).toBe(0)
+    listeners.get('pointermove')!({ clientX: 200, clientY: 200, pointerType: 'mouse' })
+    hover.dispose()
+    expect(frames.size).toBe(0)
+    expect(listeners.size).toBe(0)
+  } finally {
+    hover.dispose()
+    mesh.geometry.dispose()
+    mesh.material.dispose()
+  }
+})
+
+it('captures the same displayed Gaussian in model coordinates and restores screenshot sizing', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+  vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  try {
+    viewport.apply({ revision: 7, volume: null, objects: [] })
+    const url = `data:text/javascript,${encodeURIComponent('export function build(T) { const m = new T.Mesh(new T.BoxGeometry(10,10,10)); m.name="faceplate"; return m }')}`
+    const transform = { scale: 2, rotate: { x: 0, y: 0, z: 30 }, position: { x: 4, y: 8, z: 0 } }
+    await viewport.applyDesign({ path: '/model.js', revision: 3, url, transform }, null)
+    state.resize()
+    const camera = state.renderer.render.mock.calls.at(-1)[1]
+    camera.lookAt(state.controls.target)
+    const move = state.renderer.domElement.addEventListener.mock.calls.find(([name]) => name === 'pointermove')[1]
+    move({ clientX: 200, clientY: 150, pointerType: 'mouse' })
+    const capture = viewport.captureCursor()
+    expect(capture.status).toBe('captured')
+    expect(capture.identity).toEqual({ sceneRevision: 7, design: { path: '/model.js', revision: 3, url, transform } })
+    expect(capture.region.partPath).toEqual(['faceplate'])
+    expect(capture.region.objectId).toBeNull()
+    expect(capture.region.modelLocalBlob.radii[0]).toBeCloseTo(capture.region.worldRadius / 2)
+    const root = rendered().getObjectByName('faceplate').parent
+    const world = new THREE.Vector3(...capture.region.modelLocalBlob.center).applyMatrix4(root.matrixWorld)
+    expect(world.distanceTo(new THREE.Vector3(...capture.region.worldPoint))).toBeLessThan(1e-6)
+    expect(capture.image).toBe('data:image/png;base64,cG5n')
+    expect(state.renderer.domElement.width).toBe(400)
+    expect(state.renderer.domElement.height).toBe(300)
+    const leave = state.renderer.domElement.addEventListener.mock.calls.find(([name]) => name === 'pointerleave')[1]
+    leave()
+    expect(viewport.captureCursor()).toEqual({ status: 'no_hit' })
+  } finally { viewport.dispose() }
+})
+
+it('reuses measured geometry and GPU resources for highlight-only changes', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  try {
+    const url = `data:text/javascript,${encodeURIComponent('export function build(T) { const m = new T.Mesh(new T.BoxGeometry(10, 20, 30)); m.name = "retained"; return m }')}`
+    const spec = { url, transform: {} }
+    const report = await viewport.applyDesign(spec, null)
+    const mesh = rendered().getObjectByName('retained')
+    const geometry = mesh.geometry, material = mesh.material
+    const shader = { uniforms: {}, vertexShader: '#include <begin_vertex>', fragmentShader: '#include <opaque_fragment>' }
+    material.onBeforeCompile(shader, state.renderer)
+    const next = await viewport.applyDesign({ ...spec, highlight: { id: 'new', blobs: [
+      { center: [0, 0, 15], radii: [10, 10, 3], rotationDegrees: [0, 0, 0] },
+    ] } }, null)
+    expect(next).toBe(report)
+    expect(mesh.geometry).toBe(geometry)
+    expect(mesh.material).toBe(material)
+    expect(shader.uniforms.rumiRegionCount.value).toBe(1)
+    expect(viewport.renderedHighlight()).toBe('new')
+    const resized = await viewport.applyDesign({ ...spec, transform: { scale: 2 } }, null)
+    expect(resized).not.toBe(report)
+    expect(resized.dimensions).toEqual({ x: 20, y: 40, z: 60 })
+  } finally { viewport.dispose() }
 })

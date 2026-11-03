@@ -8,11 +8,11 @@ import { en, zh } from '../viewer/locales.js'
 import { encodeStl } from '../viewer/stl.js'
 
 vi.mock('../viewer/viewer.module.css', () => ({ default: '' }))
-const viewport = vi.hoisted(() => ({ setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
+const viewport = vi.hoisted(() => ({ renderedHighlight: vi.fn(), captureCursor: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
 vi.mock('../viewer/viewport/index.js', () => ({
   createViewport: (...args: unknown[]) => {
     viewport.create(...args)
-    return { setHighlightVisible: viewport.setHighlightVisible, thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose }
+    return { renderedHighlight: viewport.renderedHighlight, captureCursor: viewport.captureCursor, setHighlightVisible: viewport.setHighlightVisible, thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose }
   },
 }))
 
@@ -26,6 +26,8 @@ const disposers: (() => void | Promise<void>)[] = []
 beforeEach(() => {
   vi.useFakeTimers()
   viewport.applyDesign.mockReset().mockResolvedValue(null)
+  viewport.captureCursor.mockReset().mockReturnValue({ status: 'no_hit' })
+  viewport.renderedHighlight.mockReset().mockReturnValue(null)
   viewport.create.mockClear()
   viewport.apply.mockClear()
   viewport.dispose.mockClear()
@@ -64,9 +66,9 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
   const entries = new Map<string, Entry>()
   const register = () => () => {}
   const opened = vi.fn()
-  const state = { scene: host.scene ?? null, modelOk: host.modelOk ?? true }
+  const state = { scene: host.scene ?? null, modelOk: host.modelOk ?? true, cursorRequest: null as { id: string } | null }
   const fetch = vi.fn(async (url: string | URL) => {
-    if (String(url).includes('/state')) return { ok: true, json: async () => ({ scene: state.scene }) }
+    if (String(url).includes('/state')) return { ok: true, json: async () => ({ scene: state.scene, cursorRequest: state.cursorRequest }) }
     if (!state.modelOk) return { ok: false }
     return { ok: true, arrayBuffer: async () => encodeStl(positions()) }
   })
@@ -86,6 +88,7 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
   }, React, { PluginArtworkDefault: () => null, Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant: string; size: string }) => React.createElement('button', props) })
   return {
     opened, fetch,
+    requestCursor: (id: string) => { state.cursorRequest = { id } },
     setScene: (next: object | null) => { state.scene = next },
     view: (name: string, owner: Record<string, unknown> = {}) => {
       const entry = entries.get(name)!
@@ -117,6 +120,43 @@ it('discovers new model controls without a geometry revision and selects the req
   expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/select?sessionId=session-a', expect.objectContaining({
     method: 'POST', body: JSON.stringify({ path: 'models/gloves/model.js' }),
   }))
+})
+
+it('shows a selected model without waiting for the next poll', async () => {
+  const models = [{ name: 'helmet', path: 'models/helmet/model.js' }, { name: 'gloves', path: 'models/gloves/model.js' }]
+  const base = { ...scene([]), models, selectedModel: models[0].path, design: { url: '/source/helmet/model.js', revision: 1 } }
+  const view = fixture({ scene: base })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  const next = { ...base, selectedModel: models[1].path, design: { url: '/source/gloves/model.js', revision: 2 } }
+  view.setScene(next)
+  fireEvent.click(screen.getByRole('button', { name: 'gloves' }))
+  await settle()
+  expect(screen.getByRole('button', { name: 'gloves' }).getAttribute('aria-pressed')).toBe('true')
+  expect(viewport.applyDesign).toHaveBeenLastCalledWith(next.design, null)
+  expect(viewport.create).toHaveBeenCalledOnce()
+})
+
+it('refreshes after an in-flight poll without leaving the previous model selected', async () => {
+  const models = [{ name: 'helmet', path: 'models/helmet/model.js' }, { name: 'gloves', path: 'models/gloves/model.js' }]
+  const base = { ...scene([]), models, selectedModel: models[0].path }
+  const view = fixture({ scene: base })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  const poll = Promise.withResolvers<Awaited<ReturnType<typeof view.fetch>>>()
+  view.fetch.mockImplementationOnce(() => poll.promise)
+  await settle(2000)
+  view.setScene({ ...base, selectedModel: models[1].path })
+  fireEvent.click(screen.getByRole('button', { name: 'gloves' }))
+  await settle()
+  expect(screen.getByRole('button', { name: 'gloves' }).hasAttribute('disabled')).toBe(true)
+  await act(async () => { poll.resolve({ ok: true, json: async () => ({ scene: base }) }) })
+  await settle()
+  expect(screen.getByRole('button', { name: 'gloves' }).getAttribute('aria-pressed')).toBe('true')
+  expect(screen.getByRole('button', { name: 'gloves' }).hasAttribute('disabled')).toBe(false)
+  view.setScene(base)
+  await settle(2000)
+  expect(screen.getByRole('button', { name: 'helmet' }).getAttribute('aria-pressed')).toBe('true')
 })
 
 it('keeps model controls usable and reports a selection failure', async () => {
@@ -234,4 +274,60 @@ it('captures once after a scene settles and does not recapture unchanged polling
   expect(view.fetch.mock.calls.some(([url]) => String(url).includes('/rumi-projects/thumbnail?sessionId=session-a'))).toBe(true)
   await settle(4000)
   expect(viewport.thumbnail).toHaveBeenCalledTimes(1)
+})
+
+it('captures only on an agent request without rebuilding an unchanged scene', async () => {
+  const view = fixture({ scene: scene([object()]) })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  expect(viewport.captureCursor).not.toHaveBeenCalled()
+  const applications = viewport.apply.mock.calls.length
+  view.requestCursor('cursor-request')
+  await settle(2000)
+  expect(viewport.captureCursor).toHaveBeenCalledOnce()
+  expect(viewport.apply).toHaveBeenCalledTimes(applications)
+  expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/cursor?sessionId=session-a', expect.objectContaining({
+    method: 'POST', body: JSON.stringify({ requestId: 'cursor-request', snapshot: { status: 'no_hit' } }),
+  }))
+  cleanup()
+  view.requestCursor('closed-request')
+  await settle(2000)
+  expect(viewport.captureCursor).toHaveBeenCalledOnce()
+  expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/cursor?sessionId=session-a', expect.objectContaining({
+    body: JSON.stringify({ requestId: 'closed-request', snapshot: { status: 'viewer_unavailable' } }),
+  }))
+})
+
+it('acknowledges a highlight when the document becomes visible without another scene change', async () => {
+  const design = { url: '/source/one/model.js', revision: 1, transform: { scale: 1 }, highlight: { id: 'region-one', blobs: [] } }
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+  viewport.applyDesign.mockResolvedValue({ status: 'ok', dimensions: { x: 10, y: 20, z: 30 }, checks: [] })
+  viewport.renderedHighlight.mockImplementation(() => document.hidden ? null : 'region-one')
+  try {
+    const view = fixture({ scene: { ...scene([]), design } })
+    render(view.view('sidebar.right.pane.tab'))
+    await settle()
+    view.fetch.mockClear()
+    hidden.mockReturnValue(false)
+    fireEvent(document, new Event('visibilitychange'))
+    await settle()
+    expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/feedback?sessionId=session-a', expect.objectContaining({
+      body: expect.stringContaining('"highlightId":"region-one"'),
+    }))
+  } finally { hidden.mockRestore() }
+})
+
+it('reports the rendered identity and client timing for a visible highlight', async () => {
+  const design = { url: '/source/one/model.js', revision: 1, transform: { scale: 1 }, highlight: { id: 'region-visible', blobs: [] } }
+  viewport.applyDesign.mockResolvedValue({ status: 'ok', dimensions: { x: 10, y: 20, z: 30 }, checks: [] })
+  viewport.renderedHighlight.mockReturnValue('region-visible')
+  const view = fixture({ scene: { ...scene([]), design } })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/feedback?sessionId=session-a', expect.objectContaining({
+    body: expect.stringContaining('"highlightId":"region-visible"'),
+  }))
+  expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/trace?sessionId=session-a', expect.objectContaining({
+    body: expect.stringContaining('"phase":"apply_finished"'),
+  }))
 })

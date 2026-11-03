@@ -16,7 +16,7 @@ The voice control stays beside Send while the microphone mute control appears to
 
 While connecting, the control shows a dashed loading ring and remains cancellable. The enabled colors and mute control appear after the host reports readiness and local audio setup finishes.
 
-Closing voice discards queued delegations and stops local capture immediately. Work already submitted to the harness may finish; plugin disposal waits for its session flush and transport shutdown. Pending starts cannot publish a session after disposal, and overlapping starts for the same conversation are rejected.
+Closing voice discards unsubmitted delegations and stops local capture immediately. Work already submitted to the harness may finish; plugin disposal waits for its session flush and transport shutdown. Pending starts cannot publish a session after disposal, and overlapping starts for the same conversation are rejected.
 
 Delegations preserve the buffered request, including single-word and Chinese commands. The transcript buffer retains up to 4,000 characters. Duplicate delegation IDs are ignored; repeating the same words in a new delegation is allowed.
 
@@ -37,9 +37,21 @@ ctx.inject(['liveVoice'], (scoped) => {
 })
 ```
 
-Contributions are composed in `order` at session startup. A contributor that throws is logged and skipped. `@rumi/projects` supplies the project's `AGENTS.md` this way. Edits to that file take effect in the next voice session.
+Contributions are composed in `order` at session startup. A contributor that throws is logged and skipped. `@rumi/projects` supplies the project's `AGENTS.md` this way. Edits to that file take effect in the next voice session. Contributors may also implement `captureRequest({sessionId, requestedAt, signal})`, returning content blocks for a separate logged `rumi-voice-reference` context message. The reference records the spoken message ID and enters the same next-step inbox immediately before the user message; the voice bubble contains only the transcribed words. The standard context UI keeps the reference separate, and voice conversation context excludes it. Capture begins at the first nonempty transcript chunk since the previous delegation; the timestamped result is retained until that delegation. Print Studio supplies a cursor image and region this way. Capture failures are logged as explicit unavailable visual context, never replaced by an older capture. Closing voice aborts outstanding captures.
 
-During a harness turn, the host follows session events and sends quiet `thinking` notes, at most one every few seconds. The completed result is returned as commentary for the corresponding delegation.
+During a harness turn, the host follows session events and sends quiet `thinking` notes, at most one every few seconds. New delegations steer the active agent at its next step instead of waiting for another turn. Ordered submissions share one running interval; its final result is returned against the latest delegation, not attributed separately to each correction. A command already executing is not interrupted.
+
+Voice instructions require visual highlights for referenced model parts and plain-language explanations. Clear requests, undo requests, and offered choices are handled in context; ambiguous intent needs clarification. Short replies and corrections must be delegated to the harness. No special confirmation phrase is required.
+
+## Handoff evidence
+
+On delegation, the host immediately sends a silent thinking update to suppress the pending automatic acknowledgment. `acknowledgementDelayMs` defaults to 800 ms. This does not stop speech already generated or independent model speech. Voice instructions prohibit claiming acceptance before the host reports it and prohibit claiming a visible highlight before a `rendered` tool result.
+
+An early delegation waits up to `transcriptWaitMs` (default 5,000 ms) for nonempty transcript text instead of being discarded. Duplicate IDs do not submit twice. Transcript fragments are not guaranteed to be complete utterances; ambiguous instructions still need clarification. A missing transcript reports failure. The host allows `handoffTimeoutMs` (default 10,000 ms) for agent resolution and reference capture; work that resolves after timeout cannot be submitted. Closing voice cancels pending transcript waits and prevents unsubmitted work from starting.
+
+The voice controls distinguish no action sent, sending, accepted, and failed. Acceptance means admission to the modeling agent’s inbox, not completed work. These labels follow host events independently of spoken promises. Failure asks the person to repeat the request; there is no automatic retry that could duplicate an edit.
+
+`diagnosticsDirectory` defaults to `~/.rumi/voice-logs`. Each live connection writes a private JSONL file named by its live ID, with conversation and connection IDs, timestamps, input/output transcript fragments, delegation metadata, host updates, acceptance/failure transitions, and close reason. Audio and credentials are not recorded. These diagnostic journals are separate from chat messages, persist across app restarts, and remain until deleted. A journal setup failure prevents startup; a write failure stops voice and reports the failure. The normal conversation log still owns modeling-agent input, tools, and highlight-render results.
 
 ## Verification
 

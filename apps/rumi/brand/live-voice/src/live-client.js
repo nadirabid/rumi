@@ -21,6 +21,7 @@ export class LiveClient {
    * @param {string} [options.model]
    * @param {string} [options.instructions]
    * @param {string} [options.voice]
+   * @param {number} [options.acknowledgementDelayMs] Time for host updates to suppress automatic acknowledgments.
    * @param {(event: any) => void} [options.onEvent]
    * @param {(error: Error) => void} [options.onError]
    * @param {() => void} [options.onClose]
@@ -32,6 +33,7 @@ export class LiveClient {
     model,
     instructions,
     voice,
+    acknowledgementDelayMs = 800,
     onEvent = () => {},
     onError = () => {},
     onClose = () => {},
@@ -40,7 +42,7 @@ export class LiveClient {
     if (!apiKey) throw new Error('live voice: missing OpenAI API key');
     this.apiKey = apiKey;
     this.url = url;
-    this.startOptions = { model, instructions, voice };
+    this.startOptions = { model, instructions, voice, acknowledgementDelayMs };
     this.onEvent = onEvent;
     this.onError = onError;
     this.onClose = onClose;

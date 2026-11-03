@@ -14,8 +14,6 @@ export const en = {
   failed: 'This file could not be drawn.',
   webgl: 'The 3D view is unavailable. Ask Rumi about the model instead.',
   view: '3D model. Drag to orbit, scroll to zoom.',
-  needsFix: '{count} to fix',
-  needsReview: '{count} to check',
   previewFailed: 'The model could not be loaded. Ask Rumi to show it again.',
 }
 
@@ -34,7 +32,5 @@ export const zh = {
   failed: '无法绘制这个文件',
   webgl: '3D 视图不可用。可以让 Rumi 介绍这个模型',
   view: '3D 模型。拖动旋转，滚动缩放。',
-  needsFix: '{count} 处需修复',
-  needsReview: '{count} 处需检查',
   previewFailed: '模型加载失败。请 Rumi 再次展示',
 }

@@ -223,3 +223,36 @@ it('captures loaded geometry at cover size and restores the viewport even when e
   viewport.dispose()
   expect(viewport.thumbnail()).toBeNull()
 })
+
+it('owns a temporary overlay separately from design geometry and excludes it from covers', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  const url = `data:text/javascript,${encodeURIComponent('export function build(T) { const m = new T.Mesh(new T.BoxGeometry(10, 20, 30)); m.name = "highlight-subject"; return m }')}`
+  const spec = { url, transform: {}, highlight: { id: 'region-1', label: 'Top', blobs: [
+    { center: [0, 0, 15], radii: [10, 10, 3], rotationDegrees: [0, 0, 0] },
+  ] } }
+  const report = await viewport.applyDesign(spec, null)
+  const design = rendered().getObjectByName('highlight-subject')
+  const copy = design.geometry
+  const material = design.material
+  expect(report.dimensions).toEqual({ x: 10, y: 20, z: 30 })
+  expect(copy.getAttribute('rumiBarycentric')).toBeDefined()
+  const shader = { uniforms: { rumiReveal: { value: 1 } }, vertexShader: '#include <begin_vertex>', fragmentShader: '#include <opaque_fragment>' }
+  material.onBeforeCompile(shader, state.renderer)
+  expect(shader.fragmentShader).toContain('vec3(0.18, 0.40, 0.37)')
+  viewport.setHighlightVisible(false)
+  expect(shader.uniforms.rumiReveal.value).toBe(0)
+  viewport.setHighlightVisible(true)
+  const visibility: number[] = []
+  state.renderer.render.mockImplementation(() => visibility.push(shader.uniforms.rumiReveal.value))
+  viewport.thumbnail()
+  expect(visibility).toEqual([0, 1])
+  state.renderer.render.mockImplementation(() => {})
+  const disposeGeometry = vi.spyOn(copy, 'dispose')
+  const disposeMaterial = vi.spyOn(material, 'dispose')
+  await viewport.applyDesign({ ...spec, highlight: null }, null)
+  expect(disposeGeometry).toHaveBeenCalledOnce()
+  expect(disposeMaterial).toHaveBeenCalledOnce()
+  expect(design.geometry.getAttribute('rumiBarycentric')).toBeUndefined()
+  expect(design.material).not.toBe(material)
+  viewport.dispose()
+})

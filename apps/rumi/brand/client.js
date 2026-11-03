@@ -251,8 +251,14 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale'],
+      inject: ['slots', 'locale', 'layout'],
       apply(ctx) {
+        ctx.slots.inject('root', () => {
+          const entry = ctx.slots.entries('root')[0];
+          const store = entry.store.create();
+          const { rightbar, viewportWidth } = store.getSnapshot().layoutInfo;
+          if (rightbar === null) store.actions.setRightbar(viewportWidth * 0.6);
+        });
         ctx.effect(hideChrome, 'rumi-brand: hide developer chrome');
         ctx.effect(styleDocumentTabs, 'rumi-brand: document tab glass');
         ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'rumi-brand: live voice copy');

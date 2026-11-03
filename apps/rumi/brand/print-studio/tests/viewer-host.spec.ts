@@ -39,6 +39,8 @@ it('documents creating multiple models and bringing a named entry into view', as
   expect({
     instructions: await readFile(new URL('../AGENTS_TEMPLATE.md', import.meta.url), 'utf8'),
     load: f.raw('viewer_load').description,
+    highlight: f.raw('viewer_highlight').description,
+    clarification: await readFile(new URL('../skills/clarify-mesh-changes/SKILL.md', import.meta.url), 'utf8'),
     state: f.raw('mesh_state').description,
   }).toMatchSnapshot()
 })
@@ -280,6 +282,14 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
     expect(loaded.volume).toEqual({ x: 300, y: 320, z: 320 })
     expect(loaded.design).toMatchObject({ revision: 1, error: null, report: null })
     expect((await f.request(loaded.design.url)).headers.get('content-type')).toContain('javascript')
+    const reference = { path: loaded.design.path, revision: loaded.design.revision, url: loaded.design.url,
+      label: 'Upper region', blobs: [{ center: [0, 0, 3], radii: [2, 2, 1], rotationDegrees: [0, 0, 0] }] }
+    const highlighted = await f.run('viewer_highlight', reference)
+    expect(highlighted.status).toBe('queued')
+    expect((await f.run('mesh_state')).design.highlight).toEqual(highlighted.highlight)
+    expect((await f.run('viewer_highlight', reference, 'another-session')).status).toBe('model_required')
+    expect((await f.run('viewer_highlight', { ...reference, revision: 99 })).status).toBe('stale_model')
+    expect((await f.run('viewer_highlight', { ...reference, blobs: [], label: '' })).status).toBe('cleared')
     const placed = await f.run('viewer_transform', { scale: 2, rotate: { z: 90 } })
     expect(placed.design.transform).toMatchObject({ scale: 2, rotate: { z: 90 } })
     const camera = await f.run('viewer_camera', { azimuth: 45, elevation: 30 })

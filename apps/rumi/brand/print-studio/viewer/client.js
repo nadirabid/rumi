@@ -150,7 +150,7 @@ export function installViewer(ctx, React, primitives) {
         viewport.current = createViewport(holder.current, () => setFailed(true))
         setFailed(false)
       } catch {
-        // Without WebGL the pane still carries the status and the failure copy.
+        // Without WebGL the pane still displays the failure.
         setFailed(true)
       }
       return () => { viewport.current?.dispose(); viewport.current = null }
@@ -183,7 +183,7 @@ export function installViewer(ctx, React, primitives) {
       })
       return () => { active = false; controller.abort() }
     }, [
-      view?.design?.url, JSON.stringify(view?.design?.transform), view?.design?.camera?.id,
+      view?.design?.highlight?.id, view?.design?.url, JSON.stringify(view?.design?.transform), view?.design?.camera?.id,
       view?.sessionId, JSON.stringify(view?.volume),
     ])
     React.useEffect(() => {
@@ -212,19 +212,8 @@ export function installViewer(ctx, React, primitives) {
     }, [view])
     return h(React.Fragment, null,
       h('div', { className: 'pv-stage', ref: holder, role: 'img', 'aria-label': t('view'), 'data-testid': 'print-viewport' }),
-      failed ? h('p', { role: 'alert', className: 'pv-error' }, t('webgl')) : null,
       buildError && !failed && view?.design?.error?.kind !== 'source'
         ? h('p', { role: 'alert', className: 'pv-error' }, t(buildError)) : null)
-  }
-
-  function StatusPill({ summary, t }) {
-    if (summary.status === 'blocked') {
-      return h('p', { role: 'status', className: 'pv-pill is-blocked' }, t('needsFix', { count: summary.errors }))
-    }
-    if (summary.status === 'review') {
-      return h('p', { role: 'status', className: 'pv-pill' }, t('needsReview', { count: summary.warnings }))
-    }
-    return null
   }
 
   function MeshPane({ useScene, t, selectModel }) {
@@ -275,7 +264,6 @@ export function installViewer(ctx, React, primitives) {
     return h('section', { className: 'rumi-print-viewer', 'aria-label': t('title') },
       h(Stage, { key: state.view.sessionId, view: state.view, t }),
       scene.design?.error?.kind === 'source' ? h('p', { role: 'alert', className: 'pv-error' }, t('sourceFailed')) : null,
-      h(StatusPill, { summary: scene.summary, t }),
       scene.failed ? h('p', { role: 'alert', className: 'pv-error' }, t('previewFailed')) : null)
   }
 

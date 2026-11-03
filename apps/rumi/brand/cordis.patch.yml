@@ -4,3 +4,16 @@
     - id: rumi-brand
       name: '@rumi/brand'
       config: {}
+
+# Replace preset declarations while retaining their identities for resumed chats.
+- id: preset-standard
+  disabled: true
+- id: preset-ptc
+  disabled: true
+- id: preset-cordis
+  disabled: true
+- insert:
+    - id: rumi-presets
+      name: '@rumi/brand/preset'
+- id: ui-user-questions
+  disabled: true

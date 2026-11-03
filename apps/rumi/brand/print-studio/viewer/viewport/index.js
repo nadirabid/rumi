@@ -6,6 +6,7 @@
  * viewport retains camera state and the last successfully built design.
  */
 import * as THREE from 'three'
+import { createHighlight } from './highlight.js'
 import { buildModel, disposeModel } from './model.js'
 import { placeMesh } from '../transform.js'
 import { analyzeMesh } from '../checks.js'
@@ -40,6 +41,7 @@ export function createViewport(element, onFailure) {
   const designRoot = new THREE.Group()
   designRoot.matrixAutoUpdate = false
   scene.add(designRoot)
+  let highlightOverlay = null, highlightId = null, highlightVisible = true
   let design = null, designUrl = null, requestedUrl = null, generation = 0, cameraCommand = null
   let designSpec = null, designVolume = null, designPending = null
   const ink = token(element, '--dsw-alias-label-tertiary', FALLBACK_INK)
@@ -125,6 +127,22 @@ export function createViewport(element, onFailure) {
   controls.addEventListener('change', render)
   renderer.domElement.addEventListener('webglcontextlost', lost)
 
+  function clearHighlight() {
+    if (highlightOverlay) { highlightOverlay.dispose() }
+    highlightOverlay = null
+    highlightId = null
+  }
+
+  function syncHighlight() {
+    const highlight = designUrl === designSpec?.url ? designSpec?.highlight : null
+    if (highlightId === (highlight?.id ?? null)) return
+    clearHighlight()
+    if (!highlight || !design) return
+    highlightOverlay = createHighlight(design.root, highlight)
+    highlightOverlay.setVisible(highlightVisible)
+    highlightId = highlight.id
+  }
+
   function placeDesign() {
     if (!design || !designSpec) return null
     const placed = placeMesh(design.positions, designSpec.transform)
@@ -147,11 +165,18 @@ export function createViewport(element, onFailure) {
       controls.target.copy(center)
       controls.update()
     }
+    syncHighlight()
     render()
     return analyzeMesh(placed.positions, { volume: designVolume })
   }
 
   return {
+    /** Set local presentation visibility without confirming the proposed region. */
+    setHighlightVisible(visible) {
+      highlightVisible = visible
+      if (highlightOverlay) highlightOverlay.setVisible(visible)
+      render()
+    },
     /** Capture a fitted 480 × 320 PNG using the loaded geometry; restore the interactive viewport. */
     thumbnail() {
       if (closed || (objects.size === 0 && !design)) return null
@@ -170,14 +195,17 @@ export function createViewport(element, onFailure) {
       coverCamera.updateProjectionMatrix()
       const size = renderer.getSize(new THREE.Vector2())
       const ratio = renderer.getPixelRatio()
+      const overlayVisible = highlightVisible
       const visibility = volumeNodes.map(node => node.visible)
       try {
+        if (highlightOverlay) highlightOverlay.setVisible(false)
         for (const node of volumeNodes) node.visible = false
         renderer.setPixelRatio(1)
         renderer.setSize(480, 320, false)
         renderer.render(scene, coverCamera)
         return renderer.domElement.toDataURL('image/png')
       } finally {
+        if (highlightOverlay) highlightOverlay.setVisible(overlayVisible)
         volumeNodes.forEach((node, index) => { node.visible = visibility[index] })
         renderer.setPixelRatio(ratio)
         renderer.setSize(size.x, size.y, false)
@@ -190,6 +218,7 @@ export function createViewport(element, onFailure) {
       designVolume = volume
       if (!spec) {
         generation++
+        clearHighlight()
         if (design) { designRoot.remove(design.root); disposeModel(design.root) }
         design = null; designUrl = null; requestedUrl = null
         render()
@@ -197,6 +226,8 @@ export function createViewport(element, onFailure) {
       }
       if (designUrl === spec.url) return placeDesign()
       if (requestedUrl === spec.url) return designPending
+      clearHighlight()
+      render()
       requestedUrl = spec.url
       const request = ++generation
       designPending = (async () => {
@@ -275,6 +306,7 @@ export function createViewport(element, onFailure) {
       if (closed) return
       closed = true
       generation++
+      clearHighlight()
       if (design) disposeModel(design.root)
       design = null
       observer.disconnect()

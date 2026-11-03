@@ -46,7 +46,14 @@ export function assertMacOSRuntimeSignatureDetails(details, expected) {
  * @returns {string} Combined stdout and stderr.
  */
 function runAppleCommand(command, args, label) {
-  const result = spawnSync(command, args, { encoding: 'utf8' })
+  const ticketValidation = command === '/usr/bin/xcrun' && args[0] === 'stapler' && args[1] === 'validate'
+  let result
+  for (let attempt = 0; ; attempt++) {
+    result = spawnSync(command, args, { encoding: 'utf8', ...(ticketValidation ? { timeout: 120_000 } : {}) })
+    if (!ticketValidation || result.error || result.signal || result.status !== 68 || attempt === 3) break
+    console.log(`desktop notarization: ticket validation unavailable; retry ${attempt + 1}/3`)
+    runAppleCommand('/bin/sleep', [String(15 * 2 ** attempt)], 'ticket validation retry delay')
+  }
   if (result.error !== undefined) {
     throw new Error(`desktop macOS signing: could not execute ${label}: ${result.error.message}`)
   }
@@ -154,7 +161,7 @@ export function verifyMacOSSignature(appPath, expected) {
 }
 
 /**
- * Verify an independently distributed application's signature, ticket, and Gatekeeper acceptance.
+ * Verify an independently distributed application's signature, ticket, and Gatekeeper acceptance; ticket-server failures retry three times.
  * @param {string} appPath - Path to the stapled `.app` directory.
  * @param {{ signingIdentity: string, teamId: string }} expected - Public release identity.
  * @returns {void}

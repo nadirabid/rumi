@@ -10,7 +10,7 @@
 - 是否包含 H2D 配置文件？
 - 是否已配置打印机，并且可通过局域网访问？
 
-主机端通过 SSDP 发现打印机，提供 `GET /api/print-studio/status`、`/api/print-studio/cloud/*` 下的 Bambu Cloud 路由、`/api/print-studio/viewer/*` 下的网格预览路由，以及面向模型的工具。登录会获取已绑定打印机的 `dev_access_code`；Bambu Connect 负责发送切片后的任务。浏览器端包括**插件 → 内置插件设置**中的 Print Studio 卡片和 3D 预览标签页。内置的 `skills/print-studio-setup/SKILL.md` 在加载时注册，以便智能体根据检测结果引导成年人完成配置。
+主机端通过 SSDP 发现打印机，提供 `GET /api/print-studio/status`、`/api/print-studio/cloud/*` 下的 Bambu Cloud 路由、`/api/print-studio/viewer/*` 下的网格预览路由，以及面向模型的工具。登录会获取已绑定打印机的 `dev_access_code`；Bambu Connect 负责发送切片后的任务。浏览器端包括**插件 → 内置插件设置**中的 Print Studio 卡片和 3D 预览标签页。内置的[配置技能](skills/print-studio-setup/SKILL.md)和 [FDM 设计技能](skills/fdm-design/SKILL.md)在插件加载时注册，供智能体发现。它们提供配置引导和设计约束；智能体在需要时加载相应说明。
 
 打印机 IP 和序列号存储在 `$DSH_HOME/print-studio/printer.json` 中，仅所有者可访问。局域网访问码通过 `ctx.credentials` 存储为 `BAMBU_LAN_ACCESS_CODE`；它不会返回给客户端，也不会写入配置补丁。
 

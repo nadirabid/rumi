@@ -20,6 +20,8 @@ beforeAll(async () => {
 beforeEach(() => { vi.useFakeTimers() })
 afterEach(async () => {
   cleanup()
+  document.documentElement.removeAttribute('data-rightbar-fullscreen')
+  document.documentElement.removeAttribute('data-rightbar-collapsed')
   for (const dispose of disposers.splice(0).reverse()) await dispose()
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -34,6 +36,7 @@ function translate(key: string, params?: Record<string, unknown>) {
 
 const COPY: Record<string, string> = {
   title: 'Projects', new: 'New', back: 'All projects',
+  openPreview: 'Open sidebar', closePreview: 'Close sidebar', fullPreview: 'Full view', regularPreview: 'Regular view',
   empty: 'No projects yet.', emptyHint: 'Make one, then ask Rumi to help build it.',
   updated: 'Updated {when}', failed: 'That did not work. Try again.', untitled: 'Untitled project',
   count: '{count} projects',
@@ -50,6 +53,8 @@ const Icon = () => null
 
 /** Apply the plugin into a fake context and return its handles. */
 function fixture(host: { projects?: object[]; knownSessions?: Record<string, object>; activePanelId?: string | null; associationOk?: boolean } = {}) {
+  type Injection = { hooks: { sidebar: HostObservable<string> }; toggleSidebar: () => void; toggleMode: () => void }
+  const injections = new Map<string, () => Injection>()
   const entries = new Map<string, React.ComponentType<Record<string, unknown>>>()
   const register = () => () => {}
   const posts: { url: string; body: unknown }[] = []
@@ -78,12 +83,22 @@ function fixture(host: { projects?: object[]; knownSessions?: Record<string, obj
     selectPanel: vi.fn(),
     toggleSidebar: vi.fn(),
   }
+  let expanded = true;
+  const mounted = { getSnapshot: () => host.activePanelId === 'projects' ? undefined : 'session-1', subscribe: () => () => {} };
+  const sidebar = {
+    mounted, isExpanded: () => expanded,
+    toggleExpanded: vi.fn(() => { expanded = !expanded; document.documentElement.toggleAttribute('data-rightbar-collapsed', !expanded) }),
+    commandTarget: vi.fn(() => ({ sessionId: 'session-1' })),
+    toggleFullscreen: vi.fn(() => { document.documentElement.toggleAttribute('data-rightbar-fullscreen') }),
+  };
   const ctx = {
+    sidebarRight: sidebar,
     locale: { bind: () => translate, register },
     effect: (effect: () => (() => void | Promise<void>)) => { const dispose = effect(); disposers.push(dispose); return dispose },
     slots: {
       inject: (_name: string, registerEntry: () => (() => void)) => registerEntry(),
-      register: (options: { name: string; key?: string }, component: React.ComponentType<Record<string, unknown>>) => {
+      register: (options: { name: string; key?: string; inject?: () => Injection }, component: React.ComponentType<Record<string, unknown>>) => {
+        if (options.inject) injections.set(options.name, options.inject);
         entries.set(options.key === undefined ? options.name : `${options.name}:${options.key}`, component)
         return () => { entries.delete(options.name) }
       },
@@ -96,15 +111,18 @@ function fixture(host: { projects?: object[]; knownSessions?: Record<string, obj
     workspaces: { create: handles.createWorkspace, rename: handles.renameWorkspace },
     uiWorkspace: { openSession: handles.openSession, connectWorkspace: handles.connect },
   }
-  const definition = loaded!.factory(name => name === 'react' ? React : { IconPlusOutlineRegular: Icon, IconChevronLeftOutlineRegular: Icon })
+  const definition = loaded!.factory(name => name === 'react' ? React : { IconPlusOutlineRegular: Icon, IconChevronLeftOutlineRegular: Icon, IconPanelLeftOutlineRegular: Icon, Tooltip: ({ children }: { children: React.ReactNode }) => children })
   definition.apply(ctx)
   return {
-    ...handles, posts,
+    ...handles, posts, sidebar,
     view: (key: string) => {
       const component = entries.get(key)!
       const usePanelInfo = ((selector: (value: { activePanelId: string | null }) => unknown) =>
         selector(panelInfo.getSnapshot())) satisfies SnapshotSelectorHook<{ activePanelId: string | null }>
-      return React.createElement(component, { t: translate, usePanelInfo })
+      const injected = injections.get(key)?.();
+      const source = injected?.hooks.sidebar;
+      const useSidebar = (selector: (value: string) => unknown) => selector(React.useSyncExternalStore(source!.subscribe, source!.getSnapshot));
+      return React.createElement(component, { t: translate, usePanelInfo, useSidebar, ...injected })
     },
   }
 }
@@ -232,6 +250,33 @@ it('shows the opened project name in the header and keeps New available', async 
   expect(document.querySelector('.rumi-header-title')?.textContent).toBe('Dragon cup')
   expect(screen.getByRole('button', { name: COPY.new })).toBeTruthy()
   expect(screen.getByRole('button', { name: COPY.back })).toBeTruthy()
+})
+
+it('keeps sidebar controls before New and reopens the collapsed sidebar', async () => {
+  const view = fixture({ projects: [project()] })
+  render(view.view('shell.leading'))
+  expect([...document.querySelectorAll('.rumi-header-actions button')].map(button => button.getAttribute('aria-label')))
+    .toEqual(['Full view', 'Close sidebar', 'New'])
+  fireEvent.click(screen.getByRole('button', { name: 'Full view' }))
+  await settle()
+  expect(view.sidebar.toggleFullscreen).toHaveBeenCalledWith({ sessionId: 'session-1' })
+  fireEvent.click(screen.getByRole('button', { name: 'Regular view' }))
+  await settle()
+  fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }))
+  await settle()
+  expect(screen.getByRole('button', { name: 'Full view' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }))
+  await settle()
+  expect(screen.getByRole('button', { name: 'Close sidebar' }).getAttribute('aria-expanded')).toBe('true')
+  expect(view.sidebar.toggleExpanded).toHaveBeenCalledTimes(2)
+})
+
+it('omits sidebar controls on the project gallery', () => {
+  const view = fixture({ activePanelId: 'projects' })
+  render(view.view('shell.leading'))
+  expect(screen.queryByRole('button', { name: 'Open sidebar' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Close sidebar' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'New' })).toBeTruthy()
 })
 
 it('loads saved covers as lazy images and falls back when a cover cannot be read', async () => {

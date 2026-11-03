@@ -14,7 +14,7 @@ window.__ModuleLoader__.load({
   id: '@rumi/projects',
   factory(require) {
     const React = require('react');
-    const { IconChevronLeftOutlineRegular, IconPlusOutlineRegular } = require('@deepseek-ai/dsh-client-ui-primitives');
+    const { IconChevronLeftOutlineRegular, IconPlusOutlineRegular, IconPanelLeftOutlineRegular, Tooltip } = require('@deepseek-ai/dsh-client-ui-primitives');
     const h = React.createElement;
 
     const PANEL_ID = 'projects';
@@ -26,6 +26,10 @@ window.__ModuleLoader__.load({
       count: '{count} projects',
       new: 'New',
       back: 'All projects',
+      openPreview: 'Open sidebar',
+      closePreview: 'Close sidebar',
+      fullPreview: 'Full view',
+      regularPreview: 'Regular view',
       empty: 'No projects yet.',
       emptyHint: 'Make one, then ask Rumi to help build it.',
       updated: 'Updated {when}',
@@ -36,6 +40,10 @@ window.__ModuleLoader__.load({
       count: '{count} 个项目',
       new: '新建',
       back: '所有项目',
+      openPreview: '打开侧栏',
+      closePreview: '关闭侧栏',
+      fullPreview: '全屏视图',
+      regularPreview: '常规视图',
       empty: '还没有项目',
       emptyHint: '先新建一个，然后请 Rumi 一起制作',
       updated: '更新于 {when}',
@@ -63,9 +71,17 @@ window.__ModuleLoader__.load({
 .rumi-projects-empty-hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
 .rumi-projects-error{margin:0;font-size:12px;color:var(--dsw-alias-state-error-primary)}
 .rumi-projects-leading{position:fixed;inset:0 0 auto 0;box-sizing:border-box;height:var(--dsh-frame-top-clearance,48px);display:flex;align-items:center;gap:10px;padding:0 16px 0 88px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 92%,transparent);border-bottom:1px solid var(--dsw-alias-border-l2);backdrop-filter:blur(24px);-webkit-app-region:drag}
+body:has(.rumi-projects-leading) header:has([data-conversation-tabs]){border-bottom-color:transparent}
+/* The full-width project header reserves the same band above sidebar tabs. */
+body:has(.rumi-projects-leading) [data-sidebar-right-panel]{top:var(--dsh-frame-top-clearance,48px)}
 .rumi-projects-leading button{-webkit-app-region:no-drag;flex-shrink:0}
 .rumi-header-title{font-size:14px;font-weight:500;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--dsw-alias-label-primary)}
-.rumi-header-new{margin-left:auto}
+.rumi-header-actions{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.rumi-sidebar-glyph{transform:scaleX(-1)}
+.rumi-glass:disabled{opacity:.4;cursor:default}
+body:has(.rumi-projects-leading) [data-dockkit-split-button],
+body:has(.rumi-projects-leading) [data-dockkit-strip-chrome],
+body:has(.rumi-projects-leading) [data-sidebar-right-expand]{display:none}
 html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
 /* Liquid Glass: a translucent capsule over the window material. The specular
    inset and drop shade are material constants, not theme colors. */
@@ -87,6 +103,35 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
         document.head.append(style);
         return () => style.remove();
       }, 'rumi projects: styles');
+    }
+
+    /** Published frame attributes reflect the sidebar's effective mode, including narrow windows. */
+    function sidebarSource(sidebar) {
+      return {
+        getSnapshot: () => {
+          if (sidebar.mounted.getSnapshot() === undefined) return 'none';
+          if (!sidebar.isExpanded()) return 'closed';
+          return document.querySelector('[data-rightbar-fullscreen]') ? 'full' : 'regular';
+        },
+        subscribe: listener => {
+          const observer = new MutationObserver(listener);
+          observer.observe(document.documentElement, {
+            subtree: true, attributes: true,
+            attributeFilter: ['data-rightbar-fullscreen', 'data-rightbar-collapsed', 'data-sidebar-right-open'],
+          });
+          const unmount = sidebar.mounted.subscribe(listener);
+          return () => { observer.disconnect(); unmount(); };
+        },
+      };
+    }
+
+    /** The existing sidebar mode glyphs, kept at the top bar's 16px icon size. */
+    function ModeGlyph({ full }) {
+      return h('svg', { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
+        full
+          ? [h('path', { key: 'a', d: 'M9 2.5V6C9 6.26522 9.10536 6.51957 9.29289 6.70711C9.48043 6.89464 9.73478 7 10 7H13.5', stroke: 'currentColor' }),
+             h('path', { key: 'b', d: 'M7 13.5V10C7 9.73478 6.89464 9.48043 6.70711 9.29289C6.51957 9.10536 6.26522 9 6 9H2.5', stroke: 'currentColor' })]
+          : h('path', { d: 'M2.33203 10.4054V13.1681C2.33229 13.444 2.55605 13.6681 2.83203 13.6681H5.49512V14.6681H2.83203C2.00376 14.6681 1.33229 13.9963 1.33203 13.1681V10.4054H2.33203ZM14.6689 13.1681C14.6687 13.996 13.9968 14.6676 13.1689 14.6681H10.4951V13.6681H13.1689C13.4445 13.6676 13.6687 13.4437 13.6689 13.1681V10.4054H14.6689V13.1681ZM13.1689 1.33118C13.9969 1.33163 14.6688 2.00315 14.6689 2.83118V5.4054H13.6689V2.83118C13.6688 2.55544 13.4446 2.33162 13.1689 2.33118H10.4951V1.33118H13.1689ZM5.49512 2.33118H2.83203C2.55598 2.33118 2.33218 2.55516 2.33203 2.83118V5.4054H1.33203V2.83118C1.33218 2.00288 2.00369 1.33118 2.83203 1.33118H5.49512V2.33118Z', fill: 'currentColor' }));
     }
 
     /** One project list shared by the gallery and the window-chrome control. */
@@ -179,7 +224,7 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
     }
 
     return {
-      inject: ['slots', 'locale', 'layout', 'sessions', 'uiWorkspace', 'workspaces'],
+      inject: ['slots', 'locale', 'layout', 'sessions', 'uiWorkspace', 'workspaces', 'sidebarRight'],
       apply(ctx) {
         const t = ctx.locale.bind(NS);
         installChrome(ctx, t);
@@ -224,7 +269,11 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
           );
         }
 
-        function Leading({ usePanelInfo, t }) {
+        function Leading({ usePanelInfo, useSidebar, toggleSidebar, toggleMode, t }) {
+          const sidebar = useSidebar(value => value);
+          const shown = sidebar !== 'closed' && sidebar !== 'none';
+          const modeLabel = t(sidebar === 'full' ? 'regularPreview' : 'fullPreview');
+          const toggleLabel = t(shown ? 'closePreview' : 'openPreview');
           const onHome = usePanelInfo(info => info.activePanelId === PANEL_ID);
           const state = React.useSyncExternalStore(list.subscribe, list.getSnapshot);
           const project = state.projects.find(item => item.id === state.activeId);
@@ -241,10 +290,19 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
             }, h(IconChevronLeftOutlineRegular, { size: 16 })),
             h('span', { className: 'rumi-header-title', title: onHome ? t('title') : project?.name },
               onHome ? t('title') : project?.name),
-            h('button', {
-              type: 'button', className: 'rumi-glass rumi-header-new', 'aria-label': t('new'), title: t('new'),
-              disabled: busy, onClick: create,
-            }, h(IconPlusOutlineRegular, { size: 16 })),
+            h('div', { className: 'rumi-header-actions' },
+              sidebar === 'none' ? null : h(React.Fragment, null,
+                h(Tooltip, { label: modeLabel, side: 'bottom', portal: true, delayMs: 500 },
+                  h('button', { type: 'button', className: 'rumi-glass', 'aria-label': modeLabel,
+                    disabled: !shown, onClick: toggleMode }, h(ModeGlyph, { full: sidebar === 'full' }))),
+                h(Tooltip, { label: toggleLabel, side: 'bottom', portal: true, delayMs: 500 },
+                  h('button', { type: 'button', className: 'rumi-glass', 'aria-label': toggleLabel,
+                    'aria-expanded': shown, onClick: toggleSidebar },
+                    h(IconPanelLeftOutlineRegular, { size: 16, className: 'rumi-sidebar-glyph' })))),
+              h('button', {
+                type: 'button', className: 'rumi-glass rumi-header-new', 'aria-label': t('new'), title: t('new'),
+                disabled: busy, onClick: create,
+              }, h(IconPlusOutlineRegular, { size: 16 }))),
           );
         }
 
@@ -253,6 +311,14 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
         }, Gallery));
         ctx.slots.inject('shell.leading', () => ctx.slots.register({
           name: 'shell.leading', locale: NS,
+          inject: () => ({
+            hooks: { sidebar: sidebarSource(ctx.sidebarRight) },
+            toggleSidebar: () => ctx.sidebarRight.toggleExpanded(),
+            toggleMode: () => {
+              const target = ctx.sidebarRight.commandTarget(null);
+              if (target !== undefined) ctx.sidebarRight.toggleFullscreen(target);
+            },
+          }),
         }, Leading));
 
         // Home is the splash and the stock navigation column has no place in

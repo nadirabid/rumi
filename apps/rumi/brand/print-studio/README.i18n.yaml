@@ -3,8 +3,8 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write apps/rumi/brand/print-studio/README.md
 /print-studio:
-  en: e50d5cac72620202
-  zh: 0af47005df1d66b2
+  en: cea0621f7f0b358d
+  zh: 5462d0e756162a22
 /print-studio/test-print:
   en: 9a60197d35201e39
   zh: 93cbf14689151364

@@ -10,7 +10,7 @@ This slice covers setup plus a real test print. It answers three setup questions
 - Does it have the H2D profiles?
 - Is a printer configured and reachable on the LAN?
 
-The host half discovers the printer over SSDP, exposes `GET /api/print-studio/status`, the Bambu Cloud routes under `/api/print-studio/cloud/*`, the mesh viewer routes under `/api/print-studio/viewer/*`, and the model-facing tools. Signing in fetches the bound printer's `dev_access_code`; Bambu Connect sends the sliced job. The browser half is the Print Studio card under **Plugins → Built-in plugin settings**, plus the 3D preview tab. The bundled `skills/print-studio-setup/SKILL.md` is registered at load so the agent can walk an adult through whatever the probe reports.
+The host half discovers the printer over SSDP, exposes `GET /api/print-studio/status`, the Bambu Cloud routes under `/api/print-studio/cloud/*`, the mesh viewer routes under `/api/print-studio/viewer/*`, and the model-facing tools. Signing in fetches the bound printer's `dev_access_code`; Bambu Connect sends the sliced job. The browser half is the Print Studio card under **Plugins → Built-in plugin settings**, plus the 3D preview tab. The bundled [setup skill](skills/print-studio-setup/SKILL.md) and [FDM design skill](skills/fdm-design/SKILL.md) are registered at plugin load for agent discovery. They provide setup guidance and design constraints; the agent loads their instructions when relevant.
 
 Printer IP and serial are stored in `$DSH_HOME/print-studio/printer.json` (owner-only). The LAN access code is stored through `ctx.credentials` as `BAMBU_LAN_ACCESS_CODE`; it is never returned to the client and never belongs in the profile patch.
 

@@ -76,6 +76,8 @@ open -a /Applications/Rumi.app
 
 Launch from Finder. If you launch from inside a DSH shell, unset `ELECTRON_RUN_AS_NODE` first — the harness sets it for its own children, and Electron then runs as plain Node and exits silently.
 
+First launch opens Projects without signing in or entering a key. Configure the DeepSeek API key in **Rumi → Settings → Models**; new conversations default to DeepSeek Flash (`deepseek-flash`). Keys stay in local credentials and are not included in the installer.
+
 ## Moving an earlier install
 
 Builds before Rumi owned `~/.rumi` kept their profile and state under `~/.dsh`, beside DeepSeek Harness. Move that data once before launching a newer build, or the app opens empty:

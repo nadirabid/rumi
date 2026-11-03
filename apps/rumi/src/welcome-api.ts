@@ -66,10 +66,10 @@ export interface WelcomeAuthentication {
 }
 
 /**
- * Decide whether a startup or sign-out requires the welcome entry.
- * @param authentication - current account and independently stored API-key facts.
- * @returns true only when neither authentication route is configured.
+ * Rumi opens its workspace without requiring provider credentials; Settings owns key setup.
+ * @param _authentication - Account facts retained for the desktop welcome integration.
+ * @returns false for every account state, including first launch and sign-out.
  */
-export function needsWelcome(authentication: WelcomeAuthentication): boolean {
-  return !authentication.loggedIn && !authentication.hasApiKey
+export function needsWelcome(_authentication: WelcomeAuthentication): boolean {
+  return false
 }

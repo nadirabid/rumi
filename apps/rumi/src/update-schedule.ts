@@ -1,4 +1,4 @@
-/** Ordinary feed polling; policy queries and user-authorized transfers keep their own lifetimes. */
+/** Background feed checks and downloads; installation remains separately confirmed. */
 
 import { resolveDurationMs } from './duration-env.ts'
 import type { DesktopUpdateCoordinator } from './update-coordinator.ts'
@@ -33,6 +33,7 @@ export class DesktopUpdateSchedule {
   private activeChecks = 0
   private disposed = false
   private nextCheck = -Infinity
+  private automaticDownload = false
   private delay: number
 
   /**
@@ -42,7 +43,7 @@ export class DesktopUpdateSchedule {
    * @param now - Monotonic milliseconds, independent of wall-clock corrections.
    */
   constructor(
-    private readonly updates: Pick<DesktopUpdateCoordinator, 'check' | 'state'>,
+    private readonly updates: Pick<DesktopUpdateCoordinator, 'check' | 'download' | 'state'>,
     private readonly config: DesktopUpdateScheduleConfig,
     private readonly random: () => number = Math.random,
     private readonly now: () => number = () => performance.now(),
@@ -50,11 +51,15 @@ export class DesktopUpdateSchedule {
     this.delay = config.intervalMs
   }
 
+  /** Whether a background transfer owns download failures and their scheduled retry. */
+  get downloadingAutomatically(): boolean { return this.automaticDownload }
+
   /**
    * Start immediately when due; explicit requests bypass the deadline and share in-flight work.
+   * Background checks download available releases; failures retry with capped backoff.
    * @param manual - Whether a check failure must be visible, including when joining an automatic request.
    * @param force - Whether policy arrival or explicit intent bypasses the automatic deadline.
-   * @returns Current state when not due, otherwise the coordinator result. Disposal rejects new work.
+   * @returns Current state when not due, otherwise check or download completion. Disposal rejects new work.
    */
   async check(manual = false, force = manual): Promise<DesktopUpdateState> {
     if (this.disposed) throw new Error('desktop update: polling is disposed')
@@ -66,9 +71,14 @@ export class DesktopUpdateSchedule {
     this.pending = Promise.resolve().then(() => {
       if (this.disposed) throw new Error('desktop update: polling is disposed')
       return this.updates.check(manual)
+    }).then(async (state) => {
+      if (manual || this.disposed || state.phase !== 'available' || state.version === undefined) return state
+      this.automaticDownload = true
+      try { return await this.updates.download(state.version) }
+      finally { this.automaticDownload = false }
     }).then(
       (state) => {
-        this.complete(state.phase === 'error' && state.failedOperation === 'check')
+        this.complete(state.phase === 'error' && (state.failedOperation === 'check' || state.failedOperation === 'download'))
         return state
       },
       (error: unknown) => { this.complete(true); throw error },

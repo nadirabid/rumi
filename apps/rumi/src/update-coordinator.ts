@@ -88,7 +88,6 @@ export class DesktopUpdateCoordinator {
   async check(manual = false): Promise<DesktopUpdateState> {
     this.assertLive()
     if (this.downloadOperation !== undefined || this.installOperation !== undefined || this.downloaded) return this.current
-    if (!manual && this.current.phase === 'error' && this.current.failedOperation === 'download') return this.current
     this.checkOperation ??= Promise.resolve().then(() => this.doCheck())
       .finally(() => { this.checkOperation = undefined })
     const result = await this.checkOperation
@@ -97,7 +96,7 @@ export class DesktopUpdateCoordinator {
   }
 
   /**
-   * @param version - Version shown in the user's download confirmation.
+   * @param version - Checked version selected for a background download or explicit retry.
    * @returns Download readiness or failure, without authorizing installation.
    */
   async download(version: string): Promise<DesktopUpdateState> {

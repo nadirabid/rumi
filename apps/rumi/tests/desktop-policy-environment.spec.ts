@@ -58,3 +58,9 @@ it.each([{ unsigned: true }, { prepareOnly: true }, {}])('requires policy outsid
       .toThrow('DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN')
   }
 })
+
+
+it('omits mandatory policy requests for Rumi GitHub releases', () => {
+  expect(resolveDesktopPolicyEnvironment({ RUMI_RELEASE_REPOSITORY: 'nadirabid/rumi',
+    DSH_DESKTOP_AUTO_UPDATE_ENV: 'production' })).toBeUndefined()
+})

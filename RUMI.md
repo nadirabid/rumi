@@ -48,7 +48,22 @@ node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64
 
 Artifacts land in `apps/rumi/.desktop-build/targets/mac-arm64/unsigned-artifacts/` (`Rumi.app` and a `.dmg`).
 
-Distribution builds need a Developer ID plus notarization credentials and drop `--unsigned`; that path is upstream's and unchanged.
+Distribution builds need a Developer ID certificate and notarization credentials. Rumi's Apple Silicon releases use `RUMI_RELEASE_REPOSITORY=owner/repository` in a private production packaging preset, with `DSH_DESKTOP_APP_ID=com.nadirmuzaffar.rumi` and `DSH_DESKTOP_AUTO_UPDATE_ENV=production`. This selects the public GitHub repository's latest release assets as the update feed and omits the DeepSeek mandatory-update service. The repository must be public; the app carries no GitHub credential. This feed supports only mac-arm64.
+
+Keep the packaging directory outside the checkout. Its `secrets/macos-signing.env` contains `DSH_DESKTOP_MACOS_SIGNING_IDENTITY`, `DSH_DESKTOP_MACOS_TEAM_ID`, `CSC_LINK`, `CSC_KEY_PASSWORD`, and `APPLE_KEYCHAIN_PROFILE`; restrict private files to mode `0600`. `CSC_LINK` points to a local PKCS#12 certificate containing its private key and Developer ID intermediate certificate. Store notarization authentication with `xcrun notarytool store-credentials` and refer to that Keychain profile. Never put signing keys or passwords in the repository.
+
+After the builds above, package a version greater than the installed version. The build version extends the product version, for example `0.2.1-rc.3.20261102.1`; increment its final number for another release that day. The updater uses the inherited `nightly` channel for these prerelease versions, while GitHub marks the selected release as latest.
+
+```sh
+export DSH_PACKAGING_CONFIG_DIR="$HOME/.config/rumi-release"
+export DSH_PACKAGING_PRESET=production
+export npm_execpath="$PWD/node_modules/pnpm/bin/pnpm.mjs"
+node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64 --build-version 0.2.1-rc.3.20261102.1
+node apps/rumi/scripts/publish-github.mjs
+node apps/rumi/scripts/publish-github.mjs --publish
+```
+
+The publisher validates the completed release record, ZIP checksum and size, Apple signatures and notarization, and public repository access. It uploads the DMG, ZIP, blockmap, and update feed into a draft before publishing it as latest. Binary URLs in the feed identify an immutable version tag. A failed upload can leave a draft; inspect it before retrying, and never replace assets of an already published version. Updates use Rumi's existing download and restart confirmations; active work is not restarted automatically.
 
 Before macOS code signing, Rumi scopes the copied Electron app and helper build UUIDs to their application identities. This keeps local-network permissions distinct from other installed Electron apps; see [Apple TN3178](https://developer.apple.com/documentation/technotes/tn3178-checking-for-and-resolving-build-uuid-problems). The packaging hook supports the separate arm64 and x64 targets and rejects unsupported executable formats. Executable debug symbols, if distributed, must carry the rewritten UUID too.
 

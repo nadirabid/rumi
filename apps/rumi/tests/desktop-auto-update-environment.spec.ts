@@ -119,3 +119,19 @@ describe('desktop auto-update environment', () => {
     expect(() => desktopUpdateMetadataFilename('1.2.3', 'linux')).toThrow(/unsupported metadata platform/u)
   })
 })
+
+
+describe('Rumi GitHub releases', () => {
+  const env = { RUMI_RELEASE_REPOSITORY: 'nadirabid/rumi', DSH_DESKTOP_AUTO_UPDATE_ENV: 'production' }
+  it('uses public release assets without DeepSeek deployment settings', () => {
+    expect(resolveDesktopAutoUpdateConfig(env, 'darwin', 'arm64').publicUrl)
+      .toBe('https://github.com/nadirabid/rumi/releases/latest/download/')
+    expect(() => resolveDesktopUploadConfig(env, 'darwin', 'arm64')).toThrow('GitHub publisher')
+  })
+  it.each(['', '../rumi', 'owner/repo/extra', 'https://github.com/owner/repo'])('rejects invalid repository %s', repository => {
+    expect(() => resolveDesktopAutoUpdateConfig({ ...env, RUMI_RELEASE_REPOSITORY: repository }, 'darwin', 'arm64')).toThrow('owner/repository')
+  })
+  it('rejects architectures that would share the macOS feed', () => {
+    expect(() => resolveDesktopAutoUpdateConfig(env, 'darwin', 'x64')).toThrow('mac-arm64')
+  })
+})

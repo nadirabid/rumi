@@ -8,11 +8,11 @@ import { en, zh } from '../viewer/locales.js'
 import { encodeStl } from '../viewer/stl.js'
 
 vi.mock('../viewer/viewer.module.css', () => ({ default: '' }))
-const viewport = vi.hoisted(() => ({ apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
+const viewport = vi.hoisted(() => ({ setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
 vi.mock('../viewer/viewport/index.js', () => ({
   createViewport: (...args: unknown[]) => {
     viewport.create(...args)
-    return { thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose }
+    return { setHighlightVisible: viewport.setHighlightVisible, thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose }
   },
 }))
 
@@ -140,12 +140,12 @@ it('invites the reader to ask for a model instead of offering controls', async (
   expect(view.opened).not.toHaveBeenCalled()
 })
 
-it('draws the scene, opens the tab, and counts what needs fixing', async () => {
+it('draws the scene and opens the tab without a geometry warning badge', async () => {
   const view = fixture({ scene: scene([object({ blocked: true })], { status: 'blocked', errors: 1, warnings: 0 }) })
   render(view.view('sidebar.right.pane.tab'))
   await settle()
   expect(screen.getByTestId('print-viewport')).toBeTruthy()
-  expect(screen.getByRole('status').textContent).toBe(translate('needsFix', { count: 1 }))
+  expect(screen.queryByRole('status')).toBeNull()
   expect(view.opened).toHaveBeenCalledWith('session-a', 'print-studio')
   expect(viewport.apply).toHaveBeenCalledOnce()
   expect(viewport.apply.mock.calls[0][0].objects[0].positions).toHaveLength(9)

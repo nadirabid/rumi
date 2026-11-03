@@ -385,6 +385,36 @@ export function applyViewer(ctx, defineTool) {
   })), 'print viewer: source placement')
 
   ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'viewer_highlight',
+    description: 'Replace temporary Gaussian wireframe regions on the editable model loaded by viewer_load. Read mesh_state for design.path, revision and url; inspect model source to locate regions. Coordinates are model-local millimetres before viewer_transform, including part transforms. Rotation uses XYZ Euler degrees. Up to eight ellipsoids combine by maximum influence, with a fixed soft fade. All intersected surfaces, including the back, may be highlighted. Empty blobs clears. Does not edit geometry or exports. Returns queued, not proof of rendering or user confirmation. Use clarify-mesh-changes for clarification guidance.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Exact design.path from mesh_state.' },
+      revision: { type: 'integer', required: true, description: 'Exact design.revision from mesh_state.' },
+      url: { type: 'string', required: true, description: 'Exact design.url from mesh_state; identifies the loaded instance.' },
+      label: { type: 'string', required: true, description: 'Short description of the proposed region, at most 200 characters. May be empty when clearing.' },
+      blobs: { type: 'array', required: true, description: 'Zero to eight ellipsoids; an empty array clears the highlight.', items: {
+        type: 'object', additionalProperties: false, properties: {
+          center: { type: 'array', required: true, items: { type: 'number' }, description: 'Exactly three coordinates [x,y,z] in millimetres.' },
+          radii: { type: 'array', required: true, items: { type: 'number' }, description: 'Exactly three positive nominal extents [x,y,z] in millimetres, at least 0.001. Influence is exp(-1.5 * squared normalized distance), fading out near 1.3 times these extents.' },
+          rotationDegrees: { type: 'array', required: true, items: { type: 'number' }, description: 'Exactly three XYZ Euler angles in degrees; [0,0,0] aligns with model axes.' },
+        },
+      } },
+    },
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+    isConcurrencySafe: () => false, timeoutMs: 10_000,
+    async execute(args, exec) {
+      const record = sessions.get(exec.agent?.session.id)
+      if (!record?.source) return JSON.stringify({ status: 'model_required', message: 'Load an editable model with viewer_load first.' })
+      return serialize(record, async () => {
+        exec.signal.throwIfAborted()
+        await record.source.poll()
+        exec.signal.throwIfAborted()
+        return JSON.stringify(record.source.highlight(args))
+      })
+    },
+  })), 'print viewer: highlight region')
+
+  ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_camera',
     description: 'Frame the source model and orbit the viewer camera without changing the design or its printed orientation.',
     parameters: {

@@ -106,3 +106,26 @@ it('retains a build error when an unreadable source is restored unchanged', asyn
   await f.source.poll()
   expect(f.source.state().error).toEqual({ kind: 'build', message: 'broken build' })
 })
+
+it('binds temporary regions to a source instance and invalidates them after edits', async () => {
+  const f = await fixture()
+  const state = f.source.state()
+  const request = { path: state.path, revision: state.revision, url: state.url, label: 'Top', blobs: [
+    { center: [0, 0, 3], radii: [5, 5, 1], rotationDegrees: [0, 0, 0] },
+  ] }
+  expect(f.source.highlight(request).status).toBe('queued')
+  const highlight = f.source.state().highlight
+  expect(f.source.highlight({ ...request, url: '/other-instance' }).status).toBe('stale_model')
+  expect(() => f.source.highlight({ ...request, blobs: [{ ...request.blobs[0], radii: [0, 1, 1] }] })).toThrow('radii')
+  expect(f.source.state().highlight).toEqual(highlight)
+  f.source.transform({ scale: 2 })
+  expect(f.source.state().highlight).toEqual(highlight)
+  await writeFile(join(f.directory, 'part.js'), 'export const size = 25')
+  await f.source.poll()
+  expect(f.source.highlight(request).status).toBe('stale_model')
+  await f.source.poll()
+  expect(f.source.state().highlight).toBeNull()
+  expect(f.source.highlight(request).status).toBe('stale_model')
+  const current = f.source.state()
+  expect(f.source.highlight({ ...request, ...current, label: '', blobs: [] }).status).toBe('cleared')
+})

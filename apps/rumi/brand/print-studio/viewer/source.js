@@ -2,6 +2,7 @@
 import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, extname, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
+import { normalizeHighlight } from './highlight.js'
 import { normalizePlacement } from './transform.js'
 
 const ROUTE = '/api/print-studio/viewer'
@@ -27,7 +28,7 @@ export async function createSource(ctx, path, workspace) {
   let sourceError = null
   let buildError = null
   const snapshots = []
-  const state = { path, revision: 0, url: null, transform: normalizePlacement(), report: null, camera: null }
+  const state = { path, revision: 0, url: null, transform: normalizePlacement(), report: null, camera: null, highlight: null }
 
   async function scan() {
     const files = new Map()
@@ -81,9 +82,11 @@ export async function createSource(ctx, path, workspace) {
         }
       }, 'print viewer: source snapshot')
       snapshots.push(disposeSnapshot)
+      candidate = null
       hash = next.hash
       state.url = `${prefix}/${entryName.split('/').map(encodeURIComponent).join('/')}`
       state.revision++
+      state.highlight = null
       sourceError = null
       buildError = null
       state.report = null
@@ -122,6 +125,16 @@ export async function createSource(ctx, path, workspace) {
     transform(value) {
       state.transform = normalizePlacement({ ...state.transform, ...value })
       state.report = null
+    },
+    highlight(value) {
+      if (closed) return { status: 'closed' }
+      if (value.path !== state.path || value.revision !== state.revision || value.url !== state.url || sourceError || buildError || candidate) {
+        return { status: 'stale_model', message: 'Read mesh_state and resolve model errors before highlighting again.' }
+      }
+      const next = normalizeHighlight(value)
+      state.highlight = next.blobs.length ? { ...next, id: randomUUID() } : null
+      return { status: state.highlight ? 'queued' : 'cleared', highlight: state.highlight,
+        message: 'Presentation state updated; viewer display and user confirmation are not acknowledged.' }
     },
     camera(value) { state.camera = { ...value, id: randomUUID() } },
     feedback(value) {

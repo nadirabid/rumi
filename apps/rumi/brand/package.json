@@ -7,12 +7,14 @@
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./preset": "./preset.js"
   },
   "files": [
     "index.js",
     "client.js",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "preset.js"
   ],
   "dsh": {
     "bundle": {
@@ -23,7 +25,8 @@
       "inject": [
         "@deepseek-ai/dsh-client-ui-sidebar",
         "@deepseek-ai/dsh-client-ui-conversation",
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout"
       ]
     }
   }

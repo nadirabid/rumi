@@ -565,7 +565,11 @@ async function main(): Promise<void> {
           if (workspaceRecovery === recovery) workspaceRecovery = undefined
         })
       }
-      void showUpdateFailure(state).catch((error: unknown) => { console.error(error) })
+      if (state.failedOperation === 'download' && updateSchedule.downloadingAutomatically) {
+        console.warn('desktop update: background download failed; a retry is scheduled')
+      } else {
+        void showUpdateFailure(state).catch((error: unknown) => { console.error(error) })
+      }
     }
     return state
   }

@@ -29,7 +29,7 @@ function fixture(jitter = 0, random = () => 0.5) {
     updater, () => true, () => '1.0.0')
   const schedule = new DesktopUpdateSchedule(coordinator, { intervalMs: 10_000, maxBackoffMs: 40_000, jitter }, random)
   cleanup.push(() => { schedule.dispose(); coordinator.dispose() })
-  return { schedule, coordinator, states, checkForUpdates, downloadUpdate }
+  return { schedule, coordinator, states, checkForUpdates, downloadUpdate, updater }
 }
 
 describe('ordinary update polling', () => {
@@ -108,30 +108,49 @@ describe('ordinary update polling', () => {
     expect(f.checkForUpdates).toHaveBeenCalledTimes(3)
   })
 
-  it('never downloads automatically or retargets a downloaded version during polling', async () => {
+  it('downloads a new release automatically without installing or downloading it again', async () => {
     const f = fixture()
     f.checkForUpdates.mockResolvedValue({ isUpdateAvailable: true, updateInfo: { version: '1.1.0-nightly.1' } })
-    await f.schedule.check()
-    await vi.advanceTimersByTimeAsync(10_000)
-    expect(f.downloadUpdate).not.toHaveBeenCalled()
-    await f.coordinator.download('1.1.0-nightly.1')
+    expect(await f.schedule.check()).toEqual({ phase: 'ready', version: '1.1.0-nightly.1' })
     await vi.advanceTimersByTimeAsync(50_000)
     await f.schedule.check(true)
-    expect(f.checkForUpdates).toHaveBeenCalledTimes(2)
-    expect(f.downloadUpdate).toHaveBeenCalledOnce()
-    expect(f.coordinator.state).toEqual({ phase: 'ready', version: '1.1.0-nightly.1' })
-  })
-
-  it('retains a failed download for user retry without automatic transfers', async () => {
-    const f = fixture()
-    f.checkForUpdates.mockResolvedValue({ isUpdateAvailable: true, updateInfo: { version: '1.1.0-nightly.1' } })
-    await f.schedule.check()
-    f.downloadUpdate.mockRejectedValue(new Error('disk full'))
-    await f.coordinator.download('1.1.0-nightly.1')
-    await vi.advanceTimersByTimeAsync(50_000)
     expect(f.checkForUpdates).toHaveBeenCalledOnce()
     expect(f.downloadUpdate).toHaveBeenCalledOnce()
-    expect(f.coordinator.state).toMatchObject({ phase: 'error', failedOperation: 'download' })
+    expect(f.updater.quitAndInstall).not.toHaveBeenCalled()
+    expect(f.schedule.downloadingAutomatically).toBe(false)
+  })
+
+  it('retries a failed background download after backoff and recovers without installing', async () => {
+    const f = fixture()
+    f.checkForUpdates.mockResolvedValue({ isUpdateAvailable: true, updateInfo: { version: '1.1.0-nightly.1' } })
+    f.downloadUpdate.mockRejectedValueOnce(new Error('offline'))
+    expect(await f.schedule.check()).toMatchObject({ phase: 'error', failedOperation: 'download' })
+    await vi.advanceTimersByTimeAsync(19_999)
+    expect(f.downloadUpdate).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(f.downloadUpdate).toHaveBeenCalledTimes(2)
+    expect(f.coordinator.state).toEqual({ phase: 'ready', version: '1.1.0-nightly.1' })
+    expect(f.updater.quitAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('joins an in-flight background download and does not rearm polling after disposal', async () => {
+    const f = fixture()
+    f.checkForUpdates.mockResolvedValue({ isUpdateAvailable: true, updateInfo: { version: '1.1.0-nightly.1' } })
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<string[]>()
+    f.downloadUpdate.mockImplementationOnce(() => { started.resolve(); return release.promise })
+    const first = f.schedule.check()
+    await started.promise
+    const second = f.schedule.check()
+    expect(f.schedule.downloadingAutomatically).toBe(true)
+    f.schedule.dispose()
+    f.coordinator.dispose()
+    release.reject(new Error('closed'))
+    await Promise.all([first, second])
+    expect(f.downloadUpdate).toHaveBeenCalledOnce()
+    expect(f.schedule.downloadingAutomatically).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(f.updater.quitAndInstall).not.toHaveBeenCalled()
   })
 
   it('clears its timer and does not rearm after a pending check settles during disposal', async () => {

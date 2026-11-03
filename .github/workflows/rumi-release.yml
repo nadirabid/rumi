@@ -70,6 +70,7 @@ jobs:
           RUMI_BUILD_VERSION: ${{ steps.release.outputs.version }}
         run: |
           export npm_execpath="$GITHUB_WORKSPACE/node_modules/pnpm/bin/pnpm.mjs"
+          pnpm --filter dsh-rumi run build
           node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64 --build-version "$RUMI_BUILD_VERSION"
       - name: Publish verified update
         env:

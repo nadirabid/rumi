@@ -44,6 +44,8 @@ jobs:
           PY
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
+      - name: Build workspace test dependencies
+        run: pnpm run build:artifacts
       - name: Verify Rumi behavior
         run: pnpm exec vitest run apps/rumi/tests/print-studio.spec.ts apps/rumi/tests/print-studio-viewer.client.spec.tsx apps/rumi/tests/profile-mcp.spec.ts apps/rumi/tests/github-release.spec.ts
       - name: Read published version

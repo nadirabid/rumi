@@ -6,6 +6,7 @@
  * viewport retains camera state and the last successfully built design.
  */
 import * as THREE from 'three'
+import { createHover } from './hover.js'
 import { createHighlight } from './highlight.js'
 import { buildModel, disposeModel } from './model.js'
 import { placeMesh } from '../transform.js'
@@ -43,7 +44,9 @@ export function createViewport(element, onFailure) {
   scene.add(designRoot)
   let highlightOverlay = null, highlightId = null, highlightVisible = true
   let design = null, designUrl = null, requestedUrl = null, generation = 0, cameraCommand = null
+  let sceneRevision = 0
   let designSpec = null, designVolume = null, designPending = null
+  let measurement = null
   const ink = token(element, '--dsw-alias-label-tertiary', FALLBACK_INK)
   const solidMaterial = new THREE.MeshStandardMaterial({
     color: token(element, '--dsw-alias-brand-primary', FALLBACK_ACCENT),
@@ -69,6 +72,10 @@ export function createViewport(element, onFailure) {
   const light = new THREE.DirectionalLight(0xffffff, 3)
   light.position.set(100, -150, 300)
   scene.add(light)
+
+  const hover = createHover(renderer.domElement, camera,
+    () => [...objects.values()].map(entry => entry.mesh).concat(design ? [design.root] : []), render)
+  const cameraChanged = () => { if (!hover.invalidate()) render() }
 
   function clearVolume() {
     for (const node of volumeNodes) {
@@ -117,6 +124,7 @@ export function createViewport(element, onFailure) {
     const { width, height } = element.getBoundingClientRect()
     if (width <= 0 || height <= 0) return
     renderer.setSize(width, height)
+    hover.invalidate()
     camera.aspect = width / height
     camera.updateProjectionMatrix()
     // The first frame needs the real aspect ratio, which only exists after a resize.
@@ -124,7 +132,7 @@ export function createViewport(element, onFailure) {
     render()
   })
   observer.observe(element)
-  controls.addEventListener('change', render)
+  controls.addEventListener('change', cameraChanged)
   renderer.domElement.addEventListener('webglcontextlost', lost)
 
   function clearHighlight() {
@@ -135,19 +143,23 @@ export function createViewport(element, onFailure) {
 
   function syncHighlight() {
     const highlight = designUrl === designSpec?.url ? designSpec?.highlight : null
-    if (highlightId === (highlight?.id ?? null)) return
-    clearHighlight()
-    if (!highlight || !design) return
-    highlightOverlay = createHighlight(design.root, highlight)
+    if (highlightOverlay && highlightId === (highlight?.id ?? null)) return
+    if (!design) { clearHighlight(); return }
+    if (highlightOverlay) highlightOverlay.update(highlight ?? { blobs: [] })
+    else highlightOverlay = createHighlight(design.root, highlight ?? { blobs: [] }, hover.sphere)
     highlightOverlay.setVisible(highlightVisible)
-    highlightId = highlight.id
+    highlightId = highlight?.id ?? null
   }
 
   function placeDesign() {
     if (!design || !designSpec) return null
-    const placed = placeMesh(design.positions, designSpec.transform)
-    designRoot.matrix.fromArray(placed.matrix)
-    designRoot.updateMatrixWorld(true)
+    const key = JSON.stringify([designSpec.transform, designVolume])
+    if (measurement?.design !== design || measurement.key !== key) {
+      const placed = placeMesh(design.positions, designSpec.transform)
+      designRoot.matrix.fromArray(placed.matrix)
+      designRoot.updateMatrixWorld(true)
+      measurement = { design, key, report: analyzeMesh(placed.positions, { volume: designVolume }) }
+    }
     if (!framed) { framed = true; frame() }
     if (designSpec.camera && cameraCommand !== designSpec.camera.id) {
       cameraCommand = designSpec.camera.id
@@ -166,11 +178,60 @@ export function createViewport(element, onFailure) {
       controls.update()
     }
     syncHighlight()
+    hover.invalidate()
     render()
-    return analyzeMesh(placed.positions, { volume: designVolume })
+    return measurement.report
   }
 
   return {
+    /** The highlight drawn by the visible viewport, or null when it cannot be acknowledged. */
+    renderedHighlight() {
+      return !closed && !document.hidden && highlightVisible && designUrl === designSpec?.url ? highlightId : null
+    },
+    /** Capture the live cursor region and current camera view; no previous hover is reused. */
+    captureCursor() {
+      if (closed || document.hidden) return { status: 'viewer_unavailable' }
+      if (design && designUrl !== designSpec?.url) return { status: 'stale_view' }
+      const hit = hover.snapshot()
+      if (!hit) return { status: 'no_hit' }
+      const designIdentity = design ? {
+        path: designSpec.path, revision: designSpec.revision, url: designUrl, transform: designSpec.transform,
+      } : null
+      let object = hit.object, objectId = null, path = []
+      while (object && object !== designRoot && object !== scene) {
+        path.unshift(object.name || `child[${object.parent ? object.parent.children.indexOf(object) : 0}]`)
+        for (const [id, entry] of objects) if (entry.mesh === object) objectId = id
+        object = object.parent
+      }
+      const point = hit.point.toArray()
+      let modelLocalBlob = null
+      if (object === designRoot) {
+        const center = designRoot.worldToLocal(hit.point.clone()).toArray()
+        const radius = hit.radius / Math.abs(designRoot.getWorldScale(new THREE.Vector3()).x)
+        modelLocalBlob = { center, radii: [radius, radius, radius], rotationDegrees: [0, 0, 0] }
+      }
+      const size = renderer.getSize(new THREE.Vector2())
+      const ratio = renderer.getPixelRatio()
+      const factor = Math.min(1, 960 / Math.max(size.x, size.y))
+      let image
+      try {
+        renderer.setPixelRatio(1)
+        renderer.setSize(Math.max(1, Math.round(size.x * factor)), Math.max(1, Math.round(size.y * factor)), false)
+        renderer.render(scene, camera)
+        image = renderer.domElement.toDataURL('image/png')
+      } finally {
+        renderer.setPixelRatio(ratio)
+        renderer.setSize(size.x, size.y, false)
+        render()
+      }
+      return {
+        status: 'captured', capturedAt: new Date().toISOString(),
+        identity: { sceneRevision, design: designIdentity },
+        region: { objectId, partPath: path, faceIndex: hit.faceIndex, worldPoint: point, worldRadius: hit.radius, modelLocalBlob },
+        camera: { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), fov: camera.getEffectiveFOV(), aspect: camera.aspect },
+        image,
+      }
+    },
     /** Set local presentation visibility without confirming the proposed region. */
     setHighlightVisible(visible) {
       highlightVisible = visible
@@ -196,8 +257,10 @@ export function createViewport(element, onFailure) {
       const size = renderer.getSize(new THREE.Vector2())
       const ratio = renderer.getPixelRatio()
       const overlayVisible = highlightVisible
+      const hoverRadius = hover.sphere.value.w
       const visibility = volumeNodes.map(node => node.visible)
       try {
+        hover.sphere.value.w = 0
         if (highlightOverlay) highlightOverlay.setVisible(false)
         for (const node of volumeNodes) node.visible = false
         renderer.setPixelRatio(1)
@@ -205,6 +268,7 @@ export function createViewport(element, onFailure) {
         renderer.render(scene, coverCamera)
         return renderer.domElement.toDataURL('image/png')
       } finally {
+        hover.sphere.value.w = hoverRadius
         if (highlightOverlay) highlightOverlay.setVisible(overlayVisible)
         volumeNodes.forEach((node, index) => { node.visible = visibility[index] })
         renderer.setPixelRatio(ratio)
@@ -214,19 +278,20 @@ export function createViewport(element, onFailure) {
     },
     async applyDesign(spec, volume) {
       if (closed) return null
+      hover.clear()
       designSpec = spec
       designVolume = volume
       if (!spec) {
         generation++
         clearHighlight()
         if (design) { designRoot.remove(design.root); disposeModel(design.root) }
-        design = null; designUrl = null; requestedUrl = null
+        measurement = null; design = null; designUrl = null; requestedUrl = null
         render()
         return null
       }
       if (designUrl === spec.url) return placeDesign()
       if (requestedUrl === spec.url) return designPending
-      clearHighlight()
+      syncHighlight()
       render()
       requestedUrl = spec.url
       const request = ++generation
@@ -238,6 +303,7 @@ export function createViewport(element, onFailure) {
           if (closed || request !== generation) { disposeModel(next.root); return null }
           // Validate placement before replacing the last successful design.
           placeMesh(next.positions, designSpec.transform)
+          clearHighlight()
           if (design) { designRoot.remove(design.root); disposeModel(design.root) }
           design = next
           designUrl = spec.url
@@ -252,6 +318,8 @@ export function createViewport(element, onFailure) {
     },
     apply(view) {
       if (closed) return
+      hover.clear()
+      sceneRevision = view.revision
       const live = new Set()
       for (const spec of view.objects) {
         live.add(spec.id)
@@ -271,16 +339,23 @@ export function createViewport(element, onFailure) {
           entry = { mesh, datablockId: spec.datablockId }
           objects.set(spec.id, entry)
         }
-        entry.mesh.material = material
+        const rebuildOverlay = !entry.overlay || entry.sourceMaterial !== material || entry.datablockId !== spec.datablockId
+        if (rebuildOverlay) {
+          if (entry.overlay) entry.overlay.dispose()
+          entry.mesh.material = material
+          entry.sourceMaterial = material
+        }
         if (entry.datablockId !== spec.datablockId) {
           entry.mesh.geometry = geometry
           entry.datablockId = spec.datablockId
         }
         entry.mesh.matrix.fromArray(spec.matrix)
         entry.mesh.updateMatrixWorld(true)
+        if (rebuildOverlay) entry.overlay = createHighlight(entry.mesh, { blobs: [] }, hover.sphere)
       }
       for (const [id, entry] of objects) {
         if (live.has(id)) continue
+        entry.overlay.dispose()
         scene.remove(entry.mesh)
         objects.delete(id)
       }
@@ -306,12 +381,15 @@ export function createViewport(element, onFailure) {
       if (closed) return
       closed = true
       generation++
+      hover.dispose()
       clearHighlight()
       if (design) disposeModel(design.root)
       design = null
+      measurement = null
       observer.disconnect()
       controls.dispose()
       renderer.domElement.removeEventListener('webglcontextlost', lost)
+      for (const entry of objects.values()) entry.overlay.dispose()
       for (const geometry of geometries.values()) geometry.dispose()
       geometries.clear()
       objects.clear()

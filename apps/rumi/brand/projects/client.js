@@ -14,6 +14,7 @@ window.__ModuleLoader__.load({
   id: '@rumi/projects',
   factory(require) {
     const React = require('react');
+    const { flushSync } = require('react-dom');
     const { IconChevronLeftOutlineRegular, IconPlusOutlineRegular, IconPanelLeftOutlineRegular, Tooltip } = require('@deepseek-ai/dsh-client-ui-primitives');
     const h = React.createElement;
 
@@ -179,8 +180,12 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
         async open(project) {
           try {
             const sessionId = await this.sessionFor(project);
-            ctx.uiWorkspace.openSession(sessionId);
-            ctx.layout.selectPanel(null);
+            // The sidebar adopts the session tab store during the conversation render.
+            flushSync(() => {
+              ctx.uiWorkspace.openSession(sessionId);
+              ctx.layout.selectPanel(null);
+            });
+            ctx.sidebarRight.openTabIn(sessionId, 'print-studio');
             publish({ activeId: project.id, error: '' });
           } catch (error) {
             console.error('Rumi project opening failed', error);

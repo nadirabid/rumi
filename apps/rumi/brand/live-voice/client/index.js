@@ -156,7 +156,7 @@ window.__ModuleLoader__.load({
         }
 
         /** Everything one live session owns, so teardown is one call. */
-        function createEngine({ onAudio, onStatus, onTranscript, onError, onClosed, onMuted }) {
+        function createEngine({ onAudio, onStatus, onHandoff = () => {}, onTranscript, onError, onClosed, onMuted }) {
           let liveId = null;
           let audioContext = null;
           let worklet = null;
@@ -288,6 +288,8 @@ window.__ModuleLoader__.load({
               onStatus('speaking');
             } else if (message.type === 'ready') {
               onStatus('listening');
+            } else if (message.type === 'handoff') {
+              onHandoff(message.state);
             } else if (message.type === 'status') {
               onStatus(message.state === 'thinking' ? 'thinking' : 'listening');
             } else if (message.type === 'transcript') {
@@ -405,8 +407,9 @@ window.__ModuleLoader__.load({
           return () => style.remove();
         }
 
-        function LiveVoice({ sessionId }) {
+        function LiveVoice({ sessionId, t }) {
           const [status, setStatus] = useState('idle');
+          const [handoff, setHandoff] = useState(null);
           const [muted, setMuted] = useState(false);
           const [error, setError] = useState('');
           const engineRef = useRef(null);
@@ -432,6 +435,7 @@ window.__ModuleLoader__.load({
           }, []);
 
           useEffect(() => {
+            setHandoff(null);
             setStatus('idle');
             setMuted(false);
             setError('');
@@ -447,9 +451,11 @@ window.__ModuleLoader__.load({
           const start = useCallback(async () => {
             if (disposed || !sessionId || engineRef.current) return;
             setError('');
+            setHandoff(null);
             setStatus('connecting');
             dictation.start();
             const engine = createEngine({
+              onHandoff: next => { if (engineRef.current === engine) { setHandoff(next); if (next === 'accepted') dictation.clearUser(); } },
               onAudio: () => { if (engineRef.current !== engine) return; setStatus('speaking'); settle(); },
               onStatus: (next) => {
                 if (engineRef.current !== engine) return;
@@ -497,6 +503,7 @@ window.__ModuleLoader__.load({
             .filter(Boolean).join(' ');
 
           return h('div', { className: 'lv-controls', style: { display: 'inline-flex', alignItems: 'center', gap: 12 } },
+            handoff ? h('span', { role: 'status', 'data-voice-handoff': handoff, style: { color: 'var(--dsw-alias-label-primary)' } }, t(`handoff.${handoff}`)) : null,
             error ? h('span', {
               title: error,
               style: { fontSize: 11, color: '#ff8a8a', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -591,8 +598,8 @@ window.__ModuleLoader__.load({
 
         /** The one label this bundle still draws: the source under the dictation. */
         const LABELS = {
-          en: { 'trigger.voice': 'Live Voice' },
-          zh: { 'trigger.voice': '实时语音' },
+          en: { 'trigger.voice': 'Live Voice', 'handoff.not_sent': 'No action sent yet', 'handoff.received': 'Sending request…', 'handoff.waiting': 'Waiting for your words…', 'handoff.dispatching': 'Sending request…', 'handoff.accepted': 'Request accepted', 'handoff.failed': 'Request not sent. Please try again.' },
+          zh: { 'trigger.voice': '实时语音', 'handoff.not_sent': '尚未发送操作', 'handoff.received': '正在发送请求…', 'handoff.waiting': '正在等待语音文字…', 'handoff.dispatching': '正在发送请求…', 'handoff.accepted': '请求已接收', 'handoff.failed': '请求未发送，请重试' },
         };
 
         /**
@@ -831,6 +838,7 @@ window.__ModuleLoader__.load({
           name: 'conversation.input.right',
           id: 'live-voice',
           order: 20,
+          locale: NS,
         }, LiveVoice));
         ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
           name: 'plugins.bundle.config',

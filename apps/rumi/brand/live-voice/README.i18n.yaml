@@ -9,11 +9,14 @@
   en: 13b4a02b719f35af
   zh: 0b591c132704a2c2
 /live-voice/session-lifetime:
-  en: 9d3bfacb57d063ea
-  zh: bffca0a6a62c83fd
+  en: c9a36ad017c24ca9
+  zh: c26583ed982b89c3
 /live-voice/context:
-  en: ea8a495e6e48bdd6
-  zh: b9786d5dcd1c3523
+  en: d4751f76809c54d8
+  zh: 0658346316b2a2e6
+/live-voice/handoff-evidence:
+  en: accbeed808b929e6
+  zh: b5e8eb13356b9d64
 /live-voice/verification:
   en: 2eed2902cec53fa0
-  zh: 00a5be11128a22cc
+  zh: 3b97015a70198dbd

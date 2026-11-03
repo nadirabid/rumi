@@ -6,8 +6,8 @@ import { isDelegation } from './protocol.js';
  * GPT-Live pushes a delegation when it wants the harness to do something, and
  * gives no task text: the request is whatever the user said since the previous
  * delegation. This class owns that mapping — buffer the user's speech, turn it
- * into one task per delegation, run one task at a time, and answer each
- * delegation by id.
+ * into one task per delegation. With a steering callback, corrections join the
+ * active interval and its result answers the latest delegation; otherwise tasks queue.
  *
  * It is deliberately free of Cordis, WebSocket, and audio concerns so it can be
  * tested on its own.
@@ -22,18 +22,25 @@ export class LiveBridge {
   /** @type {Set<string>} */
   #seen = new Set();
   #closed = false;
+  #waiting = null;
 
   /**
    * @param {object} options
    * @param {(task: {delegationId: string, text: string}) => void} options.dispatch
+   * @param {(task: {delegationId: string, text: string}) => void} [options.steer] Deliver corrections to the active interval; omitted queues them.
    * @param {(delegationId: string, content: string) => void} options.commentary
    * @param {(delegationId: string | null, content: string) => void} options.thinking
+   * @param {number} [options.transcriptWaitMs] Maximum wait for text after an early delegation.
+   * @param {Function} [options.state] Reports received, waiting, dispatching, or failed handoffs.
    * @param {() => number} [options.now]
    * @param {(message: string) => void} [options.log]
    * @param {number} [options.maxBufferChars]
    */
-  constructor({ dispatch, commentary, thinking, now = Date.now, log = () => {}, maxBufferChars = 4_000 }) {
+  constructor({ dispatch, steer, commentary, thinking, transcriptWaitMs = 5000, state = () => {}, now = Date.now, log = () => {}, maxBufferChars = 4_000 }) {
+    this.transcriptWaitMs = transcriptWaitMs;
+    this.state = state;
     this.dispatch = dispatch;
+    this.steer = steer;
     this.commentary = commentary;
     this.thinking = thinking;
     this.now = now;
@@ -53,6 +60,7 @@ export class LiveBridge {
   snapshot() {
     return {
       closed: this.#closed,
+      waitingForTranscript: this.#waiting !== null,
       inFlight: this.#inFlight ? { ...this.#inFlight } : null,
       queued: this.#queue.length,
       buffered: this.#buffer.length,
@@ -62,13 +70,19 @@ export class LiveBridge {
   /**
    * Feed one server event.
    * @param {any} event
-   * @returns {'delegation' | 'dispatched' | 'queued' | 'ignored'}
+   * @returns {'delegation' | 'dispatched' | 'steered' | 'queued' | 'waiting' | 'ignored'}
    */
   handleLiveEvent(event) {
     if (this.#closed) return 'ignored';
     switch (event?.type) {
       case 'session.input_transcript.delta':
         if (typeof event.delta === 'string') this.#buffer = (this.#buffer + event.delta).slice(-this.maxBufferChars);
+        if (this.#waiting && this.#buffer.trim()) {
+          const id = this.#waiting.id;
+          clearTimeout(this.#waiting.timer);
+          this.#waiting = null;
+          return this.#deliver(id, this.#takeTask());
+        }
         return 'ignored';
       case 'session.delegation.created':
         return this.#onDelegation(event);
@@ -103,6 +117,8 @@ export class LiveBridge {
   /** Stop accepting requests and discard work that has not started. */
   close() {
     this.#closed = true;
+    if (this.#waiting) clearTimeout(this.#waiting.timer);
+    this.#waiting = null;
     this.#queue = [];
     this.#buffer = "";
   }
@@ -119,12 +135,37 @@ export class LiveBridge {
     if (this.#seen.has(id)) return 'ignored';
     this.#seen.add(id);
 
-    const task = this.#takeTask();
-    if (!task) {
-      this.thinking(id, 'The user asked for nothing actionable in this delegation; stay conversational and do not claim work.');
+    this.thinking(id, '');
+    this.state(id, 'received');
+    if (this.#waiting) {
+      this.state(id, 'failed');
+      this.commentary(id, 'This request was not sent because another handoff is still waiting for the spoken words. Please repeat it.');
       return 'ignored';
     }
+    const task = this.#takeTask();
+    if (!task) {
+      this.state(id, 'waiting');
+      const timer = setTimeout(() => {
+        this.#waiting = null;
+        if (this.#closed) return;
+        this.state(id, 'failed');
+        this.commentary(id, 'The request was not sent: the spoken words did not arrive. Please repeat your request.');
+      }, this.transcriptWaitMs);
+      this.#waiting = { id, timer };
+      return 'waiting';
+    }
+    return this.#deliver(id, task);
+  }
 
+  #deliver(id, task) {
+    this.state(id, 'dispatching');
+
+    if (this.#inFlight && this.steer) {
+      this.#inFlight = { delegationId: id, text: task.text, startedAt: this.now() };
+      this.thinking(id, 'The correction is being delivered to the active task. Do not describe the previous region as confirmed.');
+      this.steer({ delegationId: id, text: task.text });
+      return 'steered';
+    }
     if (this.#inFlight) {
       this.#queue.push({ delegationId: id, text: task.text, raw: task.raw });
       this.log(`queued delegation ${id}: ${task.text}`);
@@ -137,7 +178,7 @@ export class LiveBridge {
   #start(task) {
     this.#inFlight = { ...task, startedAt: this.now() };
     this.log(`dispatch delegation ${task.delegationId}: ${task.text}`);
-    this.thinking(task.delegationId, `Started in the harness: ${task.text}`);
+    this.thinking(task.delegationId, 'The handoff is pending. Do not say the assistant accepted it until the host confirms acceptance.');
     this.dispatch(task);
   }
 

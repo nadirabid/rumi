@@ -14,6 +14,10 @@ import { createHistory } from './document.js'
 import { STL_LIMITS, encodeStl, parseStl } from './stl.js'
 import { placeMesh } from './transform.js'
 
+import { createViewerDiagnostics } from './diagnostics.js'
+import { createHighlightReceipts } from './receipts.js'
+import { createViewerEvents } from './events.js'
+import { createCursorRequests, cursorIdentity } from './cursor.js'
 import { createSource } from './source.js'
 import { discoverModels, readSelection, saveSelection } from './catalog.js'
 
@@ -167,15 +171,26 @@ function sceneReport(record) {
  * Register the preview routes and the scene tools.
  * @param {object} ctx - Cordis host context with connection, tools, fs, and workingDirectory.
  * @param {Function} defineTool - DSH's schema-validating tool factory from the host entrypoint.
+ * @param {string} diagnosticsDirectory - Private local journal directory.
  * @returns {void}
  */
-export function applyViewer(ctx, defineTool) {
+export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
+  const diagnostics = createViewerDiagnostics(diagnosticsDirectory)
   const sessions = new Map()
+  const receipts = createHighlightReceipts()
+  const events = createViewerEvents()
+  const cursors = createCursorRequests(sessionId => events.notify(sessionId))
+  const captureJobs = new Set()
   let closed = false
   ctx.effect(() => async () => {
     closed = true
+    receipts.dispose()
+    events.dispose()
+    cursors.dispose()
+    await Promise.allSettled([...captureJobs])
     await Promise.all([...sessions.values()].map(record => record.pending))
     sessions.clear()
+    diagnostics.close()
   }, 'print-studio: preview scenes')
   const route = (path, fetch) => ctx.effect(() => ctx.connection.fetch.register({
     path: `${ROUTE}${path}`, methods: ['GET'], requestBody: 'buffered', fetch,
@@ -201,6 +216,9 @@ export function applyViewer(ctx, defineTool) {
       if (key === undefined) break
       const source = sessions.get(key).source
       if (source) ctx.effect(async () => { await source.dispose(); return () => {} }, 'print viewer: evict source')
+      receipts.cancel(key)
+      events.forget(key)
+      cursors.cancel(key)
       sessions.delete(key)
     }
     return record
@@ -265,6 +283,16 @@ export function applyViewer(ctx, defineTool) {
     record.catalogError = null
   }
 
+  route('/events', async request => {
+    const url = new URL(request.url)
+    const sessionId = url.searchParams.get('sessionId')
+    const after = Number(url.searchParams.get('after'))
+    if (!sessionId || !Number.isSafeInteger(after) || after < 0) return json({ error: 'invalid_event_cursor' }, 400)
+    const event = await events.wait(sessionId, after, request.signal)
+    if (receipts.has(sessionId)) diagnostics.record(sessionId, 'viewer.event_delivered', { version: event.version })
+    return json(event)
+  })
+
   route('/state', async (request) => {
     const sessionId = new URL(request.url).searchParams.get('sessionId')
     if (!sessionId) return json({ error: 'session_required' }, 400)
@@ -273,7 +301,8 @@ export function applyViewer(ctx, defineTool) {
       try { await discover(sessionId, record) }
       catch (error) { record.catalogError = String(error) }
     })
-    return json({ scene: {
+    if (receipts.has(sessionId)) diagnostics.record(sessionId, 'viewer.state_delivered', { highlightId: record.source?.state().highlight?.id ?? null })
+    return json({ cursorRequest: cursors.read(sessionId), scene: {
       ...sceneState(record), design: record.source?.state() ?? null,
       models: record.models ?? [], selectedModel: record.selectedModel ?? null,
       catalogFailed: Boolean(record.catalogError),
@@ -311,6 +340,27 @@ export function applyViewer(ctx, defineTool) {
   })
 
   ctx.effect(() => ctx.connection.fetch.register({
+    path: `${ROUTE}/trace`, methods: ['POST'], requestBody: 'buffered',
+    fetch: async request => {
+      const sessionId = new URL(request.url).searchParams.get('sessionId')
+      if (!sessions.has(sessionId)) return json({ error: 'preview_not_found' }, 404)
+      const body = await request.text()
+      if (body.length > 2048) return json({ error: 'trace_too_large' }, 413)
+      let value
+      try { value = JSON.parse(body) } catch (_error) { return json({ error: 'invalid_trace' }, 400) }
+      if (!value || typeof value.highlightId !== 'string' || value.highlightId.length > 128
+        || !['apply_started', 'apply_finished', 'feedback_started', 'feedback_failed', 'feedback_delivered', 'apply_or_feedback_failed', 'effect_disposed'].includes(value.phase)
+        || typeof value.hidden !== 'boolean'
+        || !['receivedAt', 'elapsedMs', 'width', 'height'].every(key => Number.isFinite(value[key]) && value[key] >= 0)) return json({ error: 'invalid_trace' }, 400)
+      diagnostics.record(sessionId, `client.${value.phase}`, {
+        highlightId: value.highlightId, hidden: value.hidden, receivedAt: value.receivedAt,
+        elapsedMs: value.elapsedMs, width: value.width, height: value.height,
+      })
+      return json({ ok: true })
+    },
+  }), 'print viewer: client diagnostics')
+
+  ctx.effect(() => ctx.connection.fetch.register({
     path: `${ROUTE}/feedback`, methods: ['POST'], requestBody: 'buffered',
     fetch: async (request) => {
       const sessionId = new URL(request.url).searchParams.get('sessionId')
@@ -321,10 +371,111 @@ export function applyViewer(ctx, defineTool) {
       let value
       try { value = JSON.parse(body) } catch (_error) { return json({ error: 'invalid_feedback' }, 400) }
       if (!value || !Number.isInteger(value.revision)) return json({ error: 'invalid_feedback' }, 400)
-      try { source.feedback(value) } catch (_error) { return json({ error: 'invalid_feedback' }, 400) }
+      if (value.highlightId || value.requestedHighlightId || receipts.has(sessionId)) {
+        const current = source.state()
+        diagnostics.record(sessionId, 'viewer.feedback_received', {
+          highlightId: value.highlightId ?? null, requestedHighlightId: value.requestedHighlightId ?? null, expectedHighlightId: current.highlight?.id ?? null,
+          revisionMatches: value.revision === current.revision, urlMatches: value.url === current.url,
+          transformMatches: JSON.stringify(value.transform) === JSON.stringify(current.transform),
+          client: value.diagnostics ? { hidden: value.diagnostics.hidden === true, elapsedMs: Number.isFinite(value.diagnostics.elapsedMs) ? value.diagnostics.elapsedMs : null, width: Number.isFinite(value.diagnostics.width) ? value.diagnostics.width : null, height: Number.isFinite(value.diagnostics.height) ? value.diagnostics.height : null } : null, highlightStatus: value.highlightStatus ?? null, hasError: Boolean(value.error),
+        })
+      }
+      try { source.feedback(value) } catch (_error) { diagnostics.record(sessionId, 'viewer.feedback_rejected', { reason: 'invalid_report' }); return json({ error: 'invalid_feedback' }, 400) }
+      const current = source.state()
+      if (value.highlightId && value.highlightId === current.highlight?.id
+        && value.revision === current.revision && value.url === current.url
+        && JSON.stringify(value.transform) === JSON.stringify(current.transform)) {
+        diagnostics.record(sessionId, 'highlight.acknowledged', { highlightId: value.highlightId })
+        receipts.acknowledge(sessionId, value.highlightId)
+      }
+      if (value.requestedHighlightId === current.highlight?.id
+        && value.revision === current.revision && value.url === current.url
+        && JSON.stringify(value.transform) === JSON.stringify(current.transform)
+        && ['viewer_hidden', 'render_failed'].includes(value.highlightStatus)) {
+        receipts.fail(sessionId, value.requestedHighlightId, value.highlightStatus)
+      }
       return json({ ok: true })
     },
   }), 'print viewer: build feedback')
+
+  ctx.effect(() => ctx.connection.fetch.register({
+    path: `${ROUTE}/cursor`, methods: ['POST'], requestBody: 'buffered',
+    fetch: async request => {
+      const sessionId = new URL(request.url).searchParams.get('sessionId')
+      const record = sessions.get(sessionId)
+      if (!record) return json({ error: 'preview_not_found' }, 404)
+      const body = await request.text()
+      if (body.length > 3_100_000) return json({ error: 'snapshot_too_large' }, 413)
+      let value
+      try { value = JSON.parse(body) } catch (_error) { return json({ error: 'invalid_snapshot' }, 400) }
+      if (typeof value?.requestId !== 'string') return json({ error: 'invalid_snapshot' }, 400)
+      return serialize(record, async () => {
+        await record.source?.poll()
+        try {
+          const snapshot = record.source?.state().error ? { status: 'stale_view' } : value.snapshot
+          const accepted = cursors.deliver(sessionId, value.requestId, snapshot, cursorIdentity(record))
+          return json({ accepted }, accepted ? 200 : 409)
+        } catch (_error) { return json({ error: 'invalid_snapshot' }, 400) }
+      })
+    },
+  }), 'print viewer: cursor response')
+
+  ctx.inject(['liveVoice'], scoped => {
+    scoped.effect(() => scoped.liveVoice.register({
+      id: 'print-studio-pointing',
+      captureRequest: async ({ sessionId, requestedAt, signal }) => {
+        if (!sessions.has(sessionId)) return []
+        const { image, ...snapshot } = JSON.parse(await captureReference(sessionId, signal))
+        return [{ type: 'text', text: JSON.stringify({
+          reference: 'cursor-at-start-of-spoken-request', requestedAt, snapshot,
+          instruction: 'Use this reference for pointing in this request, not a later live cursor position. Highlight the intended area to establish a visual reference. Follow the user’s requested action; ask for clarification when their intent is ambiguous.',
+        }) }, ...(image ? [{ type: 'image', attachment: image }] : [])]
+      },
+    }), 'print viewer: spoken pointing references')
+  })
+
+  async function captureReference(sessionId, signal) {
+    if (closed) return JSON.stringify({ status: 'viewer_unavailable' })
+    const capture = (async () => {
+        const record = sessions.get(sessionId)
+        if (!record) return JSON.stringify({ status: 'viewer_unavailable' })
+        const identity = await serialize(record, async () => { await record.source?.poll(); return cursorIdentity(record) })
+        if (record.source?.state().error) return JSON.stringify({ status: 'stale_view' })
+        const snapshot = await cursors.request(sessionId, identity, signal)
+        signal.throwIfAborted()
+        if (snapshot.status !== 'captured') return JSON.stringify(snapshot)
+        try {
+          const image = await ctx.attachments.saveImage({
+            data: Buffer.from(snapshot.image.slice('data:image/png;base64,'.length), 'base64'),
+            mediaType: 'image/png', name: 'Cursor region.png',
+          })
+          signal.throwIfAborted()
+          return JSON.stringify({ ...snapshot, image })
+        } catch (error) {
+          signal.throwIfAborted()
+          return JSON.stringify({ status: 'capture_failed', message: 'The cursor image could not be stored. Retry the snapshot before interpreting the region.' })
+        }
+    })()
+    captureJobs.add(capture)
+    try { return await capture }
+    finally { captureJobs.delete(capture) }
+  }
+
+  ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'viewer_cursor_snapshot',
+    description: 'Ask the open 3D viewer to capture the current cursor Gaussian region and a PNG of the current view. Cursor mesh vision is blue; agent viewer_highlight regions are teal. Captures when the viewer services this request, not when the person last spoke. Prefer an attached cursor-at-start-of-spoken-request reference for that utterance. Returns the pointed object/part, world-space point and radius in millimetres, model identity, camera and capture time. Editable-model hits include modelLocalBlob ready for viewer_highlight with identity.design path/revision/url. Read the image and region before highlighting or editing. no_hit means no active cursor intersection; viewer_unavailable means no response from an open viewer. Never substitute an earlier hover or treat a soft region as an exact edit mask.',
+    parameters: {},
+    output: { schema: { type: 'string' }, render: (_args, value) => {
+      const { image, ...snapshot } = JSON.parse(value)
+      return [{ type: 'text', text: JSON.stringify(snapshot) }, ...(image ? [{ type: 'image', attachment: image }] : [])]
+    } },
+    presentCall: () => ({ card: 'generic', title: 'Inspect cursor region', kind: 'read' }),
+    isConcurrencySafe: () => true, timeoutMs: 10_000,
+    async execute(_args, exec) {
+      if (closed) return JSON.stringify({ status: 'viewer_unavailable' })
+      return captureReference(exec.agent?.session.id, exec.signal)
+    },
+  })), 'print viewer: inspect cursor')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_load',
@@ -386,7 +537,7 @@ export function applyViewer(ctx, defineTool) {
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_highlight',
-    description: 'Replace temporary Gaussian wireframe regions on the editable model loaded by viewer_load. Read mesh_state for design.path, revision and url; inspect model source to locate regions. Coordinates are model-local millimetres before viewer_transform, including part transforms. Rotation uses XYZ Euler degrees. Up to eight ellipsoids combine by maximum influence, with a fixed soft fade. All intersected surfaces, including the back, may be highlighted. Empty blobs clears. Does not edit geometry or exports. Returns queued, not proof of rendering or user confirmation. Use clarify-mesh-changes for clarification guidance.',
+    description: 'Replace temporary Gaussian wireframe regions on the editable model loaded by viewer_load. Read mesh_state for design.path, revision and url; inspect model source to locate regions. Coordinates are model-local millimetres before viewer_transform, including part transforms. Rotation uses XYZ Euler degrees. Up to eight ellipsoids combine by maximum influence, with a fixed soft fade. All intersected surfaces, including the back, may be highlighted. Empty blobs clears. Does not edit geometry or exports. Waits for the visible viewer to acknowledge the matching highlight. Returns rendered only after acknowledgment; not_rendered or superseded is not success. Rendering is not user confirmation. Use this tool to visually ground region-specific edits and explanations of named parts. Follow the user’s requested action and clarify ambiguous intent; no special confirmation phrase is required. Use clarify-mesh-changes for guidance.',
     parameters: {
       path: { type: 'string', required: true, description: 'Exact design.path from mesh_state.' },
       revision: { type: 'integer', required: true, description: 'Exact design.revision from mesh_state.' },
@@ -405,12 +556,36 @@ export function applyViewer(ctx, defineTool) {
     async execute(args, exec) {
       const record = sessions.get(exec.agent?.session.id)
       if (!record?.source) return JSON.stringify({ status: 'model_required', message: 'Load an editable model with viewer_load first.' })
-      return serialize(record, async () => {
+      const started = performance.now()
+      const operation = (async () => {
+        const { result, receipt } = await serialize(record, async () => {
+          exec.signal.throwIfAborted()
+          await record.source.poll()
+          exec.signal.throwIfAborted()
+          const result = record.source.highlight(args)
+          let receipt = null
+          if (result.status === 'queued') {
+            receipt = receipts.wait(exec.agent.session.id, result.highlight.id, exec.signal)
+            diagnostics.record(exec.agent.session.id, 'highlight.requested', { highlightId: result.highlight.id, revision: args.revision, blobCount: args.blobs.length })
+          }
+          events.notify(exec.agent.session.id)
+          return { result, receipt }
+        })
+        if (!receipt) return JSON.stringify(result)
+        const outcome = await receipt
+        const status = ['viewer_hidden', 'render_failed'].includes(outcome) ? 'not_rendered' : outcome
+        const reason = outcome === 'not_rendered' ? 'ack_timeout' : outcome
+        diagnostics.record(exec.agent.session.id, 'highlight.settled', { highlightId: result.highlight.id, status, reason, elapsedMs: Math.round(performance.now() - started) })
         exec.signal.throwIfAborted()
-        await record.source.poll()
-        exec.signal.throwIfAborted()
-        return JSON.stringify(record.source.highlight(args))
-      })
+        return JSON.stringify({ ...result, status, reason, elapsedMs: Math.round(performance.now() - started), message: status === 'rendered'
+          ? 'The visible viewer rendered this teal highlight. Use it as the visual reference for the requested change.'
+          : reason === 'viewer_hidden' ? 'The viewer reports its document is hidden. Bring Rumi to the foreground and retry the highlight.'
+          : reason === 'render_failed' ? 'The viewer reported a rendering error. Read mesh_state for the error before retrying.'
+          : 'No matching rendering acknowledgment arrived. Visibility is unknown; do not claim the highlight is visible or absent. Ask the person to open the preview and retry.' })
+      })()
+      captureJobs.add(operation)
+      try { return await operation }
+      finally { captureJobs.delete(operation) }
     },
   })), 'print viewer: highlight region')
 

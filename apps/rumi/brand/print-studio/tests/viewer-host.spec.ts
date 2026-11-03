@@ -1,7 +1,8 @@
 /** A session's scene is edited by commands; geometry is read once and never rewritten by placement. */
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, expect, it } from 'vitest'
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -32,13 +33,18 @@ function stl(positions: Float32Array) {
 }
 
 const owners: Context[] = []
-afterEach(async () => { await Promise.all(owners.splice(0).map(owner => owner.fiber.dispose())) })
+const diagnosticRoots: string[] = []
+afterEach(async () => {
+  await Promise.all(owners.splice(0).map(owner => owner.fiber.dispose()))
+  await Promise.all(diagnosticRoots.splice(0).map(path => rm(path, { recursive: true, force: true })))
+})
 
 it('documents creating multiple models and bringing a named entry into view', async () => {
   const f = fixture()
   expect({
     instructions: await readFile(new URL('../AGENTS_TEMPLATE.md', import.meta.url), 'utf8'),
     load: f.raw('viewer_load').description,
+    cursor: f.raw('viewer_cursor_snapshot').description,
     highlight: f.raw('viewer_highlight').description,
     clarification: await readFile(new URL('../skills/clarify-mesh-changes/SKILL.md', import.meta.url), 'utf8'),
     state: f.raw('mesh_state').description,
@@ -52,6 +58,9 @@ function fixture(source: Uint8Array = stl(box()), cwd = '/workspace') {
   owners.push(owner)
   const ctx = {
     effect: owner.effect.bind(owner),
+    inject: owner.inject.bind(owner),
+    on: owner.on.bind(owner),
+    attachments: { saveImage: async ({ data, mediaType, name }: { data: Uint8Array; mediaType: string; name: string }) => ({ attachmentId: 'sha256:test-cursor', bytes: data.length, mediaType, name, width: 1, height: 1 }) },
     connection: { fetch: { register: (route: { path: string; fetch: (request: Request) => Promise<Response> }) => {
       routes.set(route.path, route.fetch)
       return () => { routes.delete(route.path) }
@@ -61,13 +70,15 @@ function fixture(source: Uint8Array = stl(box()), cwd = '/workspace') {
     sessionQuery: { observeSession: async () => ({ header: { cwd }, [Symbol.dispose]() {} }) },
     fs: { resolve: async (path: string) => ({ path, displayPath: path }), readBytes: async () => source },
   }
-  applyViewer(ctx, defineTool)
+  const diagnosticsDirectory = mkdtempSync(join(tmpdir(), 'rumi-viewer-diagnostics-'))
+  diagnosticRoots.push(diagnosticsDirectory)
+  applyViewer(ctx, defineTool, diagnosticsDirectory)
   const signal = () => new AbortController().signal
   const run = async (name: string, args: object = {}, sessionId = 'session-a') => JSON.parse(
     await tools.get(name).execute(args, { agent: { session: { id: sessionId } }, signal: signal() }),
   )
   return {
-    routes, run, owner, ctx,
+    routes, run, owner, ctx, diagnosticsDirectory,
     raw: (name: string) => tools.get(name),
     request: (path: string) => routes.get(path.split('?')[0])!(new Request(`http://rumi${path}`)),
     state: async (sessionId = 'session-a') => (await (await routes.get('/api/print-studio/viewer/state')!(
@@ -284,8 +295,24 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
     expect((await f.request(loaded.design.url)).headers.get('content-type')).toContain('javascript')
     const reference = { path: loaded.design.path, revision: loaded.design.revision, url: loaded.design.url,
       label: 'Upper region', blobs: [{ center: [0, 0, 3], radii: [2, 2, 1], rotationDegrees: [0, 0, 0] }] }
-    const highlighted = await f.run('viewer_highlight', reference)
-    expect(highlighted.status).toBe('queued')
+    const highlighting = f.run('viewer_highlight', reference)
+    let scene
+    await expect.poll(async () => { scene = await f.state(); return scene.design.highlight?.id }).toBeTruthy()
+    const design = scene.design
+    await f.routes.get('/api/print-studio/viewer/feedback')!(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
+      method: 'POST', body: JSON.stringify({ revision: design.revision, url: design.url, transform: design.transform, highlightId: design.highlight.id }),
+    }))
+    const highlighted = await highlighting
+    expect({ status: highlighted.status, reason: highlighted.reason, message: highlighted.message }).toMatchSnapshot('acknowledged highlight result')
+    expect(highlighted.status).toBe('rendered')
+    const journal = join(f.diagnosticsDirectory, (await readdir(f.diagnosticsDirectory))[0])
+    const trace = (await readFile(journal, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    expect(trace.map(row => row.type)).toEqual(expect.arrayContaining(['highlight.requested', 'viewer.state_delivered', 'viewer.feedback_received', 'highlight.acknowledged', 'highlight.settled']))
+    expect(trace.find(row => row.type === 'viewer.feedback_received').data).toMatchObject({
+      highlightId: highlighted.highlight.id, expectedHighlightId: highlighted.highlight.id,
+      revisionMatches: true, urlMatches: true, transformMatches: true,
+    })
+    expect(trace.at(-1).data.status).toBe('rendered')
     expect((await f.run('mesh_state')).design.highlight).toEqual(highlighted.highlight)
     expect((await f.run('viewer_highlight', reference, 'another-session')).status).toBe('model_required')
     expect((await f.run('viewer_highlight', { ...reference, revision: 99 })).status).toBe('stale_model')
@@ -321,5 +348,45 @@ it('waits for an admitted load during Cordis disposal without publishing it afte
   release('/workspace')
   await failure
   await disposal
+  expect(f.routes.size).toBe(0)
+})
+
+it('returns a durable cursor image with its region through the tool output', async () => {
+  const f = fixture()
+  await f.run('mesh_open', { path: 'box.stl' })
+  const pending = f.run('viewer_cursor_snapshot')
+  let response
+  await expect.poll(async () => {
+    response = await (await f.request('/api/print-studio/viewer/state?sessionId=session-a')).json()
+    return response.cursorRequest?.id
+  }).toBeTruthy()
+  const snapshot = {
+    status: 'captured', capturedAt: '2026-11-03T20:00:00.000Z',
+    identity: { sceneRevision: response.scene.revision, design: null },
+    region: { objectId: response.scene.objects[0].id, partPath: ['box'], faceIndex: 0, worldPoint: [0, 0, 1], worldRadius: 2, modelLocalBlob: null },
+    camera: { position: [0, -20, 20], target: [0, 0, 0], up: [0, 0, 1], fov: 40, aspect: 1 },
+    image: 'data:image/png;base64,cG5n',
+  }
+  const reply = await f.routes.get('/api/print-studio/viewer/cursor')!(new Request('http://rumi/api/print-studio/viewer/cursor?sessionId=session-a', {
+    method: 'POST', body: JSON.stringify({ requestId: response.cursorRequest.id, snapshot }),
+  }))
+  expect(reply.status).toBe(200)
+  const result = await pending
+  expect(result.region).toEqual(snapshot.region)
+  expect(result.image.attachmentId).toBe('sha256:test-cursor')
+  expect(result.image).not.toHaveProperty('data')
+  const blocks = f.raw('viewer_cursor_snapshot').output.render({}, JSON.stringify(result))
+  expect(blocks[0].type).toBe('text')
+  expect(blocks[1]).toEqual({ type: 'image', attachment: result.image })
+  expect(await f.run('viewer_cursor_snapshot', {}, 'other-session')).toEqual({ status: 'viewer_unavailable' })
+})
+
+it('unloads while a cursor request is waiting without retaining a tool or timer', async () => {
+  const f = fixture()
+  await f.run('mesh_open', { path: 'box.stl' })
+  const pending = f.run('viewer_cursor_snapshot')
+  await expect.poll(async () => (await (await f.request('/api/print-studio/viewer/state?sessionId=session-a')).json()).cursorRequest?.id).toBeTruthy()
+  await f.dispose()
+  expect(await pending).toEqual({ status: 'viewer_unavailable' })
   expect(f.routes.size).toBe(0)
 })

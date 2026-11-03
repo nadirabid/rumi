@@ -62,24 +62,26 @@ function fixture() {
       else init.signal?.addEventListener('abort', () => { reject(new Error('Capture stopped')) }, { once: true })
     })
   }))
-  const components = new Map<string, React.ComponentType<{ sessionId: string }>>()
+  let labels: Record<string, string> = {}
+  const t = (key: string) => labels[key] ?? key
+  const components = new Map<string, React.ComponentType<{ sessionId: string; t: (key: string) => string }>>()
   const plugin = loaded.factory((name) => {
     if (name === 'react') return React
     throw new Error(`Unexpected module ${name}`)
   })
   plugin.apply({
     effect: (effect: () => () => void) => { const dispose = effect(); if (dispose) disposers.push(dispose) },
-    locale: { register: () => () => {} },
+    locale: { register: (_name: string, values: { en: Record<string, string> }) => { labels = values.en; return () => {} } },
     slots: {
       inject: (_name: string, inject: () => void) => { inject() },
-      register: (entry: { id?: string }, component: React.ComponentType<{ sessionId: string }>) => {
+      register: (entry: { id?: string }, component: React.ComponentType<{ sessionId: string; t: (key: string) => string }>) => {
         if (entry.id) components.set(entry.id, component)
         return () => {}
       },
     },
   })
   const Voice = components.get('live-voice')!
-  const view = render(<Voice sessionId="s" />)
+  const view = render(<Voice sessionId="s" t={t} />)
   const begin = () => fireEvent.click(screen.getByRole('button', { name: 'Start live voice session' }))
   const stop = () => fireEvent.click(screen.getByRole('button', { name: 'End live voice session' }))
   // Resolve deferred resources before plugin disposal even if an assertion fails.
@@ -90,7 +92,7 @@ function fixture() {
     ready.resolve(new Response(JSON.stringify({ events: [] })))
   })
   return {
-    view, switchSession: (sessionId: string) => view.rerender(<Voice sessionId={sessionId} />),
+    view, switchSession: (sessionId: string) => view.rerender(<Voice sessionId={sessionId} t={t} />),
     begin, stop, ready, started, acquiring, microphone, closing, closed, stopTrack, closeAudio,
   }
 }
@@ -186,4 +188,19 @@ it('stops the old connection and resets the button when the composer changes ses
   expect(f.stopTrack).toHaveBeenCalledOnce()
   await f.closing.promise
   f.closed.resolve(new Response(null, { status: 204 }))
+})
+
+
+it.each([['dispatching', 'Sending request…'], ['accepted', 'Request accepted'], ['failed', 'Request not sent. Please try again.']])('shows verified handoff state %s independently of audio', async (state, label) => {
+  const f = fixture()
+  f.begin()
+  await act(async () => {
+    f.started.resolve(new Response(JSON.stringify({ liveId: 'live' })))
+    await f.acquiring.promise
+    f.microphone.resolve({ getTracks: () => [{ stop: f.stopTrack }] } as MediaStream)
+  })
+  await act(async () => { f.ready.resolve(new Response(JSON.stringify({ events: [{ type: 'ready' }, { type: 'handoff', state }] }))) })
+  expect(screen.getByRole('status').textContent).toBe(label)
+  f.switchSession('other')
+  expect(screen.queryByRole('status')).toBeNull()
 })

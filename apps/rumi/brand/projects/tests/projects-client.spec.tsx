@@ -1,5 +1,6 @@
 /** The gallery lists projects; opening one starts a session in the project directory. */
 import * as React from 'react'
+import * as ReactDOM from 'react-dom'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
@@ -87,6 +88,7 @@ function fixture(host: { projects?: object[]; knownSessions?: Record<string, obj
   const mounted = { getSnapshot: () => host.activePanelId === 'projects' ? undefined : 'session-1', subscribe: () => () => {} };
   const sidebar = {
     mounted, isExpanded: () => expanded,
+    openTabIn: vi.fn(),
     toggleExpanded: vi.fn(() => { expanded = !expanded; document.documentElement.toggleAttribute('data-rightbar-collapsed', !expanded) }),
     commandTarget: vi.fn(() => ({ sessionId: 'session-1' })),
     toggleFullscreen: vi.fn(() => { document.documentElement.toggleAttribute('data-rightbar-fullscreen') }),
@@ -111,7 +113,7 @@ function fixture(host: { projects?: object[]; knownSessions?: Record<string, obj
     workspaces: { create: handles.createWorkspace, rename: handles.renameWorkspace },
     uiWorkspace: { openSession: handles.openSession, connectWorkspace: handles.connect },
   }
-  const definition = loaded!.factory(name => name === 'react' ? React : { IconPlusOutlineRegular: Icon, IconChevronLeftOutlineRegular: Icon, IconPanelLeftOutlineRegular: Icon, Tooltip: ({ children }: { children: React.ReactNode }) => children })
+  const definition = loaded!.factory(name => name === 'react' ? React : name === 'react-dom' ? ReactDOM : { IconPlusOutlineRegular: Icon, IconChevronLeftOutlineRegular: Icon, IconPanelLeftOutlineRegular: Icon, Tooltip: ({ children }: { children: React.ReactNode }) => children })
   definition.apply(ctx)
   return {
     ...handles, posts, sidebar,
@@ -142,6 +144,7 @@ it('lists projects with their recency and opens one on click', async () => {
   expect(view.renameWorkspace).not.toHaveBeenCalled()
   expect(view.connect).toHaveBeenCalledWith('workspace-1')
   expect(view.openSession).toHaveBeenCalledWith('session-new')
+  expect(view.sidebar.openTabIn).toHaveBeenCalledWith('session-new', 'print-studio')
   expect(view.selectPanel).toHaveBeenCalledWith(null)
   expect(view.posts.at(-1)?.body).toEqual({ projectId: 'p1', sessionId: 'session-new', workspaceId: 'workspace-1' })
 })
@@ -155,6 +158,7 @@ it('reuses the session a project already recorded', async () => {
   await settle()
   expect(view.connect).not.toHaveBeenCalled()
   expect(view.openSession).toHaveBeenCalledWith('session-1')
+  expect(view.sidebar.openTabIn).toHaveBeenCalledWith('session-1', 'print-studio')
 })
 
 it('shows an empty gallery with an invitation', async () => {
@@ -174,6 +178,7 @@ it('creates a project from the New control and opens it', async () => {
   expect(view.posts[0]?.body).toEqual({})
   expect(view.renameSession).toHaveBeenCalledWith('Untitled 1')
   expect(view.openSession).toHaveBeenCalled()
+  expect(view.sidebar.openTabIn).toHaveBeenCalledWith('session-new', 'print-studio')
 })
 
 it('returns to the gallery without ending the session', async () => {
@@ -215,6 +220,7 @@ it('opens projects even when their display name is already a workspace title', a
   fireEvent.click(screen.getByRole('button', { name: 'Untitled project' }))
   await settle()
   expect(view.openSession).toHaveBeenCalledWith('session-new')
+  expect(view.sidebar.openTabIn).toHaveBeenCalledWith('session-new', 'print-studio')
   expect(screen.queryByRole('alert')).toBeNull()
 })
 

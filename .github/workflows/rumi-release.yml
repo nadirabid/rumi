@@ -1,0 +1,79 @@
+name: Release Rumi
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rumi-production-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'nadirabid/rumi' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    env:
+      DSH_TELEMETRY_DISABLED: '1'
+      DSH_PACKAGING_PRESET: production
+      DSH_DESKTOP_UPDATE_CHANNEL: nightly
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b307475762933b98ed359c036b0e51f26b63b74b # v5.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Select supported Apple SDK
+        run: |
+          test "$(uname -m)" = arm64
+          python3 - <<'PY'
+          import glob, os
+          sdks = sorted(glob.glob('/Applications/Xcode*.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15*.sdk'))
+          if not sdks:
+              raise SystemExit('Rumi requires an installed macOS 15 SDK on this runner')
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('SDKROOT=' + sdks[-1] + '\n')
+          PY
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify Rumi behavior
+        run: pnpm exec vitest run apps/rumi/tests/print-studio.spec.ts apps/rumi/tests/print-studio-viewer.client.spec.tsx apps/rumi/tests/profile-mcp.spec.ts apps/rumi/tests/github-release.spec.ts
+      - name: Read published version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isLatest --jq '.[] | select(.isLatest) | .tagName')
+          echo "RUMI_LATEST_TAG=$tag" >> "$GITHUB_ENV"
+      - name: Prepare private signing configuration
+        id: release
+        env:
+          RUMI_CERTIFICATE_BASE64: ${{ secrets.RUMI_CERTIFICATE_BASE64 }}
+          RUMI_CERTIFICATE_PASSWORD: ${{ secrets.RUMI_CERTIFICATE_PASSWORD }}
+          RUMI_SIGNING_IDENTITY: ${{ secrets.RUMI_SIGNING_IDENTITY }}
+          RUMI_APPLE_TEAM_ID: ${{ secrets.RUMI_APPLE_TEAM_ID }}
+          RUMI_APPLE_ID: ${{ secrets.RUMI_APPLE_ID }}
+          RUMI_APPLE_APP_PASSWORD: ${{ secrets.RUMI_APPLE_APP_PASSWORD }}
+        run: node apps/rumi/scripts/prepare-github-release.mjs
+      - name: Build, sign, notarize, and verify
+        env:
+          DSH_PACKAGING_CONFIG_DIR: ${{ steps.release.outputs.config }}
+          RUMI_BUILD_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          export npm_execpath="$GITHUB_WORKSPACE/node_modules/pnpm/bin/pnpm.mjs"
+          node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64 --build-version "$RUMI_BUILD_VERSION"
+      - name: Publish verified update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DSH_PACKAGING_CONFIG_DIR: ${{ steps.release.outputs.config }}
+        run: node apps/rumi/scripts/publish-github.mjs --publish
+      - name: Remove private signing inputs
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/rumi-release"

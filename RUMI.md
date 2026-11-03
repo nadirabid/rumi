@@ -67,6 +67,12 @@ The publisher validates the completed release record, ZIP checksum and size, App
 
 Before macOS code signing, Rumi scopes the copied Electron app and helper build UUIDs to their application identities. This keeps local-network permissions distinct from other installed Electron apps; see [Apple TN3178](https://developer.apple.com/documentation/technotes/tn3178-checking-for-and-resolving-build-uuid-problems). The packaging hook supports the separate arm64 and x64 targets and rejects unsupported executable formats. Executable debug symbols, if distributed, must carry the rewritten UUID too.
 
+### Automatic GitHub releases
+
+The `Release Rumi` workflow builds Apple Silicon releases on pushes to `main` in `nadirabid/rumi`; it can also be run manually on that branch. GitHub-hosted macOS runners install locked dependencies, run focused Rumi tests, package with a macOS 15 SDK, sign with Developer ID, notarize with Apple, and publish the verified update feed. Releases run serially, use a version greater than the latest published build, and tag the exact source commit. Failed builds leave the existing update feed intact. If publication leaves a draft, inspect and remove that incomplete draft before retrying; never overwrite a published release.
+
+Configure these repository Actions secrets before enabling release builds: `RUMI_CERTIFICATE_BASE64` (base64-encoded Developer ID `.p12` containing its private key), `RUMI_CERTIFICATE_PASSWORD`, `RUMI_SIGNING_IDENTITY`, `RUMI_APPLE_TEAM_ID`, `RUMI_APPLE_ID`, and `RUMI_APPLE_APP_PASSWORD` (an Apple app-specific password for notarization). Signing configuration is written outside the checkout with private file permissions and removed at job completion. GitHub's job token publishes releases; no personal access token is needed. These credentials allow trusted code on `main` to sign releases, so restrict who can push to that branch. Clients use the download and installation behavior described above.
+
 ## Install and run
 
 ```sh

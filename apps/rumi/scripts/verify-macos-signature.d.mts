@@ -44,7 +44,7 @@ export function verifyMacOSRuntimeCode(path: string, expected: MacOSSigningEnvir
 export function verifyMacOSSignature(appPath: string, expected: MacOSSigningEnvironment): void
 
 /**
- * Verify an independently distributed application's signature, ticket, and Gatekeeper acceptance.
+ * Verify an independently distributed application's signature, ticket, and Gatekeeper acceptance; ticket-server failures retry three times.
  * @param appPath - Path to the stapled `.app` directory.
  * @param expected - Public release identity.
  */

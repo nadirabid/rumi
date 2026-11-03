@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { dump, load } from 'js-yaml'
-import { valid } from 'semver'
+import { valid, gt } from 'semver'
 import { loadDesktopPackageEnvironment } from './desktop-package-environment.mjs'
 import { resolveDesktopAutoUpdateConfig, desktopUpdateMetadataFilename } from './desktop-auto-update-environment.mjs'
 import { desktopTargetBuildPaths } from './desktop-build-paths.mjs'
@@ -31,6 +31,10 @@ async function main() {
   if (record.schemaVersion !== 1 || record.target !== 'mac-arm64' || record.environment !== 'production'
     || record.publicUrl !== update.publicUrl || record.channel !== update.channel || !valid(record.version)) {
     throw new Error('Rumi release record does not match this publishing destination')
+  }
+  if (!/^[a-f0-9]{40}$/u.test(record.commit ?? '')) throw new Error('Rumi release requires its source commit')
+  if (process.env.GITHUB_ACTIONS === 'true' && (record.dirty || record.commit !== process.env.GITHUB_SHA)) {
+    throw new Error('CI releases must match the clean workflow checkout')
   }
   const version = record.version
   const tag = `rumi-v${version}`
@@ -59,13 +63,19 @@ async function main() {
   metadata.path = metadata.files[0].url
   console.log(`Verified ${tag} for ${repository}; ${values.publish ? 'publishing' : 'pass --publish to publish'}`)
   if (!values.publish) return
+  const releases = JSON.parse(execFileSync('gh', ['release', 'list', '--repo', repository, '--limit', '100',
+    '--json', 'tagName,isLatest'], { encoding: 'utf8' }))
+  const latest = releases.find(release => release.isLatest)?.tagName
+  if (latest && (!latest.startsWith('rumi-v') || !valid(latest.slice(6)) || !gt(version, latest.slice(6)))) {
+    throw new Error('Refusing to replace the update feed with an equal or older release')
+  }
   const temporary = await mkdtemp(join(tmpdir(), 'rumi-release-'))
   try {
     const feed = join(temporary, metadataName)
     const notes = join(temporary, 'notes.md')
     await writeFile(feed, dump(metadata))
     await writeFile(notes, `Rumi for Apple Silicon Macs. Download the DMG, open it, and drag Rumi to Applications.\n\nSigned with Developer ID and notarized by Apple. Existing installations can use Check for Updates in Rumi.\n\nBuild: ${version}. Source commit: ${record.commit ?? 'unrecorded'}${record.dirty ? ' (includes local changes)' : ''}.\n`)
-    execFileSync('gh', ['release', 'create', tag, '--repo', repository, '--draft', '--title', `Rumi ${version}`,
+    execFileSync('gh', ['release', 'create', tag, '--repo', repository, '--draft', '--target', record.commit, '--title', `Rumi ${version}`,
       '--notes-file', notes, ...binaries.map(name => join(root, name)), feed], { stdio: 'inherit' })
     execFileSync('gh', ['release', 'edit', tag, '--repo', repository, '--draft=false', '--latest'], { stdio: 'inherit' })
     console.log(`Published https://github.com/${repository}/releases/tag/${tag}`)

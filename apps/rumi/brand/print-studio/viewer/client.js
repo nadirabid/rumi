@@ -101,7 +101,7 @@ export function installViewer(ctx, React, primitives) {
       if (stopped()) return
       if (response.cursorRequest) {
         let snapshot
-        try { snapshot = captures.get(sessionId)?.() ?? { status: 'viewer_unavailable' } }
+        try { snapshot = captures.get(sessionId)?.(response.cursorRequest) ?? { status: 'viewer_unavailable' } }
         catch (_error) { snapshot = { status: 'capture_failed' } }
         try {
           const posted = await fetch(`${ROUTE}/cursor?sessionId=${encodeURIComponent(sessionId)}`, {
@@ -171,9 +171,10 @@ export function installViewer(ctx, React, primitives) {
     const designReady = React.useRef(Promise.resolve(null))
     const [failed, setFailed] = React.useState(false)
     const [buildError, setBuildError] = React.useState(null)
+    const [cursorMode, setCursorMode] = React.useState('patch')
     React.useEffect(() => {
       try {
-        viewport.current = createViewport(holder.current, () => setFailed(true))
+        viewport.current = createViewport(holder.current, () => setFailed(true), setCursorMode)
         setFailed(false)
       } catch {
         // Without WebGL the pane still displays the failure.
@@ -184,7 +185,7 @@ export function installViewer(ctx, React, primitives) {
     React.useEffect(() => {
       const sessionId = view?.sessionId
       if (!sessionId) return
-      const capture = () => viewport.current?.captureCursor() ?? { status: 'viewer_unavailable' }
+      const capture = request => viewport.current?.captureCursor(request) ?? { status: 'viewer_unavailable' }
       captures.set(sessionId, capture)
       const controller = new AbortController()
       let timer
@@ -293,6 +294,11 @@ export function installViewer(ctx, React, primitives) {
       return () => { active = false; clearTimeout(timer); controller.abort() }
     }, [view])
     return h(React.Fragment, null,
+      h('div', { className: 'pv-cursor-controls', role: 'group', 'aria-label': t('cursorHighlighting') },
+        ['patch', 'surface', 'part', 'edge'].map(mode => h(Button, {
+          key: mode, variant: 'ghost', size: 'sm', 'aria-pressed': cursorMode === mode,
+          onClick: () => { setCursorMode(mode); viewport.current?.setCursorMode(mode) },
+        }, t(`cursor_${mode}`)))),
       h('div', { className: 'pv-stage', ref: holder, role: 'img', 'aria-label': t('view'), 'data-testid': 'print-viewport' }),
       buildError && !failed && view?.design?.error?.kind !== 'source'
         ? h('p', { role: 'alert', className: 'pv-error' }, t(buildError)) : null)

@@ -17,7 +17,20 @@ export function normalizeHighlight(value) {
     }
     return [...value]
   }
-  return { label: value.label.trim(), blobs: value.blobs.map(blob => ({
+  return { label: value.label.trim(), ...(value.selection ? { selection: normalizeSelection(value.selection) } : {}), blobs: value.blobs.map(blob => ({
     center: vector(blob.center, false), radii: vector(blob.radii, true), rotationDegrees: vector(blob.rotationDegrees, false),
   })) }
+}
+
+/**
+ * Validate a revision-specific surface reference shared by cursor snapshots and agent highlights.
+ * @param {object} value - Path, surface id and selection scope from a cursor capture.
+ * @returns {object} Detached selection reference.
+ */
+export function normalizeSelection(value) {
+  if (!value || !Array.isArray(value.partPath) || !value.partPath.length || value.partPath.length > 128
+    || !value.partPath.every(part => typeof part === 'string' && part.length <= 1000)
+    || !Number.isSafeInteger(value.surfaceId) || value.surfaceId < 1 || value.surfaceId > 200000
+    || !['patch', 'surface', 'part', 'edge'].includes(value.mode)) throw new Error('Invalid cursor surface selection')
+  return { partPath: [...value.partPath], surfaceId: value.surfaceId, mode: value.mode }
 }

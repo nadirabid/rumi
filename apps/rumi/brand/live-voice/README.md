@@ -56,3 +56,5 @@ The voice controls distinguish no action sent, sending, accepted, and failed. Ac
 ## Verification
 
 Run `pnpm exec vitest run --config apps/rumi/vitest.voice.config.ts`. This configuration resolves directly shipped JavaScript imports to workspace source. Tests use a local WebSocket server and controlled browser audio promises; they do not contact OpenAI or capture microphone audio.
+
+Contributors may implement `refineRequest({sessionId, text, content, signal})` to refine captured content from accumulated transcript chunks before delegation. The hook returns the replacement content blocks, runs in order after capture, and shares voice cancellation. Print Studio uses it for non-destructive cursor selection phrases without another model request. The final reference remains logged separately from the user’s words; refinement failures add explicit unavailable context.

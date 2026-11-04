@@ -17,3 +17,20 @@
 .rumi-print-viewer .pv-message{max-width:260px;margin:auto;padding:24px;font-size:12px;line-height:18px;text-align:center;color:var(--dsw-alias-label-tertiary)}
 .rumi-print-viewer .pv-loading{margin:auto;padding:24px;font-size:12px;color:var(--dsw-alias-label-tertiary)}
 .rumi-print-viewer .pv-error{position:absolute;right:8px;bottom:8px;left:8px;z-index:1;margin:0;padding:8px 10px;border-radius:8px;font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-2)}
+
+.pv-cursor-controls {
+  position: absolute;
+  inset-inline-start: var(--dsw-alias-spacing-md, 12px);
+  bottom: var(--dsw-alias-spacing-md, 12px);
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dsw-alias-spacing-xs, 4px);
+  max-width: calc(100% - 24px);
+  border-radius: var(--dsw-alias-radius-md, 8px);
+  background: var(--dsw-alias-bg-layer-2);
+}
+.pv-cursor-controls [aria-pressed='true'] {
+  color: var(--dsw-alias-brand-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}

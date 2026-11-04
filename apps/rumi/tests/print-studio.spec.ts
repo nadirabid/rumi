@@ -18,3 +18,5 @@ import '../brand/print-studio/tests/viewer-cursor.spec.ts'
 import "../brand/print-studio/tests/viewer-confirmation.spec.ts"
 
 import '../brand/print-studio/tests/viewer-glb.spec.ts'
+
+import '../brand/print-studio/tests/cursor-surfaces.spec.ts'

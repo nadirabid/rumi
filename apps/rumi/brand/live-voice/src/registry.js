@@ -1,7 +1,7 @@
 /** Contributor registry for Live Voice context. */
 
 /** Contributor fields the host will call. */
-export const CONTRIBUTOR_FIELDS = ['instructions', 'thinking', 'commentary', 'captureRequest'];
+export const CONTRIBUTOR_FIELDS = ['instructions', 'thinking', 'commentary', 'captureRequest', 'refineRequest'];
 
 /**
  * Contributors consulted when a live session needs context.

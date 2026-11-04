@@ -290,6 +290,7 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, l
     if (!isClosed) push({ type: 'handoff', delegationId, state });
   };
   let speechContext = null;
+  let speechText = '';
   const speechLifetime = new AbortController();
   const submit = createVoiceDispatcher({
     resolveAgent: async () => {
@@ -312,6 +313,7 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, l
   const dispatch = task => {
     const content = speechContext ?? Promise.resolve([]);
     speechContext = null;
+    speechText = '';
     const turn = submit({ ...task, content });
     turns.add(turn);
     void turn.then(() => turns.delete(turn));
@@ -361,6 +363,20 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, l
               return [{ type: 'text', text: 'The visual reference for this spoken request could not be captured. Ask for a fresh pointing reference; do not guess.' }];
             }
           })).then(parts => parts.flat());
+        }
+        if (typeof event.delta === 'string') {
+          speechText = (speechText + event.delta).slice(-4000);
+          const text = speechText;
+          for (const contributor of registry.contributors()) {
+            if (!contributor.refineRequest || !speechContext) continue;
+            speechContext = speechContext.then(async content => {
+              try { return await contributor.refineRequest({ sessionId, text, content, signal: speechLifetime.signal }); }
+              catch (error) {
+                logger.warn(`Voice reference refinement failed: ${contributor.id}`);
+                return [...content, { type: 'text', text: 'The requested visual selection refinement failed. Do not claim it is visible; use a fresh pointing reference.' }];
+              }
+            });
+          }
         }
         push({ type: 'transcript', role: 'user', text: event.delta });
       } else if (event.type === 'session.output_transcript.delta') {

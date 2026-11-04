@@ -18,6 +18,7 @@ import { createViewerDiagnostics } from './diagnostics.js'
 import { createHighlightReceipts } from './receipts.js'
 import { createViewerEvents } from './events.js'
 import { createCursorRequests, cursorIdentity } from './cursor.js'
+import { cursorCommand } from './cursor-commands.js'
 import { createSource } from './source.js'
 import { discoverModels, readSelection, saveSelection } from './catalog.js'
 
@@ -423,6 +424,21 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
   ctx.inject(['liveVoice'], scoped => {
     scoped.effect(() => scoped.liveVoice.register({
       id: 'print-studio-pointing',
+      instructions: () => 'Cursor driven mesh highlighting responds directly to short selection phrases: local patch, whole panel, whole part, just the edge, larger selection, smaller selection. These refine a visual reference only; they never edit geometry. Still delegate the request. Use the attached refined reference and have the modeling assistant confirm it in teal with viewer_highlight, copying region.selection and modelLocalBlob. Do not claim a preview succeeded without its result.',
+      refineRequest: async ({ sessionId, text, content, signal }) => {
+        const command = cursorCommand(text)
+        if (!command) return content
+        const referenceIndex = content.findIndex(part => part.type === 'text' && part.text.startsWith('{"reference":"cursor-at-start-of-spoken-request"'))
+        if (referenceIndex < 0) return content
+        const reference = JSON.parse(content[referenceIndex].text)
+        if (reference.command === command || reference.snapshot?.status !== 'captured' || !reference.snapshot.region.anchorId) return content
+        const { image, ...snapshot } = JSON.parse(await captureReference(sessionId, signal, { command, anchorId: reference.snapshot.region.anchorId }))
+        return content.flatMap((part, index) => {
+          if (index === referenceIndex) return [{ type: 'text', text: JSON.stringify({ ...reference, command, snapshot }) }, ...(image ? [{ type: 'image', attachment: image }] : [])]
+          if (index === referenceIndex + 1 && part.type === 'image') return []
+          return [part]
+        })
+      },
       captureRequest: async ({ sessionId, requestedAt, signal }) => {
         if (!sessions.has(sessionId)) return []
         const { image, ...snapshot } = JSON.parse(await captureReference(sessionId, signal))
@@ -434,14 +450,14 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
     }), 'print viewer: spoken pointing references')
   })
 
-  async function captureReference(sessionId, signal) {
+  async function captureReference(sessionId, signal, refinement = {}) {
     if (closed) return JSON.stringify({ status: 'viewer_unavailable' })
     const capture = (async () => {
         const record = sessions.get(sessionId)
         if (!record) return JSON.stringify({ status: 'viewer_unavailable' })
         const identity = await serialize(record, async () => { await record.source?.poll(); return cursorIdentity(record) })
         if (record.source?.state().error) return JSON.stringify({ status: 'stale_view' })
-        const snapshot = await cursors.request(sessionId, identity, signal)
+        const snapshot = await cursors.request(sessionId, identity, signal, refinement)
         signal.throwIfAborted()
         if (snapshot.status !== 'captured') return JSON.stringify(snapshot)
         try {
@@ -463,7 +479,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_cursor_snapshot',
-    description: 'Ask the open 3D viewer to capture the current cursor Gaussian region and a PNG of the current view. Cursor mesh vision is blue; agent viewer_highlight regions are teal. Captures when the viewer services this request, not when the person last spoke. Prefer an attached cursor-at-start-of-spoken-request reference for that utterance. Returns the pointed object/part, world-space point and radius in millimetres, model identity, camera and capture time. Editable-model hits include modelLocalBlob ready for viewer_highlight with identity.design path/revision/url. Read the image and region before highlighting or editing. no_hit means no active cursor intersection; viewer_unavailable means no response from an open viewer. Never substitute an earlier hover or treat a soft region as an exact edit mask.',
+    description: 'Ask the open 3D viewer to capture the current cursor Gaussian region and a PNG of the current view. Cursor mesh vision is blue; agent viewer_highlight regions are teal. Captures when the viewer services this request, not when the person last spoke. Prefer an attached cursor-at-start-of-spoken-request reference for that utterance. Returns a revision-specific region.selection (surface/part/edge scope) and anchorId; copy selection together with modelLocalBlob into viewer_highlight to confirm the exact area. Returns the pointed object/part, world-space point and radius in millimetres, model identity, camera and capture time. Editable-model hits include modelLocalBlob ready for viewer_highlight with identity.design path/revision/url. Read the image and region before highlighting or editing. no_hit means no active cursor intersection; viewer_unavailable means no response from an open viewer. Never substitute an earlier hover or treat a soft region as an exact edit mask.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => {
       const { image, ...snapshot } = JSON.parse(value)
@@ -544,6 +560,11 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       revision: { type: 'integer', required: true, description: 'Exact design.revision from mesh_state.' },
       url: { type: 'string', required: true, description: 'Exact design.url from mesh_state; identifies the loaded instance.' },
       label: { type: 'string', required: true, description: 'Short description of the proposed region, at most 200 characters. May be empty when clearing.' },
+      selection: { type: 'object', additionalProperties: false, description: 'Optional exact surface restriction from cursor region.selection. Copy with modelLocalBlob to visually confirm cursor driven mesh highlighting.', properties: {
+        partPath: { type: 'array', required: true, items: { type: 'string' }, description: 'Exact hierarchy path from region.selection.' },
+        surfaceId: { type: 'integer', required: true, description: 'Exact surfaceId from region.selection for this revision.' },
+        mode: { type: 'string', required: true, enum: ['patch', 'surface', 'part', 'edge'], description: 'Local patch, connected surface, whole mesh part, or nearby boundary edge.' },
+      } },
       blobs: { type: 'array', required: true, description: 'Zero to eight ellipsoids; an empty array clears the highlight.', items: {
         type: 'object', additionalProperties: false, properties: {
           center: { type: 'array', required: true, items: { type: 'number' }, description: 'Exactly three coordinates [x,y,z] in millimetres.' },

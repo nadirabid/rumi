@@ -295,6 +295,14 @@ it('coalesces hover, follows placed surfaces, clears on leave, and cancels work 
     expect(render).toHaveBeenCalledOnce()
     expect(hover.sphere.value.z).toBeCloseTo(1)
     expect(hover.sphere.value.w).toBeGreaterThan(0)
+    const anchor = hover.snapshot()
+    listeners.get('pointermove')!({ clientX: 390, clientY: 200, pointerType: 'mouse' })
+    expect(hover.refine('surface', anchor).point.toArray()).toEqual(anchor.point.toArray())
+    expect(hover.mode.value).toBe(1)
+    expect(frames.size).toBe(0)
+    expect(hover.surface.value).toBe(anchor.surfaceId)
+    listeners.get('pointermove')!({ clientX: 200, clientY: 200, pointerType: 'mouse' })
+    flush()
     mesh.position.z = 2
     hover.invalidate()
     flush()
@@ -353,6 +361,12 @@ it('captures the same displayed Gaussian in model coordinates and restores scree
     const leave = state.renderer.domElement.addEventListener.mock.calls.find(([name]) => name === 'pointerleave')[1]
     leave()
     expect(viewport.captureCursor()).toEqual({ status: 'no_hit' })
+    const refined = viewport.captureCursor({ command: 'surface', anchorId: capture.region.anchorId })
+    expect(refined.status).toBe('captured')
+    expect(refined.region.worldPoint).toEqual(capture.region.worldPoint)
+    expect(refined.region.selection.mode).toBe('surface')
+    await viewport.applyDesign({ path: '/model.js', revision: 3, url, transform: { ...transform, scale: 3 } }, null)
+    expect(viewport.captureCursor({ command: 'part', anchorId: refined.region.anchorId })).toEqual({ status: 'stale_view' })
   } finally { viewport.dispose() }
 })
 

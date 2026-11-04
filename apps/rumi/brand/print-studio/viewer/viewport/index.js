@@ -31,12 +31,13 @@ function token(element, name, fallback) {
  * afterwards: scene updates never reset an orbit.
  * @param {HTMLElement} element - Container the canvas fills; its size is observed.
  * @param {() => void} onFailure - Called once when the WebGL context is lost.
+ * @param {Function} [onCursorMode] Receives cursor selection scope changes.
  * @returns {object} The owned viewport. `apply(view)` reconciles STL objects;
  * `applyDesign(spec, volume)` loads a source revision and resolves to measured
  * geometry. Stale loads resolve to null; build failures reject and retain the
  * previous design. `dispose()` releases the viewport and invalidates imports.
  */
-export function createViewport(element, onFailure) {
+export function createViewport(element, onFailure, onCursorMode = () => {}) {
   const scene = new THREE.Scene()
   const geometries = new Map()
   const objects = new Map()
@@ -48,6 +49,7 @@ export function createViewport(element, onFailure) {
   let sceneRevision = 0
   let designSpec = null, designVolume = null, designPending = null
   let measurement = null
+  const cursorAnchors = new Map()
   const ink = token(element, '--dsw-alias-label-tertiary', FALLBACK_INK)
   const solidMaterial = new THREE.MeshStandardMaterial({
     color: token(element, '--dsw-alias-brand-primary', FALLBACK_ACCENT),
@@ -75,7 +77,7 @@ export function createViewport(element, onFailure) {
   scene.add(light)
 
   const hover = createHover(renderer.domElement, camera,
-    () => [...objects.values()].map(entry => entry.mesh).concat(design ? [design.root] : []), render)
+    () => [...objects.values()].map(entry => entry.mesh).concat(design ? [design.root] : []), render, onCursorMode)
   const cameraChanged = () => { if (!hover.invalidate()) render() }
 
   function clearVolume() {
@@ -147,7 +149,7 @@ export function createViewport(element, onFailure) {
     if (highlightOverlay && highlightId === (highlight?.id ?? null)) return
     if (!design) { clearHighlight(); return }
     if (highlightOverlay) highlightOverlay.update(highlight ?? { blobs: [] })
-    else highlightOverlay = createHighlight(design.root, highlight ?? { blobs: [] }, hover.sphere)
+    else highlightOverlay = createHighlight(design.root, highlight ?? { blobs: [] }, hover)
     highlightOverlay.setVisible(highlightVisible)
     highlightId = highlight?.id ?? null
   }
@@ -190,10 +192,13 @@ export function createViewport(element, onFailure) {
       return !closed && !document.hidden && highlightVisible && designUrl === designSpec?.url ? highlightId : null
     },
     /** Capture the live cursor region and current camera view; no previous hover is reused. */
-    captureCursor() {
+    captureCursor(request = {}) {
       if (closed || document.hidden) return { status: 'viewer_unavailable' }
       if (design && designUrl !== designSpec?.url) return { status: 'stale_view' }
-      const hit = hover.snapshot()
+      const anchor = request.anchorId ? cursorAnchors.get(request.anchorId) : null
+      const identityKey = JSON.stringify([sceneRevision, designUrl, designSpec?.transform])
+      if (request.command && (!anchor || anchor.identityKey !== identityKey)) return { status: 'stale_view' }
+      const hit = request.command ? hover.refine(request.command, anchor.hit) : hover.snapshot()
       if (!hit) return { status: 'no_hit' }
       const designIdentity = design ? {
         path: designSpec.path, revision: designSpec.revision, url: designUrl, transform: designSpec.transform,
@@ -205,6 +210,10 @@ export function createViewport(element, onFailure) {
         object = object.parent
       }
       const point = hit.point.toArray()
+      const anchorId = crypto.randomUUID()
+      cursorAnchors.set(anchorId, { hit, identityKey })
+      while (cursorAnchors.size > 8) cursorAnchors.delete(cursorAnchors.keys().next().value)
+      const selection = { partPath: path, surfaceId: hit.surfaceId, mode: ['patch', 'surface', 'part', 'edge'][hit.mode] }
       let modelLocalBlob = null
       if (object === designRoot) {
         const center = designRoot.worldToLocal(hit.point.clone()).toArray()
@@ -228,11 +237,13 @@ export function createViewport(element, onFailure) {
       return {
         status: 'captured', capturedAt: new Date().toISOString(),
         identity: { sceneRevision, design: designIdentity },
-        region: { objectId, partPath: path, faceIndex: hit.faceIndex, worldPoint: point, worldRadius: hit.radius, modelLocalBlob },
+        region: { objectId, partPath: path, faceIndex: hit.faceIndex, worldPoint: point, worldRadius: hit.radius, modelLocalBlob, selection, anchorId },
         camera: { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), fov: camera.getEffectiveFOV(), aspect: camera.aspect },
         image,
       }
     },
+    /** Refine the cursor locally; the next pointer hit uses this selection scope. */
+    setCursorMode(command) { hover.refine(command) },
     /** Set local presentation visibility without confirming the proposed region. */
     setHighlightVisible(visible) {
       highlightVisible = visible
@@ -279,7 +290,7 @@ export function createViewport(element, onFailure) {
     },
     async applyDesign(spec, volume) {
       if (closed) return null
-      hover.clear()
+      if (designUrl !== spec?.url) { hover.clear(); cursorAnchors.clear() }
       designSpec = spec
       designVolume = volume
       if (!spec) {
@@ -323,7 +334,7 @@ export function createViewport(element, onFailure) {
     },
     apply(view) {
       if (closed) return
-      hover.clear()
+      if (sceneRevision !== view.revision) { hover.clear(); cursorAnchors.clear() }
       sceneRevision = view.revision
       const live = new Set()
       for (const spec of view.objects) {
@@ -356,7 +367,7 @@ export function createViewport(element, onFailure) {
         }
         entry.mesh.matrix.fromArray(spec.matrix)
         entry.mesh.updateMatrixWorld(true)
-        if (rebuildOverlay) entry.overlay = createHighlight(entry.mesh, { blobs: [] }, hover.sphere)
+        if (rebuildOverlay) entry.overlay = createHighlight(entry.mesh, { blobs: [] }, hover)
       }
       for (const [id, entry] of objects) {
         if (live.has(id)) continue
@@ -387,6 +398,7 @@ export function createViewport(element, onFailure) {
       closed = true
       generation++
       hover.dispose()
+      cursorAnchors.clear()
       clearHighlight()
       if (design) disposeModel(design.root)
       design = null

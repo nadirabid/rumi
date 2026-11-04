@@ -374,6 +374,19 @@ window.__ModuleLoader__.load({
           const style = document.createElement('style');
           style.id = STYLE_ID;
           style.textContent = `
+            .lv-mic {
+              display: inline-flex; align-items: center; justify-content: center;
+              flex: 0 0 auto; width: 34px; height: 34px; box-sizing: border-box; padding: 0; margin: 0;
+              border-radius: 999px; cursor: pointer; user-select: none; white-space: nowrap;
+              font-size: 12px; font-weight: 500; line-height: 1;
+              background: transparent; color: var(--dsw-alias-label-primary);
+              border: 1px solid var(--dsw-alias-border-l3);
+            }
+            .lv-mic[aria-pressed='true'] {
+              background: var(--dsw-alias-label-primary);
+              color: var(--dsw-alias-label-primary-foreground);
+            }
+            .lv-mic:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
             .lv-orb { transition: transform .12s ease, opacity .12s ease; }
             .lv-orb:hover { transform: scale(1.06); }
             .lv-orb:disabled { opacity: .45; cursor: default; transform: none; }
@@ -511,9 +524,9 @@ window.__ModuleLoader__.load({
             enabled ? h('span', {
               role: 'button',
               tabIndex: 0,
-              'aria-label': muted ? 'Unmute microphone' : 'Mute microphone',
+              'aria-label': t(muted ? 'mic.unmute' : 'mic.mute'),
               'aria-pressed': muted,
-              title: muted ? 'Unmute microphone' : 'Mute microphone',
+              title: t(muted ? 'mic.unmute' : 'mic.mute'),
               className: 'lv-mic',
               onClick: () => {
                 const next = !muted;
@@ -527,21 +540,12 @@ window.__ModuleLoader__.load({
                 setMuted(next);
                 void engineRef.current?.setMuted(next);
               },
-              style: {
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                width: 34, height: 34, minWidth: 34, boxSizing: 'border-box', padding: 0, margin: 0,
-                borderRadius: '50%', cursor: 'pointer', userSelect: 'none',
-                background: muted ? 'var(--dsw-alias-label-primary)' : 'transparent',
-                border: '1px solid var(--dsw-alias-border-l3)',
-                color: muted ? 'var(--dsw-alias-label-primary-foreground)' : 'var(--dsw-alias-label-primary)',
-              },
-            }, h('svg', { width: 14, height: 14, viewBox: '0 0 16 16', 'aria-hidden': true },
+            }, h('svg', { width: 16, height: 16, viewBox: '0 0 16 16', 'aria-hidden': true },
               h('path', {
-                d: muted
-                  ? 'M3 2l10 12M6.5 4.5A2.5 2.5 0 0 1 10 7v1M10 11.4A3.5 3.5 0 0 1 4.5 8V7M8 12v2'
-                  : 'M5 7v1a3 3 0 0 0 6 0V7M8 12v2M3.5 3.5l9 9',
+                d: 'M6 4a2 2 0 0 1 4 0v4a2 2 0 0 1-4 0V4M4 7v1a4 4 0 0 0 8 0V7M8 12v2M6 14h4',
                 stroke: 'currentColor', strokeWidth: 1.3, fill: 'none', strokeLinecap: 'round',
-              }))) : null,
+              }),
+              muted ? h('line', { x1: 2, y1: 2, x2: 14, y2: 14, stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round' }) : null)) : null,
             h('span', {
               role: 'button',
               tabIndex: sessionId ? 0 : -1,
@@ -598,8 +602,8 @@ window.__ModuleLoader__.load({
 
         /** The one label this bundle still draws: the source under the dictation. */
         const LABELS = {
-          en: { 'trigger.voice': 'Live Voice', 'handoff.not_sent': 'No action sent yet', 'handoff.received': 'Sending request…', 'handoff.waiting': 'Waiting for your words…', 'handoff.dispatching': 'Sending request…', 'handoff.accepted': 'Request accepted', 'handoff.failed': 'Request not sent. Please try again.' },
-          zh: { 'trigger.voice': '实时语音', 'handoff.not_sent': '尚未发送操作', 'handoff.received': '正在发送请求…', 'handoff.waiting': '正在等待语音文字…', 'handoff.dispatching': '正在发送请求…', 'handoff.accepted': '请求已接收', 'handoff.failed': '请求未发送，请重试' },
+          en: { 'mic.mute': 'Mute microphone', 'mic.unmute': 'Unmute microphone', 'trigger.voice': 'Live Voice', 'handoff.not_sent': 'No action sent yet', 'handoff.received': 'Sending request…', 'handoff.waiting': 'Waiting for your words…', 'handoff.dispatching': 'Sending request…', 'handoff.accepted': 'Request accepted', 'handoff.failed': 'Request not sent. Please try again.' },
+          zh: { 'mic.mute': '将麦克风静音', 'mic.unmute': '取消麦克风静音', 'trigger.voice': '实时语音', 'handoff.not_sent': '尚未发送操作', 'handoff.received': '正在发送请求…', 'handoff.waiting': '正在等待语音文字…', 'handoff.dispatching': '正在发送请求…', 'handoff.accepted': '请求已接收', 'handoff.failed': '请求未发送，请重试' },
         };
 
         /**

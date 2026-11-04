@@ -12,7 +12,7 @@ Set a key under **Plugins → Live Voice**. The host saves it through `ctx.crede
 
 ## Session lifetime
 
-The voice control stays beside Send while the microphone mute control appears to its left. Active voice reverses the icon’s foreground and background colors; animation also indicates activity.
+The voice control stays beside Send while the microphone mute control appears to its left. The microphone control displays its current state: a normal microphone when on, or a crossed-out microphone when muted; its tooltip describes the action. Active voice reverses the icon’s foreground and background colors; animation also indicates activity.
 
 While connecting, the control shows a dashed loading ring and remains cancellable. The enabled colors and mute control appear after the host reports readiness and local audio setup finishes.
 

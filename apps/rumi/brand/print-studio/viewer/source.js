@@ -2,6 +2,7 @@
 import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, extname, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
+import { validateGlb, GLB_MAX_BYTES } from './glb.js'
 import { normalizeHighlight } from './highlight.js'
 import { normalizePlacement } from './transform.js'
 
@@ -23,12 +24,13 @@ function inside(root, path) {
  */
 export async function createSource(ctx, path, workspace) {
   let root, entryName
+  const format = extname(path).toLowerCase() === '.glb' ? 'glb' : 'javascript'
   let closed = false
   let pending, hash, candidate
   let sourceError = null
   let buildError = null
   const snapshots = []
-  const state = { path, revision: 0, url: null, transform: normalizePlacement(), report: null, camera: null, highlight: null }
+  const state = { path, format, revision: 0, url: null, transform: normalizePlacement(), report: null, camera: null, highlight: null }
 
   async function scan() {
     const files = new Map()
@@ -49,7 +51,14 @@ export async function createSource(ctx, path, workspace) {
         files.set(relative(root, path).split(sep).join('/'), content)
       }
     }
-    await visit(root)
+    if (format === 'glb') {
+      const file = resolve(root, entryName)
+      if (!inside(root, await realpath(file))) throw new Error('GLB must remain inside its model folder')
+      if ((await stat(file)).size > GLB_MAX_BYTES) throw new Error('GLB exceeds 64 MiB')
+      const content = await readFile(file)
+      validateGlb(content)
+      files.set(entryName, content)
+    } else await visit(root)
     if (!files.has(entryName)) throw new Error('The model entry file is missing')
     const digest = createHash('sha256')
     for (const [name, content] of files) digest.update(name).update('\0').update(content).update('\0')
@@ -74,7 +83,7 @@ export async function createSource(ctx, path, workspace) {
             path: `${prefix}/${name.split('/').map(encodeURIComponent).join('/')}`,
             methods: ['GET'], requestBody: 'buffered',
             fetch: async () => new Response(content, { headers: {
-              'content-type': 'text/javascript; charset=utf-8',
+              'content-type': format === 'glb' ? 'model/gltf-binary' : 'text/javascript; charset=utf-8',
               'cache-control': 'private, max-age=3600, immutable',
               'x-content-type-options': 'nosniff',
             } }),
@@ -106,8 +115,8 @@ export async function createSource(ctx, path, workspace) {
     }
     const project = await realpath(workspace)
     const entry = await realpath(path)
-    if (!inside(project, entry) || !['.js', '.mjs'].includes(extname(entry))) {
-      throw new Error('viewer_load requires a .js or .mjs file inside the project')
+    if (!inside(project, entry) || !['.js', '.mjs', '.glb'].includes(extname(entry).toLowerCase())) {
+      throw new Error('viewer_load requires a .glb, .js or .mjs file inside the project')
     }
     root = dirname(entry)
     entryName = relative(root, entry).split(sep).join('/')

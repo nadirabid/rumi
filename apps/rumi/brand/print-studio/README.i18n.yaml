@@ -3,8 +3,8 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write apps/rumi/brand/print-studio/README.md
 /print-studio:
-  en: cea0621f7f0b358d
-  zh: 5462d0e756162a22
+  en: 85674279108443f7
+  zh: a4c20df31ccaebc7
 /print-studio/test-print:
   en: 9a60197d35201e39
   zh: 93cbf14689151364
@@ -20,6 +20,9 @@
 /print-studio/source-ownership:
   en: d5d901e4edea32f2
   zh: 3a95521f4153b966
+/print-studio/blender-editing-and-glb-previews:
+  en: 8657e6546868aed0
+  zh: 0ba3c43bfb979f3e
 /print-studio/editable-three-js-models:
   en: 7861a0adb283d1be
   zh: 5ca84212f0747305

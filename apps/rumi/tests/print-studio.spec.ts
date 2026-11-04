@@ -16,3 +16,5 @@ import '../brand/print-studio/tests/viewer-model.spec.ts'
 import '../brand/print-studio/tests/viewer-cursor.spec.ts'
 
 import "../brand/print-studio/tests/viewer-confirmation.spec.ts"
+
+import '../brand/print-studio/tests/viewer-glb.spec.ts'

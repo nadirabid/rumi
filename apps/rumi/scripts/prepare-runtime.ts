@@ -11,6 +11,7 @@ import { readPrimaryRuntime } from '../../../packages/skill/tool-workspace-depen
 import { desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
 import { packagingStep } from './packaging-step.mjs'
 import { preparePrimaryRuntime } from './prepare-primary-runtime.ts'
+import { prepareBlenderRuntime } from './prepare-blender-runtime.ts'
 import { prepareDesktopCli } from './prepare-cli.ts'
 import { prepareCommandLink } from './prepare-command-link.ts'
 
@@ -56,6 +57,8 @@ async function main(): Promise<void> {
   const nodeVersion = await prepareElectron(target)
   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:primary-runtime',
     () => preparePrimaryRuntime({ deferSmoke: values['defer-primary-runtime-smoke'] }))
+  await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:blender',
+    () => prepareBlenderRuntime(resolveDesktopBuildTarget(), RUNTIME_ROOT, BUILD_PATHS.downloads))
   const { pnpm } = await readPrimaryRuntime(join(RUNTIME_ROOT, 'primary-runtime'))
   if (pnpm === undefined) throw new Error('desktop runtime: primary-runtime manifest has no pnpm version')
   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:cli', async () => { prepareCli(target) })

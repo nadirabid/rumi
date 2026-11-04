@@ -10,7 +10,7 @@ async function stat(path) {
 }
 
 /**
- * List models/<name>/model.js (or model.mjs), plus the legacy source/model.js.
+ * List models/<name>/model.glb (or model.js/model.mjs), plus the legacy source/model.js.
  * Symlinks are excluded; helpers are not model entries.
  * @param {string} cwd - Project directory.
  * @returns {Promise<Array<{name: string, path: string}>>} Sorted project-relative entries.
@@ -22,7 +22,7 @@ export async function discoverModels(cwd) {
     const entries = await readdir(root, { withFileTypes: true })
     for (const directory of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       if (!directory.isDirectory() || directory.name.startsWith('.')) continue
-      for (const file of ['model.js', 'model.mjs']) {
+      for (const file of ['model.glb', 'model.js', 'model.mjs']) {
         const path = `models/${directory.name}/${file}`
         if (!(await stat(join(cwd, path)))?.isFile()) continue
         models.push({ name: directory.name, path })

@@ -28,7 +28,8 @@
     "monitor.js",
     "lib/client.js",
     "lib/THREE-LICENSE.txt",
-    "viewer"
+    "viewer",
+    "blender"
   ],
   "main": "index.js",
   "icon": "./icon.svg",

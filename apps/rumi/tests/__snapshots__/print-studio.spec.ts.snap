@@ -2,6 +2,32 @@
 
 exports[`documents creating multiple models and bringing a named entry into view 1`] = `
 {
+  "blender": "---
+name: blender-modeling
+description: Create, import, or edit Rumi meshes using background Blender Python scripts, then inspect and iterate in the Three.js viewer. Use for model creation and geometry edits.
+---
+
+# Blender modeling
+
+Call \`blender_status\` for the executable and helper paths. Run Blender through the ordinary shell tool, using its permissions and cancellation; do not build a separate execution service. If Blender is unavailable, report the setup action returned by the tool.
+
+## Edit and publish
+
+1. Read \`mesh_state\` and the existing project files. Preserve existing models. For an existing Blender model, find its latest successful revision report under \`models/<name>/revisions/\` and open that report's \`blend\` path. Use the selected revision when the user asks to revert. For a GLB or STL import, use the helper's \`import_mesh\`. Legacy JavaScript models remain viewable; migrate their actual geometry rather than approximating it from screenshots. Do not overwrite their source.
+2. Write a reproducible Python script under \`source/\`. Run \`"<executable>" --background --factory-startup --python-exit-code 1 --python "<script>"\`. This runs a full Blender process without a window; ordinary system Python cannot import \`bpy\`.
+3. Work in **metres, Z up** in Blender. Rumi's viewer, measurements and Gaussian regions use **millimetres, Z up**. Divide model-local cursor/highlight coordinates and radii by 1,000 before using them in Blender; account for object transforms when selecting vertices. Standard GLB export/import handles Y-up conversion. Do not apply viewer placement to an editing selection twice.
+4. Use Blender's modifiers and mesh operations. For symmetric objects construct one half and mirror it about an explicit plane; measure symmetry after evaluated modifiers. Keep planar faces planar, bevel widths consistent, sharp boundaries deliberate, and smooth normals confined to intended smooth surfaces. More subdivisions or smooth shading alone do not correct a lumpy silhouette. Inspect front, side and three-quarter views. Distinguish topology checks from visual/reference fidelity.
+5. Load the helper returned by \`blender_status\` with \`helper = runpy.run_path(helper_path)\`, then call \`helper["publish"]("models/<name>")\`. Use \`runpy\` so importing the helper does not write bytecode into the installed application. It saves an immutable \`.blend\` and GLB revision, prints the paths, and atomically updates \`model.glb\`. Keep named parts and modifiers in the editable original. Preview limits are 200,000 triangles and 64 MiB; preserve detailed assets separately if a lighter preview is required. Do not silently simplify the print deliverable.
+6. Call \`viewer_load\` on \`models/<name>/model.glb\`; read \`mesh_state\` after the viewer measures it. Subsequent completed exports reload automatically. Use \`viewer_camera\`, \`viewer_cursor_snapshot\`, and \`viewer_highlight\` for iteration. A failed script/export/load is not a completed edit. Retain the previous revision, report the failure, and fix it.
+
+## Pointed regions and printing
+
+Use \`printer-awareness\` before supplying a build volume or making printer-specific fit, nozzle or filament claims.
+
+Use the cursor snapshot associated with the request and visually ground named regions through \`viewer_highlight\`, following \`clarify-mesh-changes\`. Check the model revision before editing; a Gaussian region is a soft reference, not an exact vertex selection or semantic part boundary. Changes to topology invalidate old triangle indices.
+
+Keep \`.blend\` files as editable originals and GLB as viewing artifacts. Export print meshes separately from the intended evaluated solids and verify units, wall thickness, manifoldness, fit, supports and slicer output using \`fdm-design\`. Blender operations and viewer checks do not certify print readiness. Whole-model placement still uses \`viewer_transform\`; it does not rewrite the Blender original.
+",
   "clarification": "---
 name: clarify-mesh-changes
 description: Establish which region of a 3D model a person means and what change they want. Use visual references when words such as this part, around the eyes, bigger, or rounder leave materially different edits possible.
@@ -32,6 +58,27 @@ When the person corrects the region, stop work based on the previous region, rep
 When the requested change is clear, edit the model source and inspect the resulting preview and measurements. Clear an obsolete reference with \`blobs: []\`, using the current model identity and an empty label. Explain changes using the person's feature names rather than coordinates or triangle indices. Only refer to labels or viewer controls that actually exist; do not invent hover labels.
 ",
   "cursor": "Ask the open 3D viewer to capture the current cursor Gaussian region and a PNG of the current view. Cursor mesh vision is blue; agent viewer_highlight regions are teal. Captures when the viewer services this request, not when the person last spoke. Prefer an attached cursor-at-start-of-spoken-request reference for that utterance. Returns the pointed object/part, world-space point and radius in millimetres, model identity, camera and capture time. Editable-model hits include modelLocalBlob ready for viewer_highlight with identity.design path/revision/url. Read the image and region before highlighting or editing. no_hit means no active cursor intersection; viewer_unavailable means no response from an open viewer. Never substitute an earlier hover or treat a soft region as an exact edit mask.",
+  "fdm": "---
+name: fdm-design
+description: Apply FDM design constraints when creating or modifying meshes intended for physical printing. Use during design, before slicer preparation; the modeling method remains the agent's choice.
+---
+
+# Design for FDM printing
+
+Preserve the requested design while considering these constraints. They guide design; this skill does not run checks or certify print readiness.
+
+Use \`printer-awareness\` to obtain the selected printer, nozzle and material facts before applying printer-specific constraints.
+
+## Core constraints
+
+1. **Represent the intended solid.** Use explicit units, finite coordinates, and nondegenerate triangles. Each intended solid should have a closed, consistently oriented surface without self-intersections or nonmanifold connections. Slicer repair is not evidence that the intended geometry was preserved.
+2. **Fit the usable printing region.** Check the proposed placement against the active nozzle's reachable region and exclusions. Reserve room for required supports, adhesion aids, and clearance. On dual-nozzle printers, do not substitute the combined envelope for either nozzle's usable region.
+3. **Keep intended connections physical.** Features that must form one piece need a real material connection or an explicit assembly joint. Mere contact at a point or edge is not a reliable bond. Separate parts and color regions are allowed; shell count alone is not a defect.
+4. **Plan support and bed attachment.** Choose an orientation with a viable first layer or an adhesion/support strategy. Regions above it need sufficient support from previous layers, feasible bridging, or generated supports. Temporary supports need a removal or dissolution route. Face angle alone does not establish support; a flat base and support-free printing are not universal requirements.
+5. **Preserve printable features.** Size walls, posts, holes, gaps, and text for the selected nozzle, layer height, material, and wall generator. Thin features may disappear or widen during slicing. No fixed wall thickness, bridge length, or overhang angle applies to every configuration.
+6. **Allow intended fits and motion.** Mating and moving parts need clearance or interference appropriate to the intended fit, material, orientation, and calibrated process. Do not assume nominally identical dimensions will fit. Use a small fit test when the result matters and calibration is unavailable.
+7. **Design for intended use.** For functional parts, choose material, section thickness, connections, and orientation for expected loads and temperature exposure. Layer-dependent strength, shrinkage, and warping matter; successful slicing does not establish strength or dimensional accuracy.
+",
   "highlight": "Replace temporary Gaussian wireframe regions on the editable model loaded by viewer_load. Read mesh_state for design.path, revision and url; inspect model source to locate regions. Coordinates are model-local millimetres before viewer_transform, including part transforms. Rotation uses XYZ Euler degrees. Up to eight ellipsoids combine by maximum influence, with a fixed soft fade. All intersected surfaces, including the back, may be highlighted. Empty blobs clears. Does not edit geometry or exports. Waits for the visible viewer to acknowledge the matching highlight. Returns rendered only after acknowledgment; not_rendered or superseded is not success. Rendering is not user confirmation. Use this tool to visually ground region-specific edits and explanations of named parts. Follow the user’s requested action and clarify ambiguous intent; no special confirmation phrase is required. Use clarify-mesh-changes for guidance.",
   "instructions": "### Project type
 
@@ -47,14 +94,107 @@ The plugin provides the ability to prep and print the mesh to the user's persona
 
 ### Editable designs
 
-Create and organize independent models in \`models/<name>/model.js\`, with each model's helpers beside it. The viewer automatically discovers these folders and shows model-selection controls. Call \`viewer_load\` with a model's path to bring it into view; use \`mesh_state\` to see the available models and current selection. Keep existing models when adding another.
+Use background Blender Python scripts for mesh creation and editing, and Three.js for viewing and iteration. Call \`blender_status\`, then read the \`blender-modeling\` skill. Keep editable \`.blend\` originals and immutable revisions under \`models/<name>/revisions/\`; publish \`models/<name>/model.glb\` with the provided helper. Preserve existing models when adding another. The viewer discovers model folders and reloads completed GLB exports automatically.
 
-Each entry exports synchronous \`build(THREE)\` returning a fresh Mesh or Group. Use millimetres and Z up. Edits to \`.js\` and \`.mjs\` files under the entry directory reload automatically while the preview is open. Relative imports need file extensions; pass THREE into helpers instead of importing a package. Keep named parts and adjustable dimensions in source. Do not modify the viewer or create cameras, lights, controls, DOM elements, timers, or background work in the model.
+Blender works in metres, Z up. Standard GLB files use metres, Y up; the viewer converts them to millimetres, Z up. Cursor and highlight regions are model-local millimetres before viewer placement: divide by 1,000 for Blender and respect object transforms. Keep named parts and modifiers. Use the existing shell tool to execute scripts with Blender's \`--background --python-exit-code 1 --python\` options; no Blender window is needed.
 
-Use \`viewer_transform\` for whole-design placement and \`viewer_camera\` for the viewing angle. Read \`mesh_state\` for build errors and measurements. A failed edit keeps the last successful preview; fix the source to recover. Preview checks do not establish print readiness.
+Call \`viewer_load\` with a GLB path to bring it into view; use \`mesh_state\` for models, selection, load errors and measurements. Self-contained static GLB previews support at most 64 MiB and 200,000 triangles. Keep detailed print originals when explicitly making a lighter preview. Failed exports or loads retain the last successful preview and are not completed edits. Use \`viewer_transform\` for placement and \`viewer_camera\` for the viewing angle. Preview checks do not establish print readiness.
+
+Existing \`model.js\`/\`model.mjs\` designs exporting synchronous \`build(THREE)\` remain supported, in millimetres and Z up. Preserve them when migrating their actual geometry into Blender. Do not modify the viewer or approximate an existing model from a screenshot.
 ",
-  "load": "Select and show a project JavaScript model in the 3D viewer. Organize independent models as models/<name>/model.js; the viewer discovers them automatically. Export synchronous build(THREE) returning a Mesh or Group. Use millimetres and Z up. Relative .js/.mjs imports inside the entry file’s folder are supported; pass THREE to helpers. The visible viewer automatically reloads source edits. The viewer owns camera, lighting and controls; do not edit its implementation. Code executes in the renderer: keep builds synchronous and free of DOM access, timers and other side effects. Read mesh_state for build errors and measurements after the viewer loads it. Loading does not certify print readiness.",
-  "state": "Read the 3D preview scene without changing it: every object, its placement, and the measurements of its composed mesh. Includes discovered models and the selected model. Saved JavaScript models reload when the viewer opens; STL scene objects remain in memory. Read this tool instead of assuming what is on screen.",
+  "load": "Select a Blender-exported GLB in the Three.js viewer. Use models/<name>/model.glb; the viewer discovers these entries and reloads completed exports automatically. GLB uses standard metres and Y up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. Self-contained static GLB only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Legacy .js/.mjs entries exporting synchronous build(THREE) remain supported in millimetres and Z up. Read mesh_state for load errors and measurements. Loading does not certify print readiness.",
+  "printer": "---
+name: printer-awareness
+description: Retrieve printer identity, connectivity, live state, filament and machine-profile limits before answering printer questions or making printer-specific design and fit decisions.
+---
+
+# Printer awareness
+
+Use observed printer facts for design constraints. A modeling request alone does not select a printer, nozzle mode, filament or build volume. Continue a visual draft when printer details are unavailable; leave print fit unverified.
+
+## Retrieve the relevant facts
+
+- Call \`print_studio_status\` for the configured printer, discovered devices, LAN reachability and \`slicer.profiles.root\`. A configured model is saved configuration; compare it with discovered identity before selecting a machine profile. If discovery cannot confirm it, label it configured rather than detected. Profile availability and setup \`ready\` do not establish that a particular job can print.
+- Call \`print_studio_progress\` for live job state, temperatures, reported nozzle diameter, AMS trays and errors. Null, absent or incomplete fields mean unknown, not zero, empty or idle. Report when the reading was obtained; refresh live readings when answering a new status question or preparing a job. Older conversation results are historical.
+- If the printer does not answer, say it is unreachable and its power state is unknown. A successful current report establishes that it is responding; failed discovery or a closed port cannot establish that it is powered off. Use \`print-studio-setup\` for missing configuration or rejected access. Do not repeatedly retry a failed probe without a relevant change.
+- Read the applicable Bambu Studio machine profile under the returned \`slicer.profiles.root\` through the file/shell tools. Match the confirmed or explicitly selected model, nozzle diameter and single/dual-nozzle mode; installed profiles alone do not identify the active selection. Follow named \`inherits\` profiles and apply child and explicit job overrides. Inspect \`printable_area\`, \`printable_height\`, \`bed_exclude_area\`, nozzle-specific limits and applicable plate/process settings. Preserve the source paths and selected mode when reporting derived dimensions. If the selection or inheritance cannot be resolved, report the missing fact; ask only when it blocks the requested print decision.
+
+Bambu Studio's documented CLI is for slicing and export, not a live-status command. Use the existing Print Studio tools for live telemetry; do not invent CLI flags or install a separate CLI to answer status questions. Keep access codes and tokens in the credential service, out of scripts, shell arguments and chat.
+
+## Apply facts to the model
+
+Pass \`buildVolume\` to \`viewer_load\` or \`mesh_open\` only from an applicable profile or dimensions explicitly supplied by the user. Name that source. Never substitute a familiar printer size, a test-print preset or an existing viewer box for the selected printer's limits. The viewer box is a rectangular envelope; it does not encode excluded areas or different nozzle reach. Check those separately and use the slicer for final placement validation. An inherited viewer box is not evidence of printer fit; omitting \`buildVolume\` retains an existing box, so disclose an unverified retained envelope rather than relying on it.
+
+Do not scale or split a design to satisfy an assumed envelope. Separate the measured model dimensions from the printer constraints. A material preset describes slicing settings, not a loaded spool. Report AMS material/color/remaining values as printer-reported; unavailable remaining amounts, external-spool details and physical plate identity stay unknown. Tray IDs may repeat across AMS units in the current tool output; do not guess a physical slot or nozzle mapping from an ambiguous ID. Ask the user to identify the intended filament when that choice matters.
+
+Checking status does not authorize heating, motion, filament loading, calibration or printing. Preserve the existing confirmation flow for sending a prepared print. Present the relevant facts and uncertainties in plain language rather than dumping raw telemetry.
+",
+  "setup": "---
+name: print-studio-setup
+description: "Set up and diagnose Print Studio: Bambu Studio, H2D LAN mode, access code, and print readiness."
+---
+
+# Print Studio setup
+
+Use this skill whenever a person asks to set up, fix, or check the 3D printer, or when
+\`print_studio_status\` reports something missing. Call \`print_studio_status\` first and
+work from its \`nextSteps\`; do not guess.
+
+## What Print Studio needs
+
+- **Bambu Studio** — the slicer for the H2D.
+- **A printer on the same network** — Print Studio finds its IP address and serial
+  number; the LAN access code is fetched after the adult signs in to Bambu.
+- **A test slice** — a small cube, before anything is printed.
+
+## If the slicer is missing
+
+1. Tell the adult to install Bambu Studio from
+   https://bambulab.com/en/download/studio
+2. Open it once so it writes the H2D profiles.
+3. Re-run \`print_studio_status\`; do not claim it is installed until the probe finds it.
+
+Do not download or install applications yourself.
+
+## Signing in does not require LAN mode
+
+Print Studio talks to the printer's local MQTT and FTPS ports. Bambu Cloud sign-in is used only to retrieve the LAN access code; printing stays local. A printer reporting \`DevConnect: cloud\` can still accept local access after that sign-in. Only if the code is rejected should the adult enable **LAN Only Mode** on the printer, and **Developer Mode** if the firmware shows that switch.
+Ask the adult to use the **Sign in with Bambu** button. Never ask them to paste account credentials into chat.
+
+## If the printer is not configured
+
+1. Print Studio finds the printer and its IP/serial automatically.
+2. The adult signs in once with their Bambu account in **Plugins → Print Studio**;
+   Print Studio fetches the printer's access code from the bound-device list. Never
+   ask for the account password or the access code in chat.
+3. Re-run \`print_studio_status\` and confirm the access code was accepted before
+   proceeding.
+
+If the printer is on a different network or the ports are blocked, say so and stop;
+do not fall back to cloud printing.
+
+## If the H2D profiles are missing
+
+Open Bambu Studio once with the H2D selected so it writes its machine/process/filament
+presets, then re-run \`print_studio_status\`. If Bambu Studio is too old for the H2D,
+ask the adult to update it.
+
+## Before any print
+
+- Use \`printer-awareness\` to resolve the selected machine profile, nozzle mode and loaded filament. Do not infer these from installed presets.
+- Call \`mesh_state\` before saying what the preview shows. Load editable GLB or JavaScript models with \`viewer_load\`, or STL with \`mesh_open\`; pass only a verified build envelope. The viewer's rectangular box does not include every nozzle or exclusion constraint.
+- Use \`viewer_transform\` for editable-model placement or \`mesh_transform\` for STL scene placement. Opening the same STL again adds a second copy.
+- Follow \`fdm-design\` for geometry, bed attachment, supports and slicer validation. Preview checks do not establish print readiness.
+- Ask the adult which loaded AMS filament to use.
+- Never send a print without the adult confirming the prepared job.
+
+## Reporting
+
+Speak in plain language and name the one next step. Do not dump raw JSON at the person;
+translate the status into "Bambu Studio is installed, the printer is not connected yet",
+and so on.
+",
+  "state": "Read the 3D preview scene without changing it: every object, its placement, and the measurements of its composed mesh. Includes discovered models and the selected model. Saved GLB and JavaScript models reload when the viewer opens; STL scene objects remain in memory. Read this tool instead of assuming what is on screen.",
 }
 `;
 

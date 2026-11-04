@@ -1,10 +1,12 @@
 /** Validate the assembled application, including native Office conversion outside ASAR. */
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { desktopArtifactOutput, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
 import { readDesktopRuntime, verifyDesktopRuntime } from '../src/runtime-tree.ts'
 import { verifyWindowsCode } from './windows-runtime-signature.mjs'
 import { smokePreparedRuntime } from './smoke-prepared-runtime.ts'
+import { smokeBlenderRuntime } from './prepare-blender-runtime.ts'
 import { resolveDesktopPackageTarget } from './package-target.ts'
 
 const paths = resolveDesktopTargetBuildPaths()
@@ -20,3 +22,6 @@ const descriptor = await verifyDesktopRuntime(paths.dsh, readDesktopRuntime(path
   resolveDesktopPackageTarget(target))
 if (windows && !values.unsigned) await verifyWindowsCode(application)
 await smokePreparedRuntime(join(resources, 'app.asar', 'dsh'), executable, join(resources, 'runtime'), descriptor)
+smokeBlenderRuntime(resources, target)
+if (!windows) execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', join(application, '..')], { stdio: 'pipe' })
+console.log('Rumi runtime: bundled Blender editing and GLB export passed')

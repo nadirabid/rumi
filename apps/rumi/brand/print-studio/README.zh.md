@@ -14,6 +14,8 @@
 
 打印机 IP 和序列号存储在 `$DSH_HOME/print-studio/printer.json` 中，仅所有者可访问。局域网访问码通过 `ctx.credentials` 存储为 `BAMBU_LAN_ACCESS_CODE`；它不会返回给客户端，也不会写入配置补丁。
 
+[打印机感知技能](skills/printer-awareness/SKILL.md)将实时状态工具和已安装的机器配置用于打印机相关决策，保留未知读数，并要求打印空间具有明确来源。
+
 ## 测试打印
 
 `POST /api/print-studio/print/test`（以及 `print_studio_print_test` 工具）使用 Bambu Studio 对内置的 10 x 10 x 1.2 mm 测试块进行切片，设置 H2D 双挤出机项目和 Supertack 打印板，并将切片后的 3MF 交给 Bambu Connect。Bambu Connect 要求成年人点击**发送**；macOS 上没有支持这一步最终授权的 API。`GET /api/print-studio/print/status` 和 `print_studio_progress` 通过本地 MQTT 读取进度、层数、温度、AMS 和错误。
@@ -68,6 +70,14 @@ Print Studio 验证返回消息，通过 Bambu 的票据端点交换票据，并
 主机和客户端入口、发现逻辑、云协议、原生登录窗口、沙箱中的 Bambu preload、网格查看器和行为测试都位于此包中。`desktop/` 通过 `tsconfig.desktop.json` 单独为 Electron 编译，不由 Cordis 主机导入。Rumi 通过私有包导入组合此适配器，并打包其 preload。应用仅保留经过验证的 IPC 入口、主窗口所有权和 preload 暴露接口。`apps/rumi/tests/print-studio.spec.ts` 将包内测试纳入上游测试发现范围。可执行文件 UUID 的分配属于 Rumi 打包流程，因为它影响所有原生能力。
 
 <a id="editable-threejs-models"></a>
+## Blender 编辑和 GLB 预览
+
+新建模型和网格编辑通过现有 shell 工具及其权限运行本地 Blender 后台 Python 脚本。打包后的 Rumi 在 `Resources/runtime/blender` 中包含 Blender；应用更新会将该运行时替换为固定版本。`blender_status` 默认使用内置运行时，安装损坏时报告错误，不会静默回退到独立安装。显式配置的 `blenderExecutable` 优先于自动发现。开发检出可使用 `blenderHome/tools/blender/Blender.app`、`/Applications/Blender.app` 或用户的 Applications 文件夹；`blenderHome` 默认为 `DSH_RUMI_HOME` 或 `~/.rumi`。随附的 [blender-modeling 技能](skills/blender-modeling/SKILL.md) 定义代理工作流程；状态工具返回已安装导出辅助脚本的路径。
+
+辅助脚本在 `models/<name>/revisions/` 下保存不可变的 `.blend`、GLB 和测量版本，然后原子替换 `model.glb`。脚本启动完整的 Blender 进程，但不打开窗口。Blender 坐标以米为单位、Z 轴向上；标准 GLB 以米为单位、Y 轴向上。Three.js 将 GLB 转换为毫米、Z 轴向上，并保留名称、法线和材质。因此光标快照与高亮仍使用和 JavaScript 设计相同的模型局部毫米坐标。Blender 编辑须考虑对象变换，并将这些坐标除以 1,000。辅助脚本在可编辑原件中保留修改器，在查看导出文件中应用修改器。导出失败时保留上一份预览；不完整的版本文件保留供诊断。
+
+`viewer_load` 接受项目内的独立静态 GLB 文件，限制为 64 MiB 和 200,000 个可见三角形。拒绝外部资源、动画、蒙皮和必需扩展。在明确制作轻量预览时必须另行保留详细资产。查看器在同一目录内优先发现 `models/<name>/model.glb`，其次是 JavaScript 入口，并在两次相同的轮询后重新加载已完成的导出。不可变快照 URL 为光标捕获和代理高亮保留版本身份。无效导出会保留上次成功的预览并报告错误。这些检查不能证明模型已可打印。
+
 ## 可编辑的 Three.js 模型
 
 将每个独立模型保存在 `models/<name>/model.js`（或 `model.mjs`）中，辅助文件放在同一目录内。查看器会自动发现这些入口，以文件夹名标记圆角玻璃按钮，并在下次轮询时发现新增或删除的模型。即使只有一个模型，每个按钮也保留清晰的边框和阴影。使用入口路径调用 `viewer_load` 可将该模型显示在视图中；`mesh_state` 列出已发现的模型及当前选择。现有的 `source/model.js` 仍可被发现。模块导出同步的 `build(THREE)` 函数，返回新的 `THREE.Mesh` 或 `THREE.Group`。单位为毫米，Z 轴向上。向 `viewer_load` 传入 `buildVolume` 可显示打印空间并启用适配检查；省略时保留当前打印上下文。[桌子示例](assets/example-model.js) 展示了命名部件、共享几何数据、材质和参数。

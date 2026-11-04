@@ -7,6 +7,8 @@ description: Apply FDM design constraints when creating or modifying meshes inte
 
 Preserve the requested design while considering these constraints. They guide design; this skill does not run checks or certify print readiness.
 
+Use `printer-awareness` to obtain the selected printer, nozzle and material facts before applying printer-specific constraints.
+
 ## Core constraints
 
 1. **Represent the intended solid.** Use explicit units, finite coordinates, and nondegenerate triangles. Each intended solid should have a closed, consistently oriented surface without self-intersections or nonmanifold connections. Slicer repair is not evidence that the intended geometry was preserved.

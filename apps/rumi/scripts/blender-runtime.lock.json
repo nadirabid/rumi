@@ -1,0 +1,21 @@
+{
+  "version": "4.5.15",
+  "source": {
+    "url": "https://mirror.blender.org/source/blender-4.5.15.tar.xz",
+    "sha256": "9c72bf73b5bf59890fd44e1320c3af308a2998db0cb330d68d5bd54cc8687e06"
+  },
+  "targets": {
+    "mac-arm64": {
+      "filename": "blender-4.5.15-macos-arm64.dmg",
+      "sha256": "bfbc0bda099d1ab7aef0992a584f872f58bed9bb491210ad45f9ca071aa2e688"
+    },
+    "mac-x64": {
+      "filename": "blender-4.5.15-macos-x64.dmg",
+      "sha256": "3801a97619292a012ede0e855ee705ae872a680474845297b777254f7f21ed78"
+    },
+    "win-x64": {
+      "filename": "blender-4.5.15-windows-x64.zip",
+      "sha256": "52dd02fd74877fa08e74b67d7854cf32468a232c02aaa19b6844c91285574f8d"
+    }
+  }
+}

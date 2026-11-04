@@ -22,6 +22,7 @@ import { loginMessageToken, accessCodeFor, devices as cloudDevices } from './clo
 import { sliceMesh } from './slicer.js'
 import { handoffToBambuConnect, hasBambuConnect } from './connect.js'
 import { readPrinterStatus } from './monitor.js'
+import { applyBlender } from './blender/host.js'
 import { applyViewer } from './viewer/host.js'
 
 /** The plugin row id, also the card identity. */
@@ -29,6 +30,8 @@ export const name = 'print-studio'
 
 /** Local diagnostics for renderer acknowledgment failures. */
 export const Config = z.object({
+  blenderExecutable: z.string().default(''),
+  blenderHome: z.string().default(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi')),
   viewerDiagnosticsDirectory: z.string().default(join(homedir(), '.rumi', 'viewer-logs')),
 })
 
@@ -201,6 +204,7 @@ const PRINT_TYPE = {
  */
 export function apply(ctx, config) {
   applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory)
+  applyBlender(ctx, defineTool, config)
   // A project-type plugin contributes; it does not own the creation flow.
   ctx.inject(['rumiProjectTypes'], (scoped) => {
     scoped.effect(() => scoped.rumiProjectTypes.register(PRINT_TYPE), 'print-studio: project type')

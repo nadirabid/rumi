@@ -1,3 +1,4 @@
+import { loadGlbModel } from './glb.js'
 /**
  * Three.js viewport: owns rendering, model replacement, and GPU resources.
  *
@@ -297,9 +298,13 @@ export function createViewport(element, onFailure) {
       const request = ++generation
       designPending = (async () => {
         try {
-          const module = await import(/* @vite-ignore */ spec.url)
-          if (closed || request !== generation) return null
-          const next = buildModel(module.build)
+          let next
+          if (spec.format === 'glb') next = await loadGlbModel(spec.url)
+          else {
+            const module = await import(/* @vite-ignore */ spec.url)
+            if (closed || request !== generation) return null
+            next = buildModel(module.build)
+          }
           if (closed || request !== generation) { disposeModel(next.root); return null }
           // Validate placement before replacing the last successful design.
           placeMesh(next.positions, designSpec.transform)

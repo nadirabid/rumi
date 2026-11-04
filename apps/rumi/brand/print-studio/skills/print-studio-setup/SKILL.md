@@ -50,16 +50,10 @@ ask the adult to update it.
 
 ## Before any print
 
-- Call `mesh_state` before saying what the preview shows. Saved JavaScript models reload
-  when the viewer opens; imported STL scene objects do not survive a restart.
-- Show the model with `mesh_open` and pass the envelope you are printing in:
-  `buildVolume: { x: 300, y: 320, z: 320 }` for the dual nozzle, or
-  `{ x: 325, y: 320, z: 325 }` for a single nozzle. The panel opens for the person and
-  the result reports fit, a suggested scale, and whether a rotation would fit.
-- Place it with `mesh_transform` (scale, rotate in degrees, position in millimetres) rather
-  than rewriting the file. Opening the same file again adds a second copy.
-- Confirm it is watertight, has a flat base, and no unsupported overhangs. Every check
-  is a measurement; none of them means the model will slice or print.
+- Use `printer-awareness` to resolve the selected machine profile, nozzle mode and loaded filament. Do not infer these from installed presets.
+- Call `mesh_state` before saying what the preview shows. Load editable GLB or JavaScript models with `viewer_load`, or STL with `mesh_open`; pass only a verified build envelope. The viewer's rectangular box does not include every nozzle or exclusion constraint.
+- Use `viewer_transform` for editable-model placement or `mesh_transform` for STL scene placement. Opening the same STL again adds a second copy.
+- Follow `fdm-design` for geometry, bed attachment, supports and slicer validation. Preview checks do not establish print readiness.
 - Ask the adult which loaded AMS filament to use.
 - Never send a print without the adult confirming the prepared job.
 

@@ -479,13 +479,14 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_load',
-    description: 'Select and show a project JavaScript model in the 3D viewer. Organize independent models as models/<name>/model.js; the viewer discovers them automatically. Export synchronous build(THREE) returning a Mesh or Group. '
-      + 'Use millimetres and Z up. Relative .js/.mjs imports inside the entry file’s folder are supported; pass THREE to helpers. '
-      + 'The visible viewer automatically reloads source edits. The viewer owns camera, lighting and controls; do not edit its implementation. '
-      + 'Code executes in the renderer: keep builds synchronous and free of DOM access, timers and other side effects. '
-      + 'Read mesh_state for build errors and measurements after the viewer loads it. Loading does not certify print readiness.',
+    description: 'Select a Blender-exported GLB in the Three.js viewer. Use models/<name>/model.glb; the viewer discovers these entries and reloads completed exports automatically. '
+      + 'GLB uses standard metres and Y up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. '
+      + 'Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. '
+      + 'Self-contained static GLB only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. '
+      + 'Legacy .js/.mjs entries exporting synchronous build(THREE) remain supported in millimetres and Z up. '
+      + 'Read mesh_state for load errors and measurements. Loading does not certify print readiness.',
     parameters: {
-      path: { type: 'string', required: true, description: 'Model entry to bring into view, for example models/helmet/model.js.' },
+      path: { type: 'string', required: true, description: 'Model entry to bring into view, for example models/helmet/model.glb.' },
       buildVolume: {
         type: 'object', additionalProperties: false,
         description: 'Printable volume in millimetres. Omit to retain the scene’s current print context.',
@@ -610,7 +611,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'mesh_state',
     description: 'Read the 3D preview scene without changing it: every object, its placement, and the measurements of its composed mesh. '
-      + 'Includes discovered models and the selected model. Saved JavaScript models reload when the viewer opens; STL scene objects remain in memory. Read this tool instead of assuming what is on screen.',
+      + 'Includes discovered models and the selected model. Saved GLB and JavaScript models reload when the viewer opens; STL scene objects remain in memory. Read this tool instead of assuming what is on screen.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     isConcurrencySafe: () => true,

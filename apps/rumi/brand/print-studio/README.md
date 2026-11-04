@@ -14,6 +14,8 @@ The host half discovers the printer over SSDP, exposes `GET /api/print-studio/st
 
 Printer IP and serial are stored in `$DSH_HOME/print-studio/printer.json` (owner-only). The LAN access code is stored through `ctx.credentials` as `BAMBU_LAN_ACCESS_CODE`; it is never returned to the client and never belongs in the profile patch.
 
+The [printer-awareness skill](skills/printer-awareness/SKILL.md) connects live status tools and installed machine profiles to printer-specific decisions, preserving unknown readings and requiring a sourced build envelope.
+
 ## Test print
 
 `POST /api/print-studio/print/test` (and the `print_studio_print_test` tool) slices the bundled 10 x 10 x 1.2 mm tile with Bambu Studio, sets the H2D dual-extruder project and the Supertack plate, and hands the sliced 3MF to Bambu Connect. Bambu Connect requires an adult to press **Send**; there is no supported API for that final authorization on macOS. `GET /api/print-studio/print/status` and `print_studio_progress` read progress, layers, temperatures, AMS, and errors over local MQTT.
@@ -66,6 +68,14 @@ The hosted page and ticket exchange were verified with a live Bambu account; re-
 ## Source ownership
 
 The host and client entrypoints, discovery, cloud protocol, native login window, sandboxed Bambu preload, mesh viewer, and behavior tests live in this package. `desktop/` is compiled separately for Electron by `tsconfig.desktop.json`; it is not imported by the Cordis host. Rumi composes this adapter through a private package import and bundles its preload. The app retains only the validated IPC entry, main-window ownership, and preload exposure. `apps/rumi/tests/print-studio.spec.ts` includes the package-owned tests in upstream test discovery. Executable UUID assignment belongs to Rumi packaging because it affects every native capability.
+
+## Blender editing and GLB previews
+
+New modeling and mesh edits use local Blender background Python scripts through the existing shell tool and its permissions. Packaged Rumi includes Blender under `Resources/runtime/blender`; app updates replace that runtime with the pinned release. `blender_status` uses it by default and reports a broken bundle rather than silently falling back to a separate installation. An explicit `blenderExecutable` overrides discovery. Development checkouts can use `blenderHome/tools/blender/Blender.app`, `/Applications/Blender.app`, or the user's Applications folder; `blenderHome` defaults to `DSH_RUMI_HOME` or `~/.rumi`. The bundled [blender-modeling skill](skills/blender-modeling/SKILL.md) owns the agent workflow; the status tool returns the installed export-helper path.
+
+The helper saves immutable `.blend`, GLB and measurement revisions under `models/<name>/revisions/`, then atomically replaces `model.glb`. Scripts run a full Blender process without opening its window. Blender coordinates are metres, Z up; standard GLB uses metres, Y up. Three.js converts GLB to millimetres, Z up, preserving names, normals and materials. Cursor snapshots and highlights therefore retain the same model-local millimetre coordinates as JavaScript designs. Blender edits must account for object transforms and divide these coordinates by 1,000. The helper retains modifiers in the editable original and applies them to the viewing export. Export failure leaves the previous preview intact; partial revision files remain available for diagnosis.
+
+`viewer_load` accepts self-contained static GLB files inside the project, limited to 64 MiB and 200,000 visible triangles. External resources, animations, skinning and required extensions are rejected. Detailed assets must be preserved separately when explicitly producing a lighter preview. The viewer discovers `models/<name>/model.glb` before JavaScript entries in the same directory and reloads completed exports after two identical polls. Immutable snapshot URLs preserve version identity for cursor capture and agent highlights. Invalid exports retain the last successful preview and report an error. These checks do not establish print readiness.
 
 ## Editable Three.js models
 

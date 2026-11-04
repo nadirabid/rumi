@@ -1,5 +1,7 @@
 /** Copy shared by the mesh preview tab and the STL document preview. */
 export const en = {
+  cursorHighlighting: 'Cursor driven mesh highlighting',
+  cursor_patch: 'Local patch', cursor_surface: 'Surface', cursor_part: 'Whole part', cursor_edge: 'Edge',
   models: 'Models',
   catalogFailed: 'Saved models could not be loaded. Ask Rumi to check the model files.',
   selectionFailed: 'This model could not be opened. Try again or ask Rumi to check its files.',
@@ -18,6 +20,8 @@ export const en = {
 }
 
 export const zh = {
+  cursorHighlighting: '光标驱动的网格高亮',
+  cursor_patch: '局部', cursor_surface: '表面', cursor_part: '整个部件', cursor_edge: '边缘',
   models: '模型',
   catalogFailed: '无法加载已保存的模型。请让 Rumi 检查模型文件。',
   selectionFailed: '无法打开此模型。请重试，或让 Rumi 检查模型文件。',

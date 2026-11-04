@@ -49,6 +49,7 @@ async function fixture(acknowledge = true) {
   const entered = deferred<undefined>()
   const idle = deferred<undefined>()
   cleanups.push(async () => { idle.resolve(undefined) })
+  const injected: object[] = []
   let flushed = false
   const session = new Session(SessionId('s'))
   const other = new Session(SessionId('other'))
@@ -68,7 +69,7 @@ async function fixture(acknowledge = true) {
       set: async (_ref: string, value: string) => { key = value },
     },
     sessionController: { resolveAgent: async (id: string) => ({ agent: {
-      session: id === 'other' ? other : session, steer: () => { entered.resolve(undefined) }, whenIdle: () => idle.promise,
+      session: id === 'other' ? other : session, inject: (message: object) => injected.push(message), steer: () => { entered.resolve(undefined) }, whenIdle: () => idle.promise,
     } }) },
     sessions: { flush: async () => { flushed = true } },
   }
@@ -77,7 +78,7 @@ async function fixture(acknowledge = true) {
   const request = (path: string, body?: object) => routes.get(`/api/live-voice${path}`)!(new Request(`http://rumi${path}`, {
     method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined,
   }))
-  return { diagnosticsDirectory, owner, session, other, frames, request, started, entered, idle, flushed: () => flushed, key: () => key }
+  return { injected, registry: owner.get('liveVoice'), diagnosticsDirectory, owner, session, other, frames, request, started, entered, idle, flushed: () => flushed, key: () => key }
 }
 
 it('closes an established socket when its Cordis owner unloads', async () => {
@@ -195,4 +196,30 @@ it('retains early delegation, suppresses its automatic acknowledgment, and journ
   expect(records.filter(record => record.type === 'handoff').map(record => record.data.state)).toEqual(['received', 'waiting', 'dispatching', 'accepted'])
   expect(records.find(record => record.type === 'session.input_transcript.delta').data.delta).toBe('Highlight this area')
   expect(records.some(record => record.type === 'session.delegation.created')).toBe(true)
+})
+
+it('refines the captured reference from transcript chunks before admitting the spoken task', async () => {
+  const f = await fixture()
+  const refined = deferred<undefined>()
+  const texts: string[] = []
+  f.registry.register({
+    id: 'selection-test',
+    captureRequest: async () => [{ type: 'text', text: 'initial anchor' }],
+    refineRequest: async ({ text, content }: { text: string; content: object[] }) => {
+      texts.push(text)
+      if (text !== 'whole part') return content
+      refined.resolve(undefined)
+      return [{ type: 'text', text: 'refined original anchor' }]
+    },
+  })
+  await f.request('/session', { sessionId: 's' })
+  const socket = await f.started.promise
+  socket.send(JSON.stringify({ type: 'session.input_transcript.delta', delta: 'whole ' }))
+  socket.send(JSON.stringify({ type: 'session.input_transcript.delta', delta: 'part' }))
+  await refined.promise
+  expect(texts).toEqual(['whole ', 'whole part'])
+  socket.send(JSON.stringify({ type: 'session.delegation.created', delegation: { id: 'selection', target: 'client' } }))
+  await f.entered.promise
+  expect(JSON.stringify(f.injected)).toContain('refined original anchor')
+  expect(JSON.stringify(f.injected)).not.toContain('initial anchor')
 })

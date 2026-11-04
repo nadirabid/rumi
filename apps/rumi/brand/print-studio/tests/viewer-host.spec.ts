@@ -394,3 +394,49 @@ it('unloads while a cursor request is waiting without retaining a tool or timer'
   expect(await pending).toEqual({ status: 'viewer_unavailable' })
   expect(f.routes.size).toBe(0)
 })
+
+it('refines a spoken selection through the original cursor anchor and retains the resulting reference', async () => {
+  const f = fixture()
+  type Block = { type: 'text'; text: string } | { type: 'image'; attachment: object }
+  type Contributor = {
+    captureRequest(request: { sessionId: string; requestedAt: string; signal: AbortSignal }): Promise<Block[]>
+    refineRequest(request: { sessionId: string; text: string; content: Block[]; signal: AbortSignal }): Promise<Block[]>
+  }
+  let registered: Contributor | undefined
+  f.owner.provide('liveVoice', { register(value: Contributor) { registered = value; return () => {} } })
+  await f.run('mesh_open', { path: 'box.stl' })
+  if (!registered) throw new Error('Pointing contributor did not register')
+  const contributor = registered
+  const signal = new AbortController().signal
+  const base = '/api/print-studio/viewer'
+  async function reply(mode: string, anchorId: string, expected?: object) {
+    let pending: { cursorRequest: { id: string }; scene: { revision: number; objects: { id: string }[] } } | undefined
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const state = await (await f.request(`${base}/state?sessionId=session-a`)).json()
+      if (state.cursorRequest) { pending = state; break }
+    }
+    if (!pending) throw new Error('Viewer did not receive the cursor request')
+    if (expected) expect(pending.cursorRequest).toMatchObject(expected)
+    const snapshot = { status: 'captured', capturedAt: new Date().toISOString(),
+      identity: { sceneRevision: pending.scene.revision, design: null },
+      region: { objectId: pending.scene.objects[0].id, partPath: ['box'], faceIndex: 0,
+        worldPoint: [1, 2, 3], worldRadius: 4, modelLocalBlob: null,
+        selection: { partPath: ['box'], surfaceId: 1, mode }, anchorId },
+      camera: { position: [0, 0, 10], target: [0, 0, 0], up: [0, 0, 1], fov: 40, aspect: 1 },
+      image: 'data:image/png;base64,cG5n' }
+    const result = await f.routes.get(`${base}/cursor`)!(new Request(`http://rumi${base}/cursor?sessionId=session-a`, {
+      method: 'POST', body: JSON.stringify({ requestId: pending.cursorRequest.id, snapshot }),
+    }))
+    expect(result.status).toBe(200)
+  }
+  const capture = contributor.captureRequest({ sessionId: 'session-a', requestedAt: new Date().toISOString(), signal })
+  await reply('patch', 'original')
+  const content = await capture
+  const refinement = contributor.refineRequest({ sessionId: 'session-a', text: 'whole panel', content, signal })
+  await reply('surface', 'refined', { command: 'surface', anchorId: 'original' })
+  const refined = await refinement
+  if (refined[0].type !== 'text') throw new Error('Missing refined reference')
+  expect(JSON.parse(refined[0].text).snapshot.region.selection.mode).toBe('surface')
+  expect(refined.filter(part => part.type === 'image')).toHaveLength(1)
+  expect(await contributor.refineRequest({ sessionId: 'session-a', text: 'whole panel', content: refined, signal })).toBe(refined)
+})

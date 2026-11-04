@@ -162,6 +162,20 @@ it('shows a cancellable pending state until ready, then places mute left and rev
   await act(async () => { f.ready.resolve(new Response(JSON.stringify({ events: [{ type: 'ready' }] }))) })
   expect(voice.getAttribute('aria-busy')).toBe('false')
   const mute = screen.getByRole('button', { name: 'Mute microphone' })
+  expect(mute.textContent).toBe('')
+  expect(mute.querySelector('line')).toBeNull()
+  fireEvent.click(mute)
+  expect(screen.getByRole('button', { name: 'Unmute microphone' })).toBe(mute)
+  expect({ label: mute.textContent, muted: mute.getAttribute('aria-pressed') }).toMatchInlineSnapshot(`
+    {
+      "label": "",
+      "muted": "true",
+    }
+  `)
+  expect(mute.querySelector('line')).not.toBeNull()
+  fireEvent.keyDown(mute, { key: 'Enter' })
+  expect(screen.getByRole('button', { name: 'Mute microphone' }).textContent).toBe('')
+  expect(mute.querySelector('line')).toBeNull()
   expect(mute.nextElementSibling).toBe(voice)
   expect(voice.parentElement!.lastElementChild).toBe(voice)
   expect(voice.getAttribute('aria-pressed')).toBe('true')

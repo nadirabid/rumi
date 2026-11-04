@@ -45,6 +45,8 @@ Voice instructions require visual highlights for referenced model parts and plai
 
 ## Handoff evidence
 
+The default frontend prompt uses GPT-Live’s explicit `Generate <|SpawnThinking|>` instruction for backend requests, short answers to task questions, and corrections. Custom `instructions` replace that policy and must retain the delegation instruction; see the [OpenAI prompting guide](https://developers.openai.com/api/docs/guides/live-prompting#delegation). Prompt instructions guide model behavior; only a received delegation and host acceptance establish that work was submitted.
+
 On delegation, the host immediately sends a silent thinking update to suppress the pending automatic acknowledgment. `acknowledgementDelayMs` defaults to 800 ms. This does not stop speech already generated or independent model speech. Voice instructions prohibit claiming acceptance before the host reports it and prohibit claiming a visible highlight before a `rendered` tool result.
 
 An early delegation waits up to `transcriptWaitMs` (default 5,000 ms) for nonempty transcript text instead of being discarded. Duplicate IDs do not submit twice. Transcript fragments are not guaranteed to be complete utterances; ambiguous instructions still need clarification. A missing transcript reports failure. The host allows `handoffTimeoutMs` (default 10,000 ms) for agent resolution and reference capture; work that resolves after timeout cannot be submitted. Closing voice cancels pending transcript waits and prevents unsubmitted work from starting.

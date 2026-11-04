@@ -51,6 +51,8 @@ Harness 轮次运行期间，主机跟踪会话事件，每隔几秒最多发送
 
 ## 委派证据
 
+默认前端提示对后端请求、任务问题的简短回答和纠正使用 GPT-Live 明确的 `Generate <|SpawnThinking|>` 指令。自定义 `instructions` 会替换此策略，必须保留委派指令；参见 [OpenAI 提示指南](https://developers.openai.com/api/docs/guides/live-prompting#delegation)。提示指令只能引导模型行为；只有收到委派事件并获得主机接收确认，才能认定工作已提交。
+
 收到委派时，主机立即发送静默 thinking 更新，以抑制待发送的自动确认。`acknowledgementDelayMs` 默认 800 毫秒；它不会停止已经生成的语音或模型独立发言。语音指令禁止在主机确认前声称请求已接收，也禁止在工具返回 `rendered` 前声称高亮已显示。
 
 过早到达的委派会等待非空转录文字，最多等待 `transcriptWaitMs`（默认 5,000 毫秒），不会直接丢弃。重复 ID 不会重复提交。转录片段不一定是完整话语，含糊请求仍需澄清。文字未到达会明确报告失败。主机等待 agent 解析和引用捕获的期限为 `handoffTimeoutMs`（默认 10,000 毫秒）；超时后才完成的操作不会提交。关闭语音会取消文字等待并阻止未提交工作开始。

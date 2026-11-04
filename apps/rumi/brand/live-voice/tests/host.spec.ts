@@ -50,6 +50,7 @@ async function fixture(acknowledge = true) {
   const idle = deferred<undefined>()
   cleanups.push(async () => { idle.resolve(undefined) })
   const injected: object[] = []
+  const steered: object[] = []
   let flushed = false
   const session = new Session(SessionId('s'))
   const other = new Session(SessionId('other'))
@@ -69,7 +70,7 @@ async function fixture(acknowledge = true) {
       set: async (_ref: string, value: string) => { key = value },
     },
     sessionController: { resolveAgent: async (id: string) => ({ agent: {
-      session: id === 'other' ? other : session, inject: (message: object) => injected.push(message), steer: () => { entered.resolve(undefined) }, whenIdle: () => idle.promise,
+      session: id === 'other' ? other : session, inject: (message: object) => injected.push(message), steer: (message: object) => { steered.push(message); entered.resolve(undefined) }, whenIdle: () => idle.promise,
     } }) },
     sessions: { flush: async () => { flushed = true } },
   }
@@ -78,7 +79,7 @@ async function fixture(acknowledge = true) {
   const request = (path: string, body?: object) => routes.get(`/api/live-voice${path}`)!(new Request(`http://rumi${path}`, {
     method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined,
   }))
-  return { injected, registry: owner.get('liveVoice'), diagnosticsDirectory, owner, session, other, frames, request, started, entered, idle, flushed: () => flushed, key: () => key }
+  return { injected, steered, registry: owner.get('liveVoice'), diagnosticsDirectory, owner, session, other, frames, request, started, entered, idle, flushed: () => flushed, key: () => key }
 }
 
 it('closes an established socket when its Cordis owner unloads', async () => {
@@ -223,3 +224,20 @@ it('refines the captured reference from transcript chunks before admitting the s
   expect(JSON.stringify(f.injected)).toContain('refined original anchor')
   expect(JSON.stringify(f.injected)).not.toContain('initial anchor')
 })
+
+it.each(['Probably just the back, let’s see', 'Yes, do it', 'Leave the crown alone'])(
+  'sends the Live delegation policy and admits the follow-up %s unchanged', async (text) => {
+    const f = await fixture()
+    await f.request('/session', { sessionId: 's' })
+    const instructions = f.frames.find(frame => frame.type === 'session.start')?.session?.instructions
+    expect(instructions).toContain('Generate <|SpawnThinking|> when:')
+    expect(instructions).toContain('Do not generate <|SpawnThinking|> when:')
+    expect(instructions).toContain('including short replies')
+    const socket = await f.started.promise
+    socket.send(JSON.stringify({ type: 'session.input_transcript.delta', delta: text }))
+    socket.send(JSON.stringify({ type: 'session.delegation.created', delegation: { id: 'follow-up', target: 'client' } }))
+    await f.entered.promise
+    expect(f.steered).toHaveLength(1)
+    expect(JSON.stringify(f.steered)).toContain(text)
+  },
+)

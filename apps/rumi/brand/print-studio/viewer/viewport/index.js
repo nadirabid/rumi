@@ -1,3 +1,4 @@
+import { createShapeDeformer } from '../analog/gpu.js'
 import { loadGlbModel } from './glb.js'
 /**
  * Three.js viewport: owns rendering, model replacement, and GPU resources.
@@ -44,6 +45,9 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
   const designRoot = new THREE.Group()
   designRoot.matrixAutoUpdate = false
   scene.add(designRoot)
+  let shapeDeformer = null, shapeId = null, shapeFrame = null, shapeValues = null, inputTime = 0
+  const shapeMetrics = { frames: 0, maxInputToDrawMs: 0, lastDrawMs: 0 }
+  function clearShape() { if (shapeFrame !== null) cancelAnimationFrame(shapeFrame); shapeFrame = null; shapeDeformer?.dispose(); shapeDeformer = null; shapeId = null }
   let highlightOverlay = null, highlightId = null, highlightVisible = true
   let design = null, designUrl = null, requestedUrl = null, generation = 0, cameraCommand = null
   let sceneRevision = 0
@@ -63,7 +67,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
   const lost = (event) => { event.preventDefault(); onFailure() }
   const render = () => { if (!closed) renderer.render(scene, camera) }
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.domElement.setAttribute('aria-hidden', 'true')
   element.appendChild(renderer.domElement)
@@ -77,7 +81,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
   scene.add(light)
 
   const hover = createHover(renderer.domElement, camera,
-    () => [...objects.values()].map(entry => entry.mesh).concat(design ? [design.root] : []), render, onCursorMode)
+    () => shapeDeformer ? [] : [...objects.values()].map(entry => entry.mesh).concat(design ? [design.root] : []), render, onCursorMode)
   const cameraChanged = () => { if (!hover.invalidate()) render() }
 
   function clearVolume() {
@@ -187,13 +191,38 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
   }
 
   return {
+    applyShape(spec) {
+      if (!spec) { clearShape(); syncHighlight(); render(); return null }
+      if (!design) throw new Error('Load the model before its shape controls')
+      if (spec.id !== shapeId) {
+        clearShape(); hover.clear(); syncHighlight()
+        shapeDeformer = createShapeDeformer(design.root, spec); shapeId = spec.id
+        shapeMetrics.frames = 0; shapeMetrics.maxInputToDrawMs = 0; shapeMetrics.lastDrawMs = 0
+      }
+      shapeDeformer.setGuideVisible?.(!spec.frozen && highlightVisible)
+      shapeDeformer.update(spec.values); render()
+      return document.hidden ? null : shapeId
+    },
+    updateShape(values) {
+      if (!shapeDeformer) return
+      shapeValues = values; inputTime = performance.now()
+      if (shapeFrame !== null) return
+      shapeFrame = requestAnimationFrame(() => {
+        shapeFrame = null
+        if (!shapeDeformer || closed) return
+        const started = performance.now(); shapeDeformer.update(shapeValues); render()
+        shapeMetrics.frames++; shapeMetrics.lastDrawMs = performance.now() - started
+        shapeMetrics.maxInputToDrawMs = Math.max(shapeMetrics.maxInputToDrawMs, performance.now() - inputTime)
+      })
+    },
+    shapeMetrics: () => ({ ...shapeMetrics }),
     /** The highlight drawn by the visible viewport, or null when it cannot be acknowledged. */
     renderedHighlight() {
       return !closed && !document.hidden && highlightVisible && designUrl === designSpec?.url ? highlightId : null
     },
     /** Capture the live cursor region and current camera view; no previous hover is reused. */
     captureCursor(request = {}) {
-      if (closed || document.hidden) return { status: 'viewer_unavailable' }
+      if (closed || document.hidden || shapeDeformer) return { status: 'viewer_unavailable' }
       if (design && designUrl !== designSpec?.url) return { status: 'stale_view' }
       const anchor = request.anchorId ? cursorAnchors.get(request.anchorId) : null
       const identityKey = JSON.stringify([sceneRevision, designUrl, designSpec?.transform])
@@ -247,12 +276,13 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
     /** Set local presentation visibility without confirming the proposed region. */
     setHighlightVisible(visible) {
       highlightVisible = visible
+      shapeDeformer?.setGuideVisible?.(visible && !designSpec?.analog?.frozen)
       if (highlightOverlay) highlightOverlay.setVisible(visible)
       render()
     },
     /** Capture a fitted 480 × 320 PNG using the loaded geometry; restore the interactive viewport. */
     thumbnail() {
-      if (closed || (objects.size === 0 && !design)) return null
+      if (closed || shapeDeformer || (objects.size === 0 && !design)) return null
       const bounds = new THREE.Box3()
       for (const { mesh } of objects.values()) bounds.expandByObject(mesh)
       if (design) bounds.expandByObject(designRoot)
@@ -295,8 +325,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
       designVolume = volume
       if (!spec) {
         generation++
-        clearHighlight()
-        if (design) { designRoot.remove(design.root); disposeModel(design.root) }
+        clearShape(); clearHighlight()
+        if (design) { designRoot.remove(design.root); clearShape(); disposeModel(design.root) }
         measurement = null; design = null; designUrl = null; requestedUrl = null
         render()
         return null
@@ -319,8 +349,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
           if (closed || request !== generation) { disposeModel(next.root); return null }
           // Validate placement before replacing the last successful design.
           placeMesh(next.positions, designSpec.transform)
-          clearHighlight()
-          if (design) { designRoot.remove(design.root); disposeModel(design.root) }
+          clearShape(); clearHighlight()
+          if (design) { designRoot.remove(design.root); clearShape(); disposeModel(design.root) }
           design = next
           designUrl = spec.url
           designRoot.add(next.root)
@@ -394,13 +424,14 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
       render()
     },
     dispose() {
+      clearShape()
       if (closed) return
       closed = true
       generation++
       hover.dispose()
       cursorAnchors.clear()
       clearHighlight()
-      if (design) disposeModel(design.root)
+      if (design) { clearShape(); disposeModel(design.root) }
       design = null
       measurement = null
       observer.disconnect()

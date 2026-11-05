@@ -24,6 +24,7 @@ import { handoffToBambuConnect, hasBambuConnect } from './connect.js'
 import { readPrinterStatus } from './monitor.js'
 import { applyBlender } from './blender/host.js'
 import { applyViewer } from './viewer/host.js'
+import * as analogWorkflow from './viewer/analog/workflow.js'
 
 /** The plugin row id, also the card identity. */
 export const name = 'print-studio'
@@ -203,6 +204,7 @@ const PRINT_TYPE = {
  * @param {object} config - Resolved plugin configuration.
  */
 export function apply(ctx, config) {
+  ctx.plugin(analogWorkflow)
   applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory)
   applyBlender(ctx, defineTool, config)
   // A project-type plugin contributes; it does not own the creation flow.

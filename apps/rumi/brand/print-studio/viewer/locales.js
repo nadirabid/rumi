@@ -1,5 +1,6 @@
 /** Copy shared by the mesh preview tab and the STL document preview. */
 export const en = {
+  shapeReset: 'Reset {control}', cutHeight: 'Height', cutTilt: 'Tilt', cutLean: 'Lean', shapeControls: 'Shape controls', shapeAmount: 'Strength', shapeSpread: 'Spread', shapeAngle: 'Tilt', shapePeak: 'Peak position', shapeCurve: 'Softness', shapeHint: 'Drag to shape. Tell Rumi when it feels right.', shapeFrozen: 'Keeping this shape…',
   cursorHighlighting: 'Cursor driven mesh highlighting',
   cursor_patch: 'Local patch', cursor_surface: 'Surface', cursor_part: 'Whole part', cursor_edge: 'Edge',
   models: 'Models',
@@ -20,6 +21,7 @@ export const en = {
 }
 
 export const zh = {
+  shapeReset: '重置{control}', cutHeight: '高度', cutTilt: '倾斜', cutLean: '侧倾', shapeControls: '形状控制', shapeAmount: '强度', shapeSpread: '范围', shapeAngle: '倾斜', shapePeak: '峰值位置', shapeCurve: '柔和度', shapeHint: '拖动调整形状。满意后告诉 Rumi。', shapeFrozen: '正在保存形状…',
   cursorHighlighting: '光标驱动的网格高亮',
   cursor_patch: '局部', cursor_surface: '表面', cursor_part: '整个部件', cursor_edge: '边缘',
   models: '模型',

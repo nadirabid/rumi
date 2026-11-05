@@ -1,6 +1,6 @@
 /** A session's scene is edited by commands; geometry is read once and never rewritten by placement. */
 import { Context } from '@deepseek-ai/cordis'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -52,6 +52,8 @@ it('documents creating multiple models and bringing a named entry into view', as
     highlight: f.raw('viewer_highlight').description,
     clarification: await readFile(new URL('../skills/clarify-mesh-changes/SKILL.md', import.meta.url), 'utf8'),
     state: f.raw('mesh_state').description,
+    analog: f.raw('viewer_shape_controls').description,
+    shaping: await readFile(new URL('../skills/analog-shaping/SKILL.md', import.meta.url), 'utf8'),
   }).toMatchSnapshot()
 })
 
@@ -439,4 +441,41 @@ it('refines a spoken selection through the original cursor anchor and retains th
   expect(JSON.parse(refined[0].text).snapshot.region.selection.mode).toBe('surface')
   expect(refined.filter(part => part.type === 'image')).toHaveLength(1)
   expect(await contributor.refineRequest({ sessionId: 'session-a', text: 'whole panel', content: refined, signal })).toBe(refined)
+})
+
+it('opens analog controls and freezes a fresh viewer capture without rewriting the model', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-analog-host-')), f = fixture(undefined, root)
+  try {
+    const text = JSON.stringify({ asset: { version: '2.0' }, scene: 0, scenes: [{ nodes: [] }], nodes: [] })
+    const content = Buffer.from(text + ' '.repeat((4 - text.length % 4) % 4)), bytes = Buffer.alloc(20 + content.length)
+    ;[0x46546c67, 2, bytes.length, content.length, 0x4e4f534a].forEach((n, i) => bytes.writeUInt32LE(n, i * 4)); content.copy(bytes, 20)
+    let editContext: { text(context: { agent?: { session: { id: string } } }): string } | undefined
+    f.owner.provide('systemPrompt', {
+      getContextOrder: () => 210,
+      context(value: NonNullable<typeof editContext>) { editContext = value; return () => { editContext = undefined } },
+    })
+    const path = join(root, 'model.glb'); await writeFile(path, bytes)
+    await f.run('viewer_load', { path })
+    const design = (await f.state()).design
+    const values = { amount: .65, spread: .5, peakX: .5, peakY: .5, falloff: .5, angle: .5 }
+    const opened = f.run('viewer_shape_controls', { action: 'open', path: design.path, url: design.url, revision: design.revision, operation: 'bulge', label: 'Back', center: [0, 0, 0], radii: [30, 30, 30], direction: [0, 1, 0], limit: 10, parts: [], values })
+    let controls: { id: string }
+    await vi.waitFor(async () => { controls = (await f.state()).design.analog; expect(controls).toBeTruthy() })
+    const feedback = (body: object) => f.routes.get('/api/print-studio/viewer/shape-feedback')!(new Request('http://rumi/api/print-studio/viewer/shape-feedback?sessionId=session-a', { method: 'POST', body: JSON.stringify({ id: controls.id, url: design.url, ...body }) }))
+    expect((await feedback({ status: 'rendered' })).status).toBe(200)
+    expect(await opened).toMatchObject({ status: 'rendered' })
+    expect(editContext?.text({ agent: { session: { id: 'session-a' } } })).toContain('Unresolved mesh edit:')
+    expect(editContext?.text({ agent: { session: { id: 'other-session' } } })).toBe('')
+    expect(editContext?.text({})).toBe('')
+    const freezing = f.run('viewer_shape_controls', { action: 'freeze', id: controls.id })
+    await vi.waitFor(async () => expect((await f.state()).design.analog.freezeRequested).toBe(true))
+    expect((await feedback({ status: 'frozen', sequence: 3, values: { ...values, amount: .87 } })).status).toBe(200)
+    const result = await freezing
+    expect(result).toMatchObject({ status: 'frozen', recipe: { values: { amount: .87 } } })
+    expect(JSON.parse(await readFile(result.recipePath, 'utf8'))).toEqual(result.recipe)
+    expect(await readFile(path)).toEqual(bytes)
+    expect(await f.run('viewer_shape_controls', { action: 'close', id: controls.id })).toEqual({ status: 'closed' })
+    expect((await feedback({ status: 'adjusted', sequence: 4, values })).status).toBe(409)
+    expect(editContext?.text({ agent: { session: { id: 'session-a' } } })).toBe('')
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
 })

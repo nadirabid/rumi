@@ -76,3 +76,69 @@
 @media (pointer: coarse) {
   .rumi-print-viewer .pv-cursor-controls button { min-height: 44px; }
 }
+
+/* Each control owns its glass surface; the mesh keeps the full viewport. */
+.rumi-print-viewer .av-controls{
+  position:absolute;z-index:3;top:56px;right:16px;width:264px;max-width:calc(100% - 32px);
+  display:flex;flex-direction:column;gap:10px;pointer-events:none;user-select:none;
+  animation:av-arrive 160ms ease-out;
+}
+.rumi-print-viewer .av-glass{
+  border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 55%,transparent);
+  background:linear-gradient(145deg,color-mix(in srgb,var(--dsw-alias-label-primary-foreground) 50%,transparent),transparent 48%,color-mix(in srgb,var(--dsw-alias-label-primary-foreground) 12%,transparent)),color-mix(in srgb,var(--dsw-alias-bg-layer-2) 38%,transparent);
+  backdrop-filter:blur(18px) saturate(175%);-webkit-backdrop-filter:blur(18px) saturate(175%);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,var(--dsw-alias-label-primary-foreground) 85%,transparent),inset 0 -1px 0 color-mix(in srgb,var(--dsw-alias-label-primary) 7%,transparent),0 3px 12px var(--dsw-alias-bg-mask-2);
+  color:var(--dsw-alias-label-primary);box-sizing:border-box;pointer-events:auto;
+}
+.rumi-print-viewer .av-slider{
+  display:grid;grid-template-columns:48px minmax(0,1fr) 32px;align-items:center;gap:8px;
+  height:52px;padding:0 14px;border-radius:999px;corner-shape:round;font-size:11px;font-weight:500;
+}
+.rumi-print-viewer .av-slider input{
+  appearance:none;-webkit-appearance:none;width:100%;height:44px;margin:0;background:transparent;
+  cursor:ew-resize;touch-action:none;
+}
+.rumi-print-viewer .av-slider input::-webkit-slider-runnable-track{
+  height:4px;border-radius:999px;background:linear-gradient(to right,var(--dsw-alias-button-info-fill) 0 var(--av-value),color-mix(in srgb,var(--dsw-alias-label-primary) 12%,transparent) var(--av-value) 100%);
+}
+.rumi-print-viewer .av-slider input::-webkit-slider-thumb{
+  appearance:none;-webkit-appearance:none;width:24px;height:24px;margin-top:-10px;
+  border-radius:50%;corner-shape:round;border:1px solid color-mix(in srgb,var(--dsw-alias-label-primary-foreground) 85%,transparent);
+  background:linear-gradient(145deg,var(--dsw-alias-label-primary-foreground),color-mix(in srgb,var(--dsw-alias-bg-layer-2) 70%,transparent));
+  box-shadow:0 1px 5px var(--dsw-alias-bg-mask-2),inset 0 1px 0 var(--dsw-alias-label-primary-foreground);
+  transition:transform 120ms ease,background 120ms ease;
+}
+.rumi-print-viewer .av-slider input:active::-webkit-slider-thumb{transform:scale(1.18);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 35%,transparent);backdrop-filter:blur(6px) saturate(180%)}
+.rumi-print-viewer .av-spatial{display:grid;grid-template-columns:1fr 1fr;gap:10px;pointer-events:none}
+.rumi-print-viewer .av-field{padding:10px;border-radius:24px;corner-shape:round;min-width:0}
+.rumi-print-viewer .av-field-header{display:flex;align-items:center;justify-content:space-between;gap:4px;font-size:11px;font-weight:500;white-space:nowrap;margin-bottom:10px}
+.rumi-print-viewer .av-reset{display:grid;place-items:center;width:32px;height:32px;padding:0;border:0;border-radius:50%;corner-shape:round;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;flex-shrink:0}
+.rumi-print-viewer .av-reset svg{width:16px;height:16px;pointer-events:none}
+.rumi-print-viewer .av-reset:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 7%,transparent);color:var(--dsw-alias-label-primary)}
+.rumi-print-viewer .av-reset:active{background:color-mix(in srgb,var(--dsw-alias-label-primary) 12%,transparent)}
+.rumi-print-viewer .av-reset:disabled{opacity:.45;cursor:default}
+.rumi-print-viewer .av-field-header .av-reset{width:28px;height:28px}
+.rumi-print-viewer .av-pad,.rumi-print-viewer .av-curve{position:relative;display:block;width:100%;height:64px;touch-action:none;cursor:grab;overflow:visible}
+.rumi-print-viewer .av-pad:active,.rumi-print-viewer .av-curve:active{cursor:grabbing}
+.rumi-print-viewer .av-curve>svg{display:block;width:100%;height:100%;pointer-events:none}
+.rumi-print-viewer .av-handle{
+  position:absolute;width:22px;height:22px;transform:translate(-50%,-50%);border-radius:50%;corner-shape:round;
+  border:1px solid color-mix(in srgb,var(--dsw-alias-label-primary-foreground) 85%,transparent);
+  background:linear-gradient(145deg,var(--dsw-alias-label-primary-foreground),color-mix(in srgb,var(--dsw-alias-bg-layer-2) 65%,transparent));
+  box-shadow:0 1px 5px var(--dsw-alias-bg-mask-2),inset 0 1px 0 var(--dsw-alias-label-primary-foreground);pointer-events:none;
+  transition:transform 120ms ease,background 120ms ease;
+}
+.rumi-print-viewer .av-pad:active .av-handle,.rumi-print-viewer .av-curve:active .av-handle{transform:translate(-50%,-50%) scale(1.18);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 35%,transparent);backdrop-filter:blur(6px)}
+.rumi-print-viewer .av-cross{position:absolute;background:color-mix(in srgb,var(--dsw-alias-label-primary) 16%,transparent);pointer-events:none}
+.rumi-print-viewer .av-cross-x{left:0;right:0;top:50%;height:1px}
+.rumi-print-viewer .av-cross-y{top:0;bottom:0;left:50%;width:1px}
+.rumi-print-viewer .av-curve-line{fill:none;stroke:var(--dsw-alias-button-info-fill);stroke-width:2;vector-effect:non-scaling-stroke}
+.rumi-print-viewer .av-controls :focus-visible{outline:2px solid var(--dsw-alias-button-info-fill);outline-offset:4px}
+.rumi-print-viewer .av-controls[aria-busy=true]{opacity:.55;pointer-events:none}
+.rumi-print-viewer .av-controls[aria-busy=true] .av-glass{pointer-events:none}
+.rumi-print-viewer .av-saving{position:absolute;z-index:3;top:56px;right:16px;padding:10px 16px;border-radius:999px;font-size:12px;corner-shape:round;pointer-events:none}
+.rumi-print-viewer .av-error{top:48px;bottom:auto;z-index:4}
+@keyframes av-arrive{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-transparency:reduce){.rumi-print-viewer .av-glass{background:var(--dsw-alias-bg-layer-2);backdrop-filter:none;-webkit-backdrop-filter:none}}
+@media(prefers-reduced-motion:reduce){.rumi-print-viewer .av-controls{animation:none}.rumi-print-viewer .av-slider input::-webkit-slider-thumb,.rumi-print-viewer .av-handle{transition:none}}
+@media(max-height:520px){.rumi-print-viewer .av-controls{gap:6px;top:48px}.rumi-print-viewer .av-slider{height:44px}.rumi-print-viewer .av-field{padding:10px}.rumi-print-viewer .av-pad,.rumi-print-viewer .av-curve{height:44px}}

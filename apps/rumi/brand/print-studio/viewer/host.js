@@ -8,6 +8,7 @@
  * resizing never rewrites a mesh, and the browser renders the same geometry it
  * already fetched.
  */
+import { mkdir, realpath, writeFile } from 'node:fs/promises'
 import { basename, extname, relative, resolve, sep } from 'node:path'
 import { analyzeMesh } from './checks.js'
 import { createHistory } from './document.js'
@@ -182,6 +183,16 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
   const events = createViewerEvents()
   const cursors = createCursorRequests(sessionId => events.notify(sessionId))
   const captureJobs = new Set()
+  ctx.inject(['systemPrompt'], scoped => {
+    scoped.effect(() => scoped.systemPrompt.context({
+      name: 'rumi:active-shape', order: scoped.systemPrompt.getContextOrder('WEB_SURFACE'), interpolate: false,
+      text: context => {
+        const shape = sessions.get(context.agent?.session.id)?.source?.state().analog
+        if (!shape) return ''
+        return `Unresolved mesh edit: ${JSON.stringify({ id: shape.id, region: shape.label, operation: shape.operation, values: shape.values, frozen: shape.frozen })}. Read mesh_state. Keep this edit as the focus while tuning. If the person is satisfied or moves to another task, finish the current edit first: freeze, apply the captured recipe in Blender, publish and load it. If already frozen, complete that save. Explicit cancel/revert uses close instead. Verify both controls and highlight are cleared. Do not require a special phrase.`
+      },
+    }), 'print-studio active edit context')
+  })
   let closed = false
   ctx.effect(() => async () => {
     closed = true
@@ -424,7 +435,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
   ctx.inject(['liveVoice'], scoped => {
     scoped.effect(() => scoped.liveVoice.register({
       id: 'print-studio-pointing',
-      instructions: () => 'Cursor driven mesh highlighting responds directly to short selection phrases: local patch, whole panel, whole part, just the edge, larger selection, smaller selection. These refine a visual reference only; they never edit geometry. Still delegate the request. Use the attached refined reference and have the modeling assistant confirm it in teal with viewer_highlight, copying region.selection and modelLocalBlob. Do not claim a preview succeeded without its result.',
+      instructions: () => 'Cursor driven mesh highlighting responds directly to short selection phrases: local patch, whole panel, whole part, just the edge, larger selection, smaller selection. These refine a visual reference only; they never edit geometry. Still delegate the request. Use the attached refined reference and have the modeling assistant confirm it in teal with viewer_highlight, copying region.selection and modelLocalBlob. Do not claim a preview succeeded without its result. When mesh shaping controls are active, delegate satisfaction, completion, cancellation, and changes of topic so the modeling assistant can resolve the current edit and clear its controls and highlight before proceeding. Do not merely acknowledge that it is done.',
       refineRequest: async ({ sessionId, text, content, signal }) => {
         const command = cursorCommand(text)
         if (!command) return content
@@ -610,6 +621,77 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       finally { captureJobs.delete(operation) }
     },
   })), 'print viewer: highlight region')
+
+  ctx.effect(() => ctx.connection.fetch.register({
+    path: `${ROUTE}/shape-feedback`, methods: ['POST'], requestBody: 'buffered',
+    fetch: async request => {
+      const sessionId = new URL(request.url).searchParams.get('sessionId')
+      try {
+        const value = await request.json(), record = sessions.get(sessionId)
+        if (!record?.source?.shapeFeedback(value)) return json({ error: 'stale_controls' }, 409)
+        receipts.acknowledge(sessionId, value.status === 'frozen' ? `${value.id}:freeze` : value.id)
+        if (value.status === 'frozen') events.notify(sessionId)
+        diagnostics.record(sessionId, 'shape.feedback', { id: value.id, status: value.status, values: value.values, metrics: value.metrics })
+        return json({ ok: true })
+      } catch (_error) { return json({ error: 'invalid_shape_feedback' }, 400) }
+    },
+  }), 'print viewer: shape feedback')
+
+  ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'viewer_shape_controls',
+    description: 'Give the person continuous analog controls over a real local deformation: bulge, bend, twist, taper, or a continuous planar cut. Read mesh_state. For deformations, visually highlight the region first. Cut mode supplies its own continuous teal cut-line guide; do not assemble Gaussian blobs around a cut. Open uses a model-local millimetre ellipsoid in a frame whose N axis is direction, U is across, V is up. Strength, spread, tilt, peak position, and falloff respond locally without agent calls. parts contains exact mesh names, or [] for all intersecting meshes. For cut, direction points toward the retained side (bottom trim: [0,0,1]); center is the neutral plane point, amount shifts height by +/-limit mm, angle tilts along V and spread leans along U by +/-60 degrees. At .5/.5 both angles are neutral; peak and falloff are unused. The plane crosses all selected parts, without an ellipsoid boundary. Preview caps are visual; Blender performs the real capped cut on finish. Extrusion, curved cuts, and bevel are not supported by these controls. For the helmet back prefer bulge. Do not overwrite the original while tuning. When the person is satisfied or moves on, freeze captures the latest controls from the visible viewer and writes a recipe; use blender_status and the helper apply_shape_controls(recipePath) on the original .blend, publish a new revision, then viewer_load. Close discards the local edit. Read analog-shaping for the workflow. Only rendered confirms the controls and operation guide are displayed.',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['open', 'freeze', 'close'] },
+      id: { type: 'string', description: 'Current design.analog.id for freeze or close.' },
+      path: { type: 'string', description: 'Exact design.path for open.' },
+      revision: { type: 'integer', description: 'Exact design.revision for open.' },
+      url: { type: 'string', description: 'Exact design.url for open.' },
+      label: { type: 'string', description: 'Short plain-language region label.' },
+      operation: { type: 'string', enum: ['bulge', 'bend', 'twist', 'taper', 'cut'] },
+      center: { type: 'array', items: { type: 'number' }, description: 'Three model-local coordinates, mm.' },
+      radii: { type: 'array', items: { type: 'number' }, description: 'Three positive extents along U,V,N, mm; for cut these bound the allowed limit, not the plane footprint.' },
+      direction: { type: 'array', items: { type: 'number' }, description: 'Three numbers: outward axis. Back of helmet is often [0,1,0]; inspect source.' },
+      limit: { type: 'number', description: 'Maximum bulge displacement or cut-height travel either side of center, mm, no larger than the smallest radius.' },
+      parts: { type: 'array', items: { type: 'string' }, description: 'Exact mesh names to deform; [] includes all meshes in the soft region.' },
+      values: { type: 'object', additionalProperties: false, properties: Object.fromEntries(['amount','spread','peakX','peakY','falloff','angle'].map(key => [key, { type: 'number', required: true, description: 'Normalized 0..1. Neutral amount .5, spread .5, peak .5/.5, tilt angle .5. Positive bulge amount > .5.' }])) },
+    },
+    output: { schema: { type: 'string' }, render: (_args,value) => [{ type: 'text', text: value }] },
+    presentCall: args => ({ card: 'generic', title: args.action === 'open' ? 'Shape controls' : 'Update shape controls', kind: 'write' }),
+    isConcurrencySafe: () => false, timeoutMs: 15_000,
+    async execute(args, exec) {
+      const sessionId = exec.agent.session.id, record = sessions.get(sessionId)
+      if (!record?.source) throw new Error('Load a GLB model first')
+      if (args.action === 'close') { record.source.clearShape(args.id); events.notify(sessionId); return JSON.stringify({ status: 'closed' }) }
+      const operation = (async () => {
+        const { shape, receipt } = await serialize(record, async () => {
+          await record.source.poll()
+          if (args.action === 'freeze') record.source.requestShapeFreeze(args.id)
+          const shape = args.action === 'open' ? record.source.shape(args) : record.source.state().analog
+          const receipt = receipts.wait(sessionId, args.action === 'freeze' ? `${shape.id}:freeze` : shape.id, exec.signal)
+          events.notify(sessionId)
+          return { shape, receipt }
+        })
+        const status = await receipt
+        exec.signal.throwIfAborted()
+        if (status !== 'rendered') return JSON.stringify({ status: 'not_rendered', reason: status, id: shape.id })
+        if (args.action === 'freeze') {
+          await record.source.poll()
+          const recipe = record.source.freezeShape(args.id)
+          const directory = resolve(record.cwd, 'artifacts', 'shape-controls')
+          await mkdir(directory, { recursive: true })
+          const inside = relative(await realpath(record.cwd), await realpath(directory))
+          if (inside === '..' || inside.startsWith(`..${sep}`)) throw new Error('Recipe directory must stay inside the project')
+          const recipePath = resolve(directory, `${recipe.id}.json`)
+          await writeFile(recipePath, JSON.stringify(recipe, null, 2)+'\n', { mode: 0o600 })
+          events.notify(sessionId)
+          return JSON.stringify({ status: 'frozen', recipePath, recipe })
+        }
+        return JSON.stringify({ status: 'rendered', controls: record.source.state().analog })
+      })()
+      captureJobs.add(operation)
+      try { return await operation } finally { captureJobs.delete(operation) }
+    },
+  })), 'print viewer: analog shape controls')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_camera',

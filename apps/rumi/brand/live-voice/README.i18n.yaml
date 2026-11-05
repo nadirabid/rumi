@@ -3,8 +3,8 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write apps/rumi/brand/live-voice/README.md
 /live-voice:
-  en: 2e4497d867965f3f
-  zh: e056c83dccb4c69a
+  en: ecb3edd776df3091
+  zh: ade60e31746691c8
 /live-voice/configuration:
   en: 13b4a02b719f35af
   zh: 0b591c132704a2c2

@@ -1,10 +1,13 @@
 /** Live Voice keeps one session per DSH session and takes context from contributors. */
+import { Context } from '@deepseek-ai/cordis'
+import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import * as Projects from '../brand/projects/index.js'
 import { describe, expect, it } from 'vitest'
 import { composeInstructions, createLiveVoiceRegistry } from '../brand/live-voice/src/registry.js'
 import { LiveBridge, speakable, summarize } from '../brand/live-voice/src/bridge.js'
-import { DEFAULT_INSTRUCTIONS, VOICES } from '../brand/live-voice/src/protocol.js'
+import { CONVERSATION_POLICY, DEFAULT_INSTRUCTIONS, sessionStart, VOICES } from '../brand/live-voice/src/protocol.js'
 import { createProjectStore, projectInstructionsFor, renderProjectInstructions } from '../brand/projects/index.js'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -171,4 +174,27 @@ it('steers a spoken correction immediately and reports the shared interval to th
 
 it('records the voice visual-reference requirements', () => {
   expect(DEFAULT_INSTRUCTIONS).toMatchSnapshot()
+})
+
+
+it('keeps mandatory scope when voice instructions are overridden', () => {
+  const payload = sessionStart({ instructions: 'Custom speaking style.' })
+  expect(payload.session.instructions).toBe(`${CONVERSATION_POLICY}\n\nCustom speaking style.`)
+  const template = readFileSync(new URL('../brand/projects/AGENTS_TEMPLATE.md', import.meta.url), 'utf8')
+  expect(template).toContain(CONVERSATION_POLICY)
+})
+
+it('supplies current scope to existing backend sessions and removes it on unload', async () => {
+  const owner = new Context()
+  try {
+    owner.provide('connection', { fetch: { register: () => () => {} } })
+    await owner.plugin(SystemPrompt)
+    const fork = owner.plugin(Projects)
+    await fork
+    const prompt = renderPrompt(await owner.systemPrompt.assemble())
+    expect(prompt).toContain(CONVERSATION_POLICY)
+    expect(prompt).toMatchSnapshot()
+    await fork.dispose()
+    expect(renderPrompt(await owner.systemPrompt.assemble())).not.toContain(CONVERSATION_POLICY)
+  } finally { await owner.fiber.dispose() }
 })

@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 The app's home: a gallery of projects, each one a directory on disk rather than a session-scoped workspace.
 
+The current project template is also registered in the backend system prompt, so existing projects receive the mandatory [conversation scope](../../../../RUMI.md#conversation-scope) without rewriting their files.
+
 ## What a project is
 
 ```text

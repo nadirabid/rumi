@@ -106,6 +106,10 @@ Blender works in metres, Z up. Standard GLB files use metres, Y up; the viewer c
 Call \`viewer_load\` with a GLB path to bring it into view; use \`mesh_state\` for models, selection, load errors and measurements. Self-contained static GLB previews support at most 64 MiB and 200,000 triangles. Keep detailed print originals when explicitly making a lighter preview. Failed exports or loads retain the last successful preview and are not completed edits. Use \`viewer_transform\` for placement and \`viewer_camera\` for the viewing angle. Preview checks do not establish print readiness.
 
 Existing \`model.js\`/\`model.mjs\` designs exporting synchronous \`build(THREE)\` remain supported, in millimetres and Z up. Preserve them when migrating their actual geometry into Blender. Do not modify the viewer or approximate an existing model from a screenshot.
+
+### Model references
+
+Use the request's captured model selection as a default for an unnamed model, with explicit names and captured pointing references taking precedence. Later browsing does not redirect ongoing work. Clarify conflicting references before editing. Call \`viewer_working_model\` with a discovered entry before inspecting or editing it; update the declaration when changing targets and clear it before clarification. The green dot identifies your declared work independently of the selected model and clears when your agent stops. Read \`mesh_state\` for both selection and working models. Use \`viewer_load\` only to change what the person sees.
 ",
   "load": "Select a Blender-exported GLB in the Three.js viewer. Use models/<name>/model.glb; the viewer discovers these entries and reloads completed exports automatically. GLB uses standard metres and Y up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. Self-contained static GLB only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Legacy .js/.mjs entries exporting synchronous build(THREE) remain supported in millimetres and Z up. Read mesh_state for load errors and measurements. Loading does not certify print readiness.",
   "printer": "---
@@ -223,6 +227,7 @@ To finish, use action \`freeze\` with the current control ID. This captures thei
 Every control has an icon reset to its exact neutral value, without changing the others. Strength becomes zero deformation, Spread returns to the supplied region extents, Tilt and Lean return to zero relative to the supplied direction, Height returns to center, Peak resets both coordinates to the center, and Softness returns to its midpoint. These are neutral values (.5), not the agent’s initial tuning. Resets update the preview locally and report the resulting values immediately.
 ",
   "state": "Read the 3D preview scene without changing it: every object, its placement, and the measurements of its composed mesh. Includes discovered models and the selected model. Saved GLB and JavaScript models reload when the viewer opens; STL scene objects remain in memory. Read this tool instead of assuming what is on screen.",
+  "working": "Declare which existing model you are actively inspecting or editing. Shows a green dot without changing the user selection. Use a path from mesh_state.models; call before work and when changing targets. Omit path to clear before clarification or unrelated work. The host also clears it when your agent stops or is disposed. This declaration does not authorize edits or resolve ambiguous references.",
 }
 `;
 

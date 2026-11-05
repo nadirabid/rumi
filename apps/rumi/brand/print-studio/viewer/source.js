@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { validateGlb, GLB_MAX_BYTES } from './glb.js'
 import { normalizeHighlight } from './highlight.js'
 import { normalizePlacement } from './transform.js'
+import { normalizeShape, normalizeValues } from './analog/spec.js'
 
 const ROUTE = '/api/print-studio/viewer'
 const MAX_FILES = 64
@@ -30,7 +31,7 @@ export async function createSource(ctx, path, workspace) {
   let sourceError = null
   let buildError = null
   const snapshots = []
-  const state = { path, format, revision: 0, url: null, transform: normalizePlacement(), report: null, camera: null, highlight: null }
+  const state = { path, format, revision: 0, url: null, transform: normalizePlacement(), report: null, camera: null, highlight: null, analog: null, contentHash: null }
 
   async function scan() {
     const files = new Map()
@@ -96,6 +97,8 @@ export async function createSource(ctx, path, workspace) {
       state.url = `${prefix}/${entryName.split('/').map(encodeURIComponent).join('/')}`
       state.revision++
       state.highlight = null
+      state.analog = null
+      state.contentHash = format === 'glb' ? createHash('sha256').update(next.files.get(entryName)).digest('hex') : null
       sourceError = null
       buildError = null
       state.report = null
@@ -140,11 +143,38 @@ export async function createSource(ctx, path, workspace) {
       if (value.path !== state.path || value.revision !== state.revision || value.url !== state.url || sourceError || buildError || candidate) {
         return { status: 'stale_model', message: 'Read mesh_state and resolve model errors before highlighting again.' }
       }
+      if (state.analog?.operation === 'cut') return { status: 'active_cut', message: 'The cut owns its continuous plane guide. Finish or discard this edit before adding a different region highlight.' }
       const next = normalizeHighlight(value)
       state.highlight = next.blobs.length ? { ...next, id: randomUUID() } : null
       return { status: state.highlight ? 'queued' : 'cleared', highlight: state.highlight,
         message: 'Presentation state updated; viewer display and user confirmation are not acknowledged.' }
     },
+    shape(value) {
+      if (value.path !== state.path || value.revision !== state.revision || value.url !== state.url || sourceError || buildError || candidate) throw new Error('Model changed; read mesh_state again')
+      if (format !== 'glb') throw new Error('Shape controls require a Blender GLB')
+      state.analog = { ...normalizeShape(value), id: randomUUID(), frozen: false, freezeRequested: false, rendered: false, editRevision: 0 }
+      if (state.analog.operation === 'cut') state.highlight = null
+      return state.analog
+    },
+    shapeFeedback(value) {
+      const shape = state.analog
+      if (!shape || value.id !== shape.id || value.url !== state.url || shape.frozen) return false
+      if (value.status === 'adjusted' || value.status === 'frozen') {
+        if (!Number.isSafeInteger(value.sequence) || value.sequence <= shape.editRevision) return false
+        if (value.status === 'frozen' && !shape.freezeRequested) throw new Error('Freeze was not requested')
+        shape.values = normalizeValues(value.values); shape.editRevision = value.sequence
+        if (value.status === 'frozen') { shape.frozen = true; state.highlight = null }
+      } else if (value.status !== 'rendered') throw new Error('Unknown shape feedback')
+      shape.rendered = true
+      return true
+    },
+    requestShapeFreeze(id) { if (id !== state.analog?.id || !state.analog.rendered) throw new Error('Read the rendered controls first'); state.analog.freezeRequested = true },
+    freezeShape(id) {
+      if (id !== state.analog?.id || !state.analog.rendered || !state.analog.frozen || sourceError || buildError || candidate) throw new Error('Read the rendered shape controls before applying')
+      state.analog.frozen = true
+      return { ...state.analog, source: state.path, sourceHash: state.contentHash }
+    },
+    clearShape(id) { if (id !== state.analog?.id) throw new Error('Shape controls changed'); state.analog = null; state.highlight = null },
     camera(value) { state.camera = { ...value, id: randomUUID() } },
     feedback(value) {
       if (value.revision !== state.revision || value.url !== state.url

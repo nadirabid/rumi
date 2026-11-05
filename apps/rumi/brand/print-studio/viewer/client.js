@@ -6,6 +6,7 @@
  * placement only. Nothing here imports three: the viewport is a separate
  * module, and this half never measures or transforms geometry.
  */
+import { createAnalogPanel } from './analog/controls.js'
 import { parseStl } from './stl.js'
 import { createViewport } from './viewport/index.js'
 import { placeMesh } from './transform.js'
@@ -33,6 +34,7 @@ const EMPTY = Object.freeze({ scene: null, view: null })
  */
 export function installViewer(ctx, React, primitives) {
   const h = React.createElement
+  const AnalogPanel = createAnalogPanel(React)
   const { PluginArtworkDefault, Button } = primitives
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'print viewer: copy')
@@ -172,6 +174,8 @@ export function installViewer(ctx, React, primitives) {
     const [failed, setFailed] = React.useState(false)
     const [buildError, setBuildError] = React.useState(null)
     const [cursorMode, setCursorMode] = React.useState('patch')
+    const analogValues = React.useRef(null), analogId = React.useRef(null), analogSequence = React.useRef(0), analogDelivery = React.useRef(Promise.resolve())
+    const analogAbort = React.useRef(null)
     React.useEffect(() => {
       try {
         viewport.current = createViewport(holder.current, () => setFailed(true), setCursorMode)
@@ -269,6 +273,39 @@ export function installViewer(ctx, React, primitives) {
       view?.design?.highlight?.id, view?.design?.url, JSON.stringify(view?.design?.transform), view?.design?.camera?.id,
       view?.sessionId, JSON.stringify(view?.volume),
     ])
+    function sendShape(status, values) {
+      const spec = view?.design?.analog
+      if (!spec) return Promise.resolve()
+      const body = { id: spec.id, url: view.design.url, status, values, sequence: ++analogSequence.current, metrics: viewport.current?.shapeMetrics?.() }
+      const signal = analogAbort.current?.signal
+      const post = async () => {
+        if (signal?.aborted) return
+        const response = await fetch(`${ROUTE}/shape-feedback?sessionId=${encodeURIComponent(view.sessionId)}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal,
+        })
+        if (!response.ok) throw new Error('Shape control delivery failed')
+      }
+      const delivery = analogDelivery.current.then(post)
+      analogDelivery.current = delivery.catch(() => { if (!signal?.aborted) setBuildError('feedbackFailed') })
+      return delivery
+    }
+    React.useEffect(() => {
+      let active = true
+      const spec = view?.design?.analog
+      if (analogId.current !== spec?.id) {
+        analogAbort.current?.abort(); analogAbort.current = new AbortController()
+        analogId.current = spec?.id; analogValues.current = spec?.values; analogSequence.current = spec?.editRevision ?? 0
+        analogDelivery.current = Promise.resolve()
+      }
+      void designReady.current.then(() => {
+        if (!active || !viewport.current) return
+        const values = analogValues.current ?? spec?.values
+        const id = viewport.current.applyShape?.(spec ? { ...spec, values } : null)
+        if (id && !spec.frozen) return sendShape(spec.freezeRequested ? 'frozen' : 'rendered', values)
+      }).catch(() => { if (active) setBuildError('buildFailed') })
+      return () => { active = false }
+    }, [view?.design?.analog?.id, view?.design?.analog?.freezeRequested, view?.design?.analog?.frozen, view?.design?.url])
+    React.useEffect(() => () => analogAbort.current?.abort(), [])
     React.useEffect(() => {
       if (!view?.sessionId) return
       let active = true
@@ -294,14 +331,15 @@ export function installViewer(ctx, React, primitives) {
       return () => { active = false; clearTimeout(timer); controller.abort() }
     }, [view])
     return h(React.Fragment, null,
-      h('div', { className: 'pv-cursor-controls', role: 'group', 'aria-label': t('cursorHighlighting') },
+      !view?.design?.analog && h('div', { className: 'pv-cursor-controls', role: 'group', 'aria-label': t('cursorHighlighting') },
         ['patch', 'surface', 'part', 'edge'].map(mode => h(Button, {
           key: mode, variant: 'ghost', size: 'sm', 'aria-pressed': cursorMode === mode,
           onClick: () => { setCursorMode(mode); viewport.current?.setCursorMode(mode) },
         }, t(`cursor_${mode}`)))),
+      view?.design?.analog ? h(AnalogPanel, { key: view.design.analog.id, spec: view.design.analog, t, onChange: values => { analogValues.current = values; viewport.current?.updateShape(values) }, onRelease: values => { void sendShape('adjusted', values).catch(_error => { /* sendShape reports delivery failure in the viewer. */ }) } }) : null,
       h('div', { className: 'pv-stage', ref: holder, role: 'img', 'aria-label': t('view'), 'data-testid': 'print-viewport' }),
       buildError && !failed && view?.design?.error?.kind !== 'source'
-        ? h('p', { role: 'alert', className: 'pv-error' }, t(buildError)) : null)
+        ? h('p', { role: 'alert', className: view?.design?.analog ? 'pv-error av-error' : 'pv-error' }, t(buildError)) : null)
   }
 
   function MeshPane({ useScene, t, selectModel }) {

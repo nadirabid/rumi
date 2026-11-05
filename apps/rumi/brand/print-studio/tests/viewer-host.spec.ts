@@ -52,6 +52,7 @@ it('documents creating multiple models and bringing a named entry into view', as
     highlight: f.raw('viewer_highlight').description,
     clarification: await readFile(new URL('../skills/clarify-mesh-changes/SKILL.md', import.meta.url), 'utf8'),
     state: f.raw('mesh_state').description,
+    working: f.raw('viewer_working_model').description,
     analog: f.raw('viewer_shape_controls').description,
     shaping: await readFile(new URL('../skills/analog-shaping/SKILL.md', import.meta.url), 'utf8'),
   }).toMatchSnapshot()
@@ -477,5 +478,37 @@ it('opens analog controls and freezes a fresh viewer capture without rewriting t
     expect(await f.run('viewer_shape_controls', { action: 'close', id: controls.id })).toEqual({ status: 'closed' })
     expect((await feedback({ status: 'adjusted', sequence: 4, values })).status).toBe(409)
     expect(editContext?.text({ agent: { session: { id: 'session-a' } } })).toBe('')
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+
+it('declares work without switching the viewer and rejects missing or cancelled targets', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-work-target-'))
+  const f = fixture(undefined, root)
+  const agent = { session: { id: 'session-a' }, status: 'running' }
+  const controller = new AbortController()
+  const declare = (path?: string) => f.raw('viewer_working_model').execute(
+    path === undefined ? {} : { path }, { agent, signal: controller.signal },
+  )
+  try {
+    for (const name of ['cup', 'dragon']) {
+      await mkdir(join(root, 'models', name), { recursive: true })
+      await writeFile(join(root, 'models', name, 'model.js'), 'export function build() {}\n')
+    }
+    const before = await f.state()
+    await declare('models/dragon/model.js')
+    const during = await f.state()
+    expect(during.selectedModel).toBe(before.selectedModel)
+    expect(during.workingModels).toEqual(['models/dragon/model.js'])
+    await expect(f.raw('viewer_transform').execute({ scale: 2 }, { agent, signal: controller.signal }))
+      .rejects.toThrow(/viewer selection differs/u)
+    expect((await f.state()).design.transform).toEqual(before.design.transform)
+    await expect(declare('models/missing/model.js')).rejects.toThrow(/not found/u)
+    expect((await f.state()).workingModels).toEqual(['models/dragon/model.js'])
+    await declare()
+    expect((await f.state()).workingModels).toEqual([])
+    controller.abort()
+    await expect(declare('models/cup/model.js')).rejects.toThrow()
+    expect((await f.state()).workingModels).toEqual([])
   } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
 })

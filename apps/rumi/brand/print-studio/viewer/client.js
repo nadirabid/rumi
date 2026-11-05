@@ -6,6 +6,7 @@
  * placement only. Nothing here imports three: the viewport is a separate
  * module, and this half never measures or transforms geometry.
  */
+import { createModelSelector } from './model-selector.js'
 import { createAnalogPanel } from './analog/controls.js'
 import { parseStl } from './stl.js'
 import { createViewport } from './viewport/index.js'
@@ -36,6 +37,7 @@ export function installViewer(ctx, React, primitives) {
   const h = React.createElement
   const AnalogPanel = createAnalogPanel(React)
   const { PluginArtworkDefault, Button } = primitives
+  const ModelSelector = createModelSelector(React, Button)
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'print viewer: copy')
   ctx.effect(() => {
@@ -118,6 +120,7 @@ export function installViewer(ctx, React, primitives) {
       const unchanged = current?.scene != null && current.scene.revision === scene.revision
         && JSON.stringify(current.scene.design) === JSON.stringify(scene.design)
         && JSON.stringify(current.scene.models) === JSON.stringify(scene.models)
+        && JSON.stringify(current.scene.workingModels) === JSON.stringify(scene.workingModels)
         && current.scene.selectedModel === scene.selectedModel
         && current.scene.catalogFailed === scene.catalogFailed
         && !current.scene.failed
@@ -360,13 +363,7 @@ export function installViewer(ctx, React, primitives) {
       finally { if (!controller.signal.aborted) setBusy(false) }
     }
     return h('section', { className: 'rumi-print-viewer', 'aria-label': t('title') },
-      scene?.models?.length ? h('div', { className: 'pv-models', role: 'group', 'aria-label': t('models') },
-        scene.models.map(model => h(Button, {
-          key: model.path, variant: 'ghost', size: 'sm', disabled: busy,
-          className: 'pv-model-button', title: model.name,
-          'aria-pressed': scene.selectedModel === model.path,
-          onClick: () => { void select(model.path) },
-        }, model.name))) : null,
+      h(ModelSelector, { scene, busy, select, t }),
       failed || scene?.catalogFailed ? h('p', { className: 'pv-catalog-error', role: 'alert' },
         t(failed ? 'selectionFailed' : 'catalogFailed')) : null,
       h('div', { className: 'pv-content' }, h(MeshContent, { state, t })))

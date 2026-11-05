@@ -20,6 +20,7 @@ import { createHighlightReceipts } from './receipts.js'
 import { createViewerEvents } from './events.js'
 import { createCursorRequests, cursorIdentity } from './cursor.js'
 import { cursorCommand } from './cursor-commands.js'
+import { createModelFocus } from './model-focus.js'
 import { createSource } from './source.js'
 import { discoverModels, readSelection, saveSelection } from './catalog.js'
 
@@ -181,6 +182,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
   const sessions = new Map()
   const receipts = createHighlightReceipts()
   const events = createViewerEvents()
+  const focus = createModelFocus(ctx, { read: id => sessions.get(id), notify: id => events.notify(id) })
   const cursors = createCursorRequests(sessionId => events.notify(sessionId))
   const captureJobs = new Set()
   ctx.inject(['systemPrompt'], scoped => {
@@ -224,7 +226,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
     const record = { history: createHistory(), datablocks: new Map(), byPath: new Map(), measurements: new Map(), pending: Promise.resolve() }
     sessions.set(sessionId, record)
     while (sessions.size > MAX_SESSIONS) {
-      const key = [...sessions.keys()].find(id => id !== sessionId && !sessions.get(id).busy)
+      const key = [...sessions.keys()].find(id => id !== sessionId && !sessions.get(id).busy && focus.paths(id).length === 0)
       if (key === undefined) break
       const source = sessions.get(key).source
       if (source) ctx.effect(async () => { await source.dispose(); return () => {} }, 'print viewer: evict source')
@@ -317,6 +319,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
     return json({ cursorRequest: cursors.read(sessionId), scene: {
       ...sceneState(record), design: record.source?.state() ?? null,
       models: record.models ?? [], selectedModel: record.selectedModel ?? null,
+      workingModels: focus.paths(sessionId),
       catalogFailed: Boolean(record.catalogError),
     } })
   })
@@ -452,9 +455,11 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       },
       captureRequest: async ({ sessionId, requestedAt, signal }) => {
         if (!sessions.has(sessionId)) return []
+        const record = sessions.get(sessionId)
+        const selectionAtSpeech = { path: record.selectedModel ?? null, revision: record.source?.state().revision ?? null }
         const { image, ...snapshot } = JSON.parse(await captureReference(sessionId, signal))
         return [{ type: 'text', text: JSON.stringify({
-          reference: 'cursor-at-start-of-spoken-request', requestedAt, snapshot,
+          reference: 'cursor-at-start-of-spoken-request', requestedAt, selectionAtSpeech, snapshot,
           instruction: 'Use this reference for pointing in this request, not a later live cursor position. Highlight the intended area to establish a visual reference. Follow the user’s requested action; ask for clarification when their intent is ambiguous.',
         }) }, ...(image ? [{ type: 'image', attachment: image }] : [])]
       },
@@ -503,6 +508,29 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       return captureReference(exec.agent?.session.id, exec.signal)
     },
   })), 'print viewer: inspect cursor')
+
+  ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'viewer_working_model',
+    description: 'Declare which existing model you are actively inspecting or editing. Shows a green dot without changing the user selection. Use a path from mesh_state.models; call before work and when changing targets. Omit path to clear before clarification or unrelated work. The host also clears it when your agent stops or is disposed. This declaration does not authorize edits or resolve ambiguous references.',
+    parameters: { path: { type: 'string', description: 'Discovered model entry path. Omit to clear the work indicator.' } },
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+    isConcurrencySafe: () => false, timeoutMs: 10_000,
+    async execute(args, exec) {
+      if (!exec.agent) throw new Error('Model work requires a conversation')
+      const record = recordFor(exec.agent.session.id)
+      let path = null
+      if (args.path !== undefined) {
+        const cwd = await ctx.workingDirectory.ensure(exec.agent, exec.signal)
+        record.models = await discoverModels(cwd)
+        path = relative(cwd, resolve(cwd, args.path)).split(sep).join('/')
+        if (!record.models.some(model => model.path === path)) throw new Error('Model entry not found; read mesh_state')
+      }
+      exec.signal.throwIfAborted()
+      if (closed) throw new Error('Model preview is closed')
+      focus.set(exec.agent, path)
+      return JSON.stringify({ workingModel: path, selectedModel: record.selectedModel ?? null })
+    },
+  })), 'print viewer: declare working model')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_load',
@@ -558,6 +586,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
     async execute(args, exec) {
       const record = sessions.get(exec.agent?.session.id)
       if (!record?.source) throw new Error('Load a model with viewer_load first')
+      focus.assertSelected(exec.agent, record.selectedModel)
       record.source.transform(Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined)))
       return JSON.stringify(sceneReport(record), undefined, 2)
     },
@@ -589,6 +618,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
     async execute(args, exec) {
       const record = sessions.get(exec.agent?.session.id)
       if (!record?.source) return JSON.stringify({ status: 'model_required', message: 'Load an editable model with viewer_load first.' })
+      focus.assertSelected(exec.agent, record.selectedModel)
       const started = performance.now()
       const operation = (async () => {
         const { result, receipt } = await serialize(record, async () => {
@@ -661,6 +691,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
     async execute(args, exec) {
       const sessionId = exec.agent.session.id, record = sessions.get(sessionId)
       if (!record?.source) throw new Error('Load a GLB model first')
+      focus.assertSelected(exec.agent, record.selectedModel)
       if (args.action === 'close') { record.source.clearShape(args.id); events.notify(sessionId); return JSON.stringify({ status: 'closed' }) }
       const operation = (async () => {
         const { shape, receipt } = await serialize(record, async () => {
@@ -725,7 +756,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       const record = recordFor(agent.session.id)
       const cwd = await ctx.workingDirectory.ensure(agent, exec.signal)
       record.models = await discoverModels(cwd)
-      return JSON.stringify(sceneReport(record), undefined, 2)
+      return JSON.stringify({ ...sceneReport(record), workingModels: focus.paths(agent.session.id) }, undefined, 2)
     },
   })), 'print-studio: read scene tool')
 

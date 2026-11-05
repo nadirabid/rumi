@@ -6,6 +6,8 @@ Full-duplex voice for Rumi: GPT-Live listens and speaks, and the harness does th
 
 The package is Rumi's own, at `@rumi/live-voice`. `src/` owns the OpenAI connection and harness delegation; `client/` owns microphone capture, playback, and the composer control. Rumi includes the bundle in its default profile.
 
+Every voice session includes the mandatory [conversation scope](../../../../RUMI.md#conversation-scope), even when custom instructions are configured. Restart voice to load updated instructions.
+
 ## Configuration
 
 Set a key under **Plugins → Live Voice**. The host saves it through `ctx.credentials`; settings responses contain only presence, a masked hint, and the storage location. Credential-service resolution takes precedence over explicit configuration and the configured legacy key file (`~/.rumi/live-voice.key` in the bundled profile). The launch environment is the final fallback. Saving a replacement does not rewrite legacy files.

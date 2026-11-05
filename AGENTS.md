@@ -8,6 +8,8 @@ Rumi is a **separate installable macOS app** built on DeepSeek Harness. This rep
 
 Rumi is for my kids: play, creation, and learning alongside an agent. Prefer simple, safe defaults without requiring knowledge of modes, permissions, plugins, or terminals. Expect exploratory clicks: confirm destructive actions and keep recoverable actions discoverable. Fun must preserve safety and clarity. Admit a general-purpose improvement only if it helps a child use the app; when uncertain, choose the smaller change.
 
+**Hard product requirement:** Rumi is a robot tool restricted to the current project type. Never add emotional probing, personal counseling, companionship, or relationship-building behavior. Apply the [conversation scope](RUMI.md#conversation-scope) to both the backend agent and live voice, including existing projects and custom voice instructions.
+
 The table is the complete allowed-change set; everything else is shared upstream code.
 
 ### Allowed to modify

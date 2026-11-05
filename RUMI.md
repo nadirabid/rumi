@@ -129,6 +129,12 @@ The creator writes the project's `AGENTS.md`. `@rumi/projects` contributes the f
 
 The first pass has no renaming, deletion, thumbnails, or project switching inside a project. Session logs stay in Rumi's own session storage; only their ids are recorded per project.
 
+## Conversation scope
+
+Rumi is a robot tool restricted to the current project type and directly related setup, learning, and safety. It must not explore feelings or personal matters, offer counseling, build relationships, or answer unrelated questions. Personal concerns receive a brief referral to a parent or trusted adult; immediate danger receives a brief direction to obtain adult or emergency help. Other off-topic requests receive a short redirect to the project. Project frustration is handled through concrete edits, undo, clarification, or pausing.
+
+The projects plugin supplies the current `AGENTS_TEMPLATE.md` to the backend system prompt for existing and new conversations and writes it into new projects. Live Voice includes the same mandatory scope in every `session.start`, including custom instruction configurations. Restart Rumi after installing an updated build and start a new voice connection to load these instructions. Prompt configuration does not by itself establish that every model response complies; behavioral evaluation remains necessary.
+
 ## Print Studio
 
 `apps/rumi/brand/print-studio/` is the 3D-print setup slice. It detects Bambu Studio, the H2D profiles, and discovers the printer over SSDP; the **Plugins → Print Studio** card adopts the printer automatically and signs in once with a Bambu account to fetch the configured printer’s access code. A different account-bound printer never supplies a fallback code for a known serial. The bundled `print-studio-setup` skill guides setup. The access code lives in the credential store, never in the profile patch.

@@ -6,6 +6,8 @@ Rumi 的全双工语音功能：GPT-Live 负责听和说，Harness 执行它委�
 
 该软件包由 Rumi 维护，名称为 `@rumi/live-voice`。`src/` 管理 OpenAI 连接和 Harness 委派；`client/` 管理麦克风采集、播放和输入框旁的控件。Rumi 在默认配置中包含此 Bundle。
 
+每个语音会话都包含强制性的[对话范围要求](../../../../RUMI.md#conversation-scope)，即使配置了自定义指令也不例外。重新启动语音以加载更新的指令。
+
 ## 配置
 
 在 **插件 → Live Voice** 中设置密钥。主机通过 `ctx.credentials` 保存密钥；设置响应仅包含是否已配置、掩码提示和存储位置。凭据服务的解析结果优先于显式配置和指定的旧密钥文件（内置配置使用 `~/.rumi/live-voice.key`）。启动环境是最后的回退来源。保存替代密钥不会改写旧文件。

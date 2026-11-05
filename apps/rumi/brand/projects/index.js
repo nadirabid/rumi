@@ -9,6 +9,7 @@
  * This half owns the filesystem and nothing else: the browser creates the DSH
  * session (it has the session controller) and records the id here.
  */
+import { readFileSync } from 'node:fs'
 import { mkdir, readFile, readdir, writeFile, stat, rename, unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -252,6 +253,14 @@ export function apply(ctx, config = {}) {
   const types = createProjectTypes()
   // A project-type plugin contributes here instead of importing this one.
   ctx.provide('rumiProjectTypes', types)
+
+  const currentInstructions = readFileSync(BASE_TEMPLATE, 'utf8')
+  ctx.inject(['systemPrompt'], (scoped) => {
+    scoped.effect(() => scoped.systemPrompt.section({
+      name: 'rumi:project-scope', order: scoped.systemPrompt.getSectionOrder('TOOL_WORKFLOW'),
+      text: currentInstructions,
+    }), 'rumi project scope')
+  })
 
   const instructionsFor = (sessionId) => projectInstructionsFor(store, sessionId)
 

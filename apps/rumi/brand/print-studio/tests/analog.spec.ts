@@ -97,7 +97,7 @@ it('publishes the analog workflow in model instructions and removes it on unload
     await fork
     expect(renderPrompt(await owner.systemPrompt.assemble())).toMatchSnapshot()
     await fork.dispose()
-    expect(renderPrompt(await owner.systemPrompt.assemble())).not.toContain('viewer_shape_controls')
+    expect(renderPrompt(await owner.systemPrompt.assemble())).not.toContain('viewer_controls')
   } finally { await owner.fiber.dispose() }
 })
 

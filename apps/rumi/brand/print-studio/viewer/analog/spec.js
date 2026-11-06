@@ -1,4 +1,5 @@
 /** Fixed, continuous shape operations in model-local millimetres. */
+import { normalizeControls, parameterValues, legacyControls } from './control-spec.js'
 export const OPERATIONS = ['bulge', 'bend', 'twist', 'taper', 'cut']
 export const INITIAL_VALUES = Object.freeze({ amount: 0.65, spread: 0.5, peakX: 0.5, peakY: 0.5, falloff: 0.5, angle: 0.5 })
 
@@ -14,6 +15,14 @@ export function normalizeValues(value) {
 
 /** Validate a deformation selected by the agent. @param {object} value Operation and local frame. @returns {object} Canonical recipe. */
 export function normalizeShape(value) {
+  if (typeof value.label !== 'string' || !value.label.trim() || value.label.length > 160) throw new Error('Give the region a short label')
+  if (value.operation === 'parameters') {
+    const values = parameterValues(value.values), controls = normalizeControls(value.controls, values)
+    const finish = value.finish ?? 'parameters'
+    if (!['parameters', 'blender'].includes(finish)) throw new Error('Choose parameters or blender for finishing')
+    if (finish === 'blender' && (typeof value.original !== 'string' || !value.original.trim() || typeof value.edit !== 'string' || !value.edit.trim() || value.edit.length > 4000)) throw new Error('Blender previews require the preserved original path and an edit recipe')
+    return { version: 2, operation: 'parameters', label: value.label.trim(), controls, values, finish, ...(finish === 'blender' ? { original: value.original, originalHash: value.originalHash, edit: value.edit.trim() } : {}) }
+  }
   const vector = (key, positive = false) => {
     const v = value[key]
     if (!Array.isArray(v) || v.length !== 3 || v.some(n => !Number.isFinite(n) || Math.abs(n) > 100000 || (positive && n < 0.01))) throw new Error(`Invalid ${key}`)
@@ -26,7 +35,9 @@ export function normalizeShape(value) {
   if (!Number.isFinite(value.limit) || value.limit <= 0 || value.limit > Math.min(...radii)) throw new Error('Limit must be positive and no larger than the smallest region radius')
   if (typeof value.label !== 'string' || !value.label.trim() || value.label.length > 160) throw new Error('Give the region a short label')
   if (!Array.isArray(value.parts) || value.parts.length > 64 || value.parts.some(p => typeof p !== 'string' || !p || p.length > 200)) throw new Error('parts must contain mesh names, or be empty for all meshes')
-  return { version: 1, operation: value.operation, label: value.label.trim(), center, radii, direction: direction.map(n => n / length), limit: value.limit, parts: [...value.parts], values: normalizeValues(value.values) }
+  const values = normalizeValues(value.values), controls = normalizeControls(value.controls ?? legacyControls(value.operation), values)
+  if (controls.some(control => control.axes.some(axis => axis.min !== 0 || axis.max !== 1))) throw new Error('Mesh-operation bindings use normalized ranges 0..1')
+  return { version: 1, operation: value.operation, label: value.label.trim(), center, radii, direction: direction.map(n => n / length), limit: value.limit, parts: [...value.parts], values, controls }
 }
 
 /** Stable right-handed frame: U across, V up, N outward. @param {number[]} n Unit direction. @returns {number[][]} Frame axes. */

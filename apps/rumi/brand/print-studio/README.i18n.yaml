@@ -9,8 +9,8 @@
   en: 9a60197d35201e39
   zh: 93cbf14689151364
 /print-studio/mesh-preview:
-  en: 4d68a9e448fa87c9
-  zh: f2be3d14ea005a10
+  en: ec1677fb67aea329
+  zh: 36568291a98943b0
 /print-studio/client-build:
   en: bebe7ccf8177c5dd
   zh: 7233a8d3b4a7eb93
@@ -24,11 +24,11 @@
   en: 8657e6546868aed0
   zh: 0ba3c43bfb979f3e
 /print-studio/editable-three-js-models:
-  en: 7861a0adb283d1be
-  zh: 5ca84212f0747305
+  en: 168357ca7ebc806e
+  zh: 755910c19b1e972a
 /print-studio/editable-three-js-models/visual-clarification:
-  en: 1b42b59b468de63d
-  zh: 62ec698e0b16d00d
+  en: 52c89d24062a4c5d
+  zh: 8a89520f7e5c65ff
 /print-studio/editable-three-js-models/highlight-diagnostics:
   en: 50e9aa998a3a99a3
   zh: 66fdc5d522c45ca4
@@ -36,8 +36,11 @@
   en: 89a0b811599b7bc9
   zh: f0f82c0d0e60c451
 /print-studio/analog-mesh-editing:
-  en: ec0e8dba948a9797
-  zh: 1568888ff56f8adf
+  en: 0e650d2578f0c05f
+  zh: 5f084723b3a7c6e0
+/print-studio/live-model-context:
+  en: 391d18501eed9de1
+  zh: 8730661248666fa4
 /print-studio/model-selection-and-agent-work:
   en: 3ca14c0cb56b7ebc
   zh: a77b1fb4aa0b06a8

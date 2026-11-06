@@ -1,11 +1,12 @@
 /** Versioned local model modules. Source is served as data; only the renderer executes it. */
-import { readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { readdir, readFile, realpath, stat, writeFile, rename, rm } from 'node:fs/promises'
 import { dirname, extname, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { validateGlb, GLB_MAX_BYTES } from './glb.js'
 import { normalizeHighlight } from './highlight.js'
 import { normalizePlacement } from './transform.js'
 import { normalizeShape, normalizeValues } from './analog/spec.js'
+import { controlValues, parameterValues } from './analog/control-spec.js'
 
 const ROUTE = '/api/print-studio/viewer'
 const MAX_FILES = 64
@@ -31,7 +32,7 @@ export async function createSource(ctx, path, workspace) {
   let sourceError = null
   let buildError = null
   const snapshots = []
-  const state = { path, format, revision: 0, url: null, transform: normalizePlacement(), report: null, camera: null, highlight: null, analog: null, contentHash: null }
+  const state = { path, format, revision: 0, url: null, transform: normalizePlacement(), report: null, camera: null, highlight: null, analog: null, contentHash: null, parameters: {} }
 
   async function scan() {
     const files = new Map()
@@ -63,7 +64,16 @@ export async function createSource(ctx, path, workspace) {
     if (!files.has(entryName)) throw new Error('The model entry file is missing')
     const digest = createHash('sha256')
     for (const [name, content] of files) digest.update(name).update('\0').update(content).update('\0')
-    return { files, hash: digest.digest('hex') }
+    let parameters = {}
+    if (format === 'javascript') {
+      const metadata = resolve(root, '.rumi-parameters.json')
+      try {
+        if (!inside(root, await realpath(metadata)) || (await stat(metadata)).size > 8192) throw new Error('Invalid saved model parameters')
+        parameters = parameterValues(JSON.parse(await readFile(metadata, 'utf8')))
+      } catch (error) { if (error.code !== 'ENOENT') throw error }
+      digest.update(JSON.stringify(parameters))
+    }
+    return { files, hash: digest.digest('hex'), parameters }
   }
 
   async function update(initial) {
@@ -98,7 +108,8 @@ export async function createSource(ctx, path, workspace) {
       state.revision++
       state.highlight = null
       state.analog = null
-      state.contentHash = format === 'glb' ? createHash('sha256').update(next.files.get(entryName)).digest('hex') : null
+      state.contentHash = format === 'glb' ? createHash('sha256').update(next.files.get(entryName)).digest('hex') : next.hash
+      state.parameters = next.parameters
       sourceError = null
       buildError = null
       state.report = null
@@ -141,7 +152,7 @@ export async function createSource(ctx, path, workspace) {
     highlight(value) {
       if (closed) return { status: 'closed' }
       if (value.path !== state.path || value.revision !== state.revision || value.url !== state.url || sourceError || buildError || candidate) {
-        return { status: 'stale_model', message: 'Read mesh_state and resolve model errors before highlighting again.' }
+        return { status: 'stale_model', message: 'Read the current meshState context and resolve model errors before highlighting again.' }
       }
       if (state.analog?.operation === 'cut') return { status: 'active_cut', message: 'The cut owns its continuous plane guide. Finish or discard this edit before adding a different region highlight.' }
       const next = normalizeHighlight(value)
@@ -150,8 +161,8 @@ export async function createSource(ctx, path, workspace) {
         message: 'Presentation state updated; viewer display and user confirmation are not acknowledged.' }
     },
     shape(value) {
-      if (value.path !== state.path || value.revision !== state.revision || value.url !== state.url || sourceError || buildError || candidate) throw new Error('Model changed; read mesh_state again')
-      if (format !== 'glb') throw new Error('Shape controls require a Blender GLB')
+      if (value.path !== state.path || value.revision !== state.revision || value.url !== state.url || sourceError || buildError || candidate) throw new Error('Model changed; read the current meshState context again')
+      if ((value.operation === 'parameters') !== (format === 'javascript')) throw new Error('Parameter controls require a JavaScript model; deformation controls require a GLB')
       state.analog = { ...normalizeShape(value), id: randomUUID(), frozen: false, freezeRequested: false, rendered: false, editRevision: 0 }
       if (state.analog.operation === 'cut') state.highlight = null
       return state.analog
@@ -159,13 +170,22 @@ export async function createSource(ctx, path, workspace) {
     shapeFeedback(value) {
       const shape = state.analog
       if (!shape || value.id !== shape.id || value.url !== state.url || shape.frozen) return false
+      if (value.status === 'viewer_hidden' || value.status === 'render_failed') {
+        if (value.status === 'render_failed' && (typeof value.error !== 'string' || !value.error)) throw new Error('Report the control rendering error')
+        shape.rendered = false
+        shape.error = { kind: value.status, message: value.status === 'render_failed' ? value.error.slice(0, 2000) : 'Bring Rumi to the foreground to show the controls.' }
+        return true
+      }
       if (value.status === 'adjusted' || value.status === 'frozen') {
         if (!Number.isSafeInteger(value.sequence) || value.sequence <= shape.editRevision) return false
         if (value.status === 'frozen' && !shape.freezeRequested) throw new Error('Freeze was not requested')
-        shape.values = normalizeValues(value.values); shape.editRevision = value.sequence
+        shape.values = controlValues(shape, value.values)
+        if (shape.operation !== 'parameters') normalizeValues(shape.values)
+        shape.editRevision = value.sequence
         if (value.status === 'frozen') { shape.frozen = true; state.highlight = null }
       } else if (value.status !== 'rendered') throw new Error('Unknown shape feedback')
       shape.rendered = true
+      shape.error = null
       return true
     },
     requestShapeFreeze(id) { if (id !== state.analog?.id || !state.analog.rendered) throw new Error('Read the rendered controls first'); state.analog.freezeRequested = true },
@@ -175,6 +195,19 @@ export async function createSource(ctx, path, workspace) {
       return { ...state.analog, source: state.path, sourceHash: state.contentHash }
     },
     clearShape(id) { if (id !== state.analog?.id) throw new Error('Shape controls changed'); state.analog = null; state.highlight = null },
+    async saveParameters(id) {
+      if (format !== 'javascript' || state.analog?.operation !== 'parameters' || state.analog.id !== id || !state.analog.frozen) throw new Error('Freeze parameter controls before saving')
+      if (state.analog.finish === 'blender') throw new Error('This preview must be finished in Blender using its frozen recipe')
+      const values = { ...state.parameters, ...controlValues(state.analog, state.analog.values) }
+      if ((await scan()).hash !== state.contentHash || !inside(await realpath(workspace), await realpath(root))) throw new Error('Model changed before parameter save')
+      const temporary = resolve(root, `.rumi-parameters-${randomUUID()}.tmp`)
+      await writeFile(temporary, JSON.stringify(values)+'\n', { mode: 0o600, flag: 'wx' })
+      try { await rename(temporary, resolve(root, '.rumi-parameters.json')) }
+      finally { await rm(temporary, { force: true }) }
+      await update(true)
+      if (sourceError) throw new Error(sourceError.message)
+      return { parameters: { ...state.parameters }, revision: state.revision }
+    },
     camera(value) { state.camera = { ...value, id: randomUUID() } },
     feedback(value) {
       if (value.revision !== state.revision || value.url !== state.url

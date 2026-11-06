@@ -68,7 +68,7 @@ export function createModelFocus(ctx, { read, notify }) {
     /** Reject selected-model operations when browsing has moved away from declared work. */
     assertSelected(agent, selected) {
       const target = agents.get(agent)?.working
-      if (target && target !== selected) throw new Error(`Work is declared on ${target}, but the viewer selection differs. Read mesh_state and resolve the target before acting.`)
+      if (target && target !== selected) throw new Error(`Work is declared on ${target}, but the viewer selection differs. Read the current meshState context and resolve the target before acting.`)
     },
     /** Active declared paths for one conversation, including concurrent agents. */
     paths(sessionId) {

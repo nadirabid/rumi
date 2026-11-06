@@ -276,10 +276,10 @@ export function installViewer(ctx, React, primitives) {
       view?.design?.highlight?.id, view?.design?.url, JSON.stringify(view?.design?.transform), view?.design?.camera?.id,
       view?.sessionId, JSON.stringify(view?.volume),
     ])
-    function sendShape(status, values) {
+    function sendShape(status, values, error) {
       const spec = view?.design?.analog
       if (!spec) return Promise.resolve()
-      const body = { id: spec.id, url: view.design.url, status, values, sequence: ++analogSequence.current, metrics: viewport.current?.shapeMetrics?.() }
+      const body = { id: spec.id, url: view.design.url, status, values, error, sequence: ++analogSequence.current, metrics: viewport.current?.shapeMetrics?.() }
       const signal = analogAbort.current?.signal
       const post = async () => {
         if (signal?.aborted) return
@@ -300,13 +300,34 @@ export function installViewer(ctx, React, primitives) {
         analogId.current = spec?.id; analogValues.current = spec?.values; analogSequence.current = spec?.editRevision ?? 0
         analogDelivery.current = Promise.resolve()
       }
-      void designReady.current.then(() => {
-        if (!active || !viewport.current) return
-        const values = analogValues.current ?? spec?.values
-        const id = viewport.current.applyShape?.(spec ? { ...spec, values } : null)
-        if (id && !spec.frozen) return sendShape(spec.freezeRequested ? 'frozen' : 'rendered', values)
-      }).catch(() => { if (active) setBuildError('buildFailed') })
-      return () => { active = false }
+      let attempt = 0
+      const renderControls = async () => {
+        const request = ++attempt
+        let status, values
+        try {
+          await designReady.current
+          if (!active || request !== attempt || !viewport.current) return
+          values = analogValues.current ?? spec?.values
+          if (spec && !spec.frozen && document.hidden) {
+            status = 'viewer_hidden'
+          } else {
+            const id = viewport.current.applyShape?.(spec ? { ...spec, values } : null)
+            if (id && !spec.frozen) { setBuildError(null); status = spec.freezeRequested ? 'frozen' : 'rendered' }
+          }
+        } catch (error) {
+          if (!active) return
+          setBuildError('buildFailed')
+          try { await sendShape('render_failed', values, error instanceof Error ? error.message : String(error)) }
+          catch (_deliveryError) { if (active) setBuildError('feedbackFailed') }
+          return
+        }
+        if (status) try { await sendShape(status, values) }
+        catch (_deliveryError) { if (active) setBuildError('feedbackFailed') }
+      }
+      void renderControls()
+      const visible = () => { if (!document.hidden) void renderControls() }
+      document.addEventListener('visibilitychange', visible)
+      return () => { active = false; document.removeEventListener('visibilitychange', visible) }
     }, [view?.design?.analog?.id, view?.design?.analog?.freezeRequested, view?.design?.analog?.frozen, view?.design?.url])
     React.useEffect(() => () => analogAbort.current?.abort(), [])
     React.useEffect(() => {
@@ -339,7 +360,11 @@ export function installViewer(ctx, React, primitives) {
           key: mode, variant: 'ghost', size: 'sm', 'aria-pressed': cursorMode === mode,
           onClick: () => { setCursorMode(mode); viewport.current?.setCursorMode(mode) },
         }, t(`cursor_${mode}`)))),
-      view?.design?.analog ? h(AnalogPanel, { key: view.design.analog.id, spec: view.design.analog, t, onChange: values => { analogValues.current = values; viewport.current?.updateShape(values) }, onRelease: values => { void sendShape('adjusted', values).catch(_error => { /* sendShape reports delivery failure in the viewer. */ }) } }) : null,
+      view?.design?.analog ? h(AnalogPanel, { key: view.design.analog.id, spec: view.design.analog, t, onChange: values => {
+        try { viewport.current?.updateShape(values) }
+        catch (_error) { setBuildError('buildFailed'); return false }
+        analogValues.current = values; setBuildError(null); return true
+      }, onRelease: values => { void sendShape('adjusted', values).catch(_error => { /* sendShape reports delivery failure in the viewer. */ }) } }) : null,
       h('div', { className: 'pv-stage', ref: holder, role: 'img', 'aria-label': t('view'), 'data-testid': 'print-viewport' }),
       buildError && !failed && view?.design?.error?.kind !== 'source'
         ? h('p', { role: 'alert', className: view?.design?.analog ? 'pv-error av-error' : 'pv-error' }, t(buildError)) : null)

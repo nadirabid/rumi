@@ -22,11 +22,12 @@ export function disposeModel(root) {
 /**
  * Build a static mesh hierarchy and extract the same visible triangles used for measurement.
  * @param {Function} build - Project's synchronous build(THREE) export.
+ * @param {object} [parameters] - Numeric values consumed by the model builder.
  * @returns {{root: THREE.Object3D, positions: Float32Array}} Owned model and world-space triangles.
  */
-export function buildModel(build) {
+export function buildModel(build, parameters = {}) {
   if (typeof build !== 'function' || build.constructor.name === 'AsyncFunction') throw new Error('Export a synchronous build(THREE) function')
-  const root = build(THREE)
+  const root = build(THREE, Object.freeze({ ...parameters }))
   if (root instanceof Promise) {
     root.catch(() => { /* Async designs are rejected; consume their eventual rejection. */ })
     throw new Error('build(THREE) must return a Mesh or Group synchronously')

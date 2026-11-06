@@ -184,7 +184,7 @@ def apply_shape_controls(recipe_path):
     import hashlib
     recipe = json.loads(Path(recipe_path).read_text())
     if recipe.get('version') != 1 or not recipe.get('frozen') or recipe.get('operation') not in ['bulge', 'bend', 'twist', 'taper', 'cut']:
-        raise ValueError('Use a frozen v1 recipe from viewer_shape_controls')
+        raise ValueError('Use a frozen v1 recipe from viewer_controls')
     values = recipe.get('values', {})
     for key in ['amount', 'spread', 'peakX', 'peakY', 'falloff', 'angle']:
         if not isinstance(values.get(key), (int, float)) or not math.isfinite(values[key]) or not 0 <= values[key] <= 1:

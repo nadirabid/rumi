@@ -8,8 +8,9 @@
  * resizing never rewrites a mesh, and the browser renders the same geometry it
  * already fetched.
  */
-import { mkdir, realpath, writeFile } from 'node:fs/promises'
-import { basename, extname, relative, resolve, sep } from 'node:path'
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
 import { analyzeMesh } from './checks.js'
 import { createHistory } from './document.js'
 import { STL_LIMITS, encodeStl, parseStl } from './stl.js'
@@ -187,11 +188,21 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
   const captureJobs = new Set()
   ctx.inject(['systemPrompt'], scoped => {
     scoped.effect(() => scoped.systemPrompt.context({
+      name: 'rumi:mesh-state', order: scoped.systemPrompt.getContextOrder('WEB_SURFACE'), interpolate: false, required: true,
+      text: ({ agent }) => {
+        if (!agent) return ''
+        const record = sessions.get(agent.session.id)
+        return JSON.stringify({ meshState: record
+          ? { ...sceneReport(record), workingModels: focus.paths(agent.session.id) }
+          : { status: 'unavailable', reason: 'viewer_not_initialized' } })
+      },
+    }), 'print viewer: live mesh context')
+    scoped.effect(() => scoped.systemPrompt.context({
       name: 'rumi:active-shape', order: scoped.systemPrompt.getContextOrder('WEB_SURFACE'), interpolate: false,
       text: context => {
         const shape = sessions.get(context.agent?.session.id)?.source?.state().analog
         if (!shape) return ''
-        return `Unresolved mesh edit: ${JSON.stringify({ id: shape.id, region: shape.label, operation: shape.operation, values: shape.values, frozen: shape.frozen })}. Read mesh_state. Keep this edit as the focus while tuning. If the person is satisfied or moves to another task, finish the current edit first: freeze, apply the captured recipe in Blender, publish and load it. If already frozen, complete that save. Explicit cancel/revert uses close instead. Verify both controls and highlight are cleared. Do not require a special phrase.`
+        return `Unresolved model edit: ${JSON.stringify({ id: shape.id, label: shape.label, operation: shape.operation, controls: shape.controls, values: shape.values, frozen: shape.frozen, finish: shape.finish, original: shape.original, edit: shape.edit })}. Keep controls open while the person explores. Satisfaction or moving to another task resolves the current edit first: freeze the latest visible values, then ${shape.operation === 'parameters' && shape.finish !== 'blender' ? 'call viewer_controls save with the frozen id' : 'apply the captured recipe in Blender, publish and load the revision'}. If already frozen, finish saving. Explicit cancel uses close. Read interactive-controls; do not require a special phrase.`
       },
     }), 'print-studio active edit context')
   })
@@ -511,7 +522,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_working_model',
-    description: 'Declare which existing model you are actively inspecting or editing. Shows a green dot without changing the user selection. Use a path from mesh_state.models; call before work and when changing targets. Omit path to clear before clarification or unrelated work. The host also clears it when your agent stops or is disposed. This declaration does not authorize edits or resolve ambiguous references.',
+    description: 'Declare which existing model you are actively inspecting or editing. Shows a green dot without changing the user selection. Use a path from meshState.models; call before work and when changing targets. Omit path to clear before clarification or unrelated work. The host also clears it when your agent stops or is disposed. This declaration does not authorize edits or resolve ambiguous references.',
     parameters: { path: { type: 'string', description: 'Discovered model entry path. Omit to clear the work indicator.' } },
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     isConcurrencySafe: () => false, timeoutMs: 10_000,
@@ -523,7 +534,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
         const cwd = await ctx.workingDirectory.ensure(exec.agent, exec.signal)
         record.models = await discoverModels(cwd)
         path = relative(cwd, resolve(cwd, args.path)).split(sep).join('/')
-        if (!record.models.some(model => model.path === path)) throw new Error('Model entry not found; read mesh_state')
+        if (!record.models.some(model => model.path === path)) throw new Error('Model entry not found; read the current meshState context')
       }
       exec.signal.throwIfAborted()
       if (closed) throw new Error('Model preview is closed')
@@ -539,7 +550,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       + 'Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. '
       + 'Self-contained static GLB only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. '
       + 'Legacy .js/.mjs entries exporting synchronous build(THREE) remain supported in millimetres and Z up. '
-      + 'Read mesh_state for load errors and measurements. Loading does not certify print readiness.',
+      + 'Read the current meshState context for load errors and measurements. Loading does not certify print readiness.',
     parameters: {
       path: { type: 'string', required: true, description: 'Model entry to bring into view, for example models/helmet/model.glb.' },
       buildVolume: {
@@ -594,11 +605,11 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_highlight',
-    description: 'Replace temporary Gaussian wireframe regions on the editable model loaded by viewer_load. Read mesh_state for design.path, revision and url; inspect model source to locate regions. Coordinates are model-local millimetres before viewer_transform, including part transforms. Rotation uses XYZ Euler degrees. Up to eight ellipsoids combine by maximum influence, with a fixed soft fade. All intersected surfaces, including the back, may be highlighted. Empty blobs clears. Does not edit geometry or exports. Waits for the visible viewer to acknowledge the matching highlight. Returns rendered only after acknowledgment; not_rendered or superseded is not success. Rendering is not user confirmation. Use this tool to visually ground region-specific edits and explanations of named parts. Follow the user’s requested action and clarify ambiguous intent; no special confirmation phrase is required. Use clarify-mesh-changes for guidance.',
+    description: 'Replace temporary Gaussian wireframe regions on the editable model loaded by viewer_load. Read the current meshState context for design.path, revision and url; inspect model source to locate regions. Coordinates are model-local millimetres before viewer_transform, including part transforms. Rotation uses XYZ Euler degrees. Up to eight ellipsoids combine by maximum influence, with a fixed soft fade. All intersected surfaces, including the back, may be highlighted. Empty blobs clears. Does not edit geometry or exports. Waits for the visible viewer to acknowledge the matching highlight. Returns rendered only after acknowledgment; not_rendered or superseded is not success. Rendering is not user confirmation. Use this tool to visually ground region-specific edits and explanations of named parts. Follow the user’s requested action and clarify ambiguous intent; no special confirmation phrase is required. Use clarify-mesh-changes for guidance.',
     parameters: {
-      path: { type: 'string', required: true, description: 'Exact design.path from mesh_state.' },
-      revision: { type: 'integer', required: true, description: 'Exact design.revision from mesh_state.' },
-      url: { type: 'string', required: true, description: 'Exact design.url from mesh_state; identifies the loaded instance.' },
+      path: { type: 'string', required: true, description: 'Exact design.path from the current meshState context.' },
+      revision: { type: 'integer', required: true, description: 'Exact design.revision from the current meshState context.' },
+      url: { type: 'string', required: true, description: 'Exact design.url from the current meshState context; identifies the loaded instance.' },
       label: { type: 'string', required: true, description: 'Short description of the proposed region, at most 200 characters. May be empty when clearing.' },
       selection: { type: 'object', additionalProperties: false, description: 'Optional exact surface restriction from cursor region.selection. Copy with modelLocalBlob to visually confirm cursor driven mesh highlighting.', properties: {
         partPath: { type: 'array', required: true, items: { type: 'string' }, description: 'Exact hierarchy path from region.selection.' },
@@ -643,7 +654,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
         return JSON.stringify({ ...result, status, reason, elapsedMs: Math.round(performance.now() - started), message: status === 'rendered'
           ? 'The visible viewer rendered this teal highlight. Use it as the visual reference for the requested change.'
           : reason === 'viewer_hidden' ? 'The viewer reports its document is hidden. Bring Rumi to the foreground and retry the highlight.'
-          : reason === 'render_failed' ? 'The viewer reported a rendering error. Read mesh_state for the error before retrying.'
+          : reason === 'render_failed' ? 'The viewer reported a rendering error. Read the current meshState context for the error before retrying.'
           : 'No matching rendering acknowledgment arrived. Visibility is unknown; do not claim the highlight is visible or absent. Ask the person to open the preview and retry.' })
       })()
       captureJobs.add(operation)
@@ -659,55 +670,107 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       try {
         const value = await request.json(), record = sessions.get(sessionId)
         if (!record?.source?.shapeFeedback(value)) return json({ error: 'stale_controls' }, 409)
-        receipts.acknowledge(sessionId, value.status === 'frozen' ? `${value.id}:freeze` : value.id)
-        if (value.status === 'frozen') events.notify(sessionId)
-        diagnostics.record(sessionId, 'shape.feedback', { id: value.id, status: value.status, values: value.values, metrics: value.metrics })
+        const receiptId = record.source.state().analog.freezeRequested ? `${value.id}:freeze` : value.id
+        if (value.status === 'viewer_hidden' || value.status === 'render_failed') receipts.fail(sessionId, receiptId, value.status)
+        else if (value.status === 'rendered' || value.status === 'frozen') receipts.acknowledge(sessionId, value.status === 'frozen' ? `${value.id}:freeze` : value.id)
+        if (value.status !== 'adjusted') events.notify(sessionId)
+        diagnostics.record(sessionId, 'shape.feedback', { id: value.id, status: value.status, error: value.error, values: value.values, metrics: value.metrics })
         return json({ ok: true })
       } catch (_error) { return json({ error: 'invalid_shape_feedback' }, 400) }
     },
   }), 'print viewer: shape feedback')
 
   ctx.effect(() => ctx.tools.register(defineTool({
-    name: 'viewer_shape_controls',
-    description: 'Give the person continuous analog controls over a real local deformation: bulge, bend, twist, taper, or a continuous planar cut. Read mesh_state. For deformations, visually highlight the region first. Cut mode supplies its own continuous teal cut-line guide; do not assemble Gaussian blobs around a cut. Open uses a model-local millimetre ellipsoid in a frame whose N axis is direction, U is across, V is up. Strength, spread, tilt, peak position, and falloff respond locally without agent calls. parts contains exact mesh names, or [] for all intersecting meshes. For cut, direction points toward the retained side (bottom trim: [0,0,1]); center is the neutral plane point, amount shifts height by +/-limit mm, angle tilts along V and spread leans along U by +/-60 degrees. At .5/.5 both angles are neutral; peak and falloff are unused. The plane crosses all selected parts, without an ellipsoid boundary. Preview caps are visual; Blender performs the real capped cut on finish. Extrusion, curved cuts, and bevel are not supported by these controls. For the helmet back prefer bulge. Do not overwrite the original while tuning. When the person is satisfied or moves on, freeze captures the latest controls from the visible viewer and writes a recipe; use blender_status and the helper apply_shape_controls(recipePath) on the original .blend, publish a new revision, then viewer_load. Close discards the local edit. Read analog-shaping for the workflow. Only rendered confirms the controls and operation guide are displayed.',
+    name: 'viewer_controls',
+    description: 'Open labeled sliders, pads, or curves bound to real model values. Read interactive-controls first. Supply controls with labels, axis keys, ranges, steps and reset values, plus initial values. operation parameters binds exported parameters of a JavaScript model build(THREE, parameters); one key can drive multiple features such as both eyes. Other operations bind GLB deformation values; read analog-shaping for their geometry. If a requested parameter is not exposed, prepare a faithful parametric model before opening controls; never claim a cosmetic label is a working binding. Open controls before making a requested user adjustment. Only rendered confirms visibility. Freeze captures the latest visible values. For final parameter models, save persists frozen values and closes the edit. For a temporary parameter preview of an edit to an existing model, set finish to blender, provide the preserved original and semantic edit recipe, then freeze and apply the values to the original in Blender, check printability, publish and load the result. For GLB deformations, apply the frozen recipe through Blender and load the saved revision. Close cancels and restores the saved preview. Preserve unrelated features and the original model.',
     parameters: {
-      action: { type: 'string', required: true, enum: ['open', 'freeze', 'close'] },
+      action: { type: 'string', required: true, enum: ['open', 'freeze', 'save', 'close'] },
       id: { type: 'string', description: 'Current design.analog.id for freeze or close.' },
-      path: { type: 'string', description: 'Exact design.path for open.' },
+      path: { type: 'string', description: 'Current design.path for open, absolute or project-relative.' },
       revision: { type: 'integer', description: 'Exact design.revision for open.' },
       url: { type: 'string', description: 'Exact design.url for open.' },
       label: { type: 'string', description: 'Short plain-language region label.' },
-      operation: { type: 'string', enum: ['bulge', 'bend', 'twist', 'taper', 'cut'] },
+      operation: { type: 'string', enum: ['parameters', 'bulge', 'bend', 'twist', 'taper', 'cut'], description: 'parameters binds JavaScript model parameters; other adapters deform a GLB.' },
+      finish: { type: 'string', enum: ['parameters', 'blender'], description: 'For parameter controls: parameters saves a final JavaScript model; blender finishes a temporary preview on a preserved original.' },
+      original: { type: 'string', description: 'Preserved source path for a Blender-finished preview.' },
+      edit: { type: 'string', description: 'Semantic Blender edit recipe, including how parameter values affect the original and what must be preserved.' },
       center: { type: 'array', items: { type: 'number' }, description: 'Three model-local coordinates, mm.' },
       radii: { type: 'array', items: { type: 'number' }, description: 'Three positive extents along U,V,N, mm; for cut these bound the allowed limit, not the plane footprint.' },
       direction: { type: 'array', items: { type: 'number' }, description: 'Three numbers: outward axis. Back of helmet is often [0,1,0]; inspect source.' },
       limit: { type: 'number', description: 'Maximum bulge displacement or cut-height travel either side of center, mm, no larger than the smallest radius.' },
       parts: { type: 'array', items: { type: 'string' }, description: 'Exact mesh names to deform; [] includes all meshes in the soft region.' },
-      values: { type: 'object', additionalProperties: false, properties: Object.fromEntries(['amount','spread','peakX','peakY','falloff','angle'].map(key => [key, { type: 'number', required: true, description: 'Normalized 0..1. Neutral amount .5, spread .5, peak .5/.5, tilt angle .5. Positive bulge amount > .5.' }])) },
+      values: { type: 'object', additionalProperties: true, description: 'Numeric initial values keyed by model parameter name. GLB adapters use amount, spread, peakX, peakY, falloff, angle in 0..1.' },
+      controls: { type: 'array', description: 'Labeled controls. Supply for open. Each axis key binds a value; pad axes are horizontal then vertical.', items: {
+        type: 'object', additionalProperties: false, properties: {
+          kind: { type: 'string', required: true, enum: ['slider', 'pad', 'curve'] },
+          label: { type: 'string', required: true, description: 'Short label in the user’s language, such as Eye tilt.' },
+          axes: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
+            key: { type: 'string', required: true },
+            ...Object.fromEntries(['min', 'max', 'step', 'reset'].map(key => [key, { type: 'number', required: true }])),
+          } } },
+        },
+      } },
     },
     output: { schema: { type: 'string' }, render: (_args,value) => [{ type: 'text', text: value }] },
     presentCall: args => ({ card: 'generic', title: args.action === 'open' ? 'Shape controls' : 'Update shape controls', kind: 'write' }),
     isConcurrencySafe: () => false, timeoutMs: 15_000,
     async execute(args, exec) {
       const sessionId = exec.agent.session.id, record = sessions.get(sessionId)
-      if (!record?.source) throw new Error('Load a GLB model first')
+      if (!record?.source) throw new Error('Load a model first')
+      if (args.action === 'open' && !args.controls) throw new Error('Declare the labeled controls and their bindings before opening')
       focus.assertSelected(exec.agent, record.selectedModel)
       if (args.action === 'close') { record.source.clearShape(args.id); events.notify(sessionId); return JSON.stringify({ status: 'closed' }) }
       const operation = (async () => {
+        if (args.action === 'save') return serialize(record, async () => {
+          await record.source.poll()
+          const saved = await record.source.saveParameters(args.id)
+          events.notify(sessionId)
+          return JSON.stringify({ status: 'saved', ...saved })
+        })
         const { shape, receipt } = await serialize(record, async () => {
           await record.source.poll()
           if (args.action === 'freeze') record.source.requestShapeFreeze(args.id)
-          const shape = args.action === 'open' ? record.source.shape(args) : record.source.state().analog
+          let original = args.original, originalHash, finish = args.finish, edit = args.edit
+          if (args.action === 'open' && args.operation === 'parameters') {
+            const marker = resolve(dirname(await realpath(resolve(record.cwd, args.path))), '.rumi-preview.json')
+            let metadata
+            try {
+              const target = await realpath(marker), part = relative(await realpath(record.cwd), target)
+              if (!part || part === '..' || part.startsWith(`..${sep}`)) throw new Error('Preview marker must stay inside the project')
+              const bytes = await readFile(target)
+              if (bytes.length > 8192) throw new Error('Preview marker exceeds 8192 bytes')
+              metadata = JSON.parse(bytes.toString('utf8'))
+            } catch (error) { if (error.code !== 'ENOENT') throw error }
+            if (metadata !== undefined) {
+              if (!metadata || typeof metadata.original !== 'string' || !metadata.original || typeof metadata.edit !== 'string' || !metadata.edit) throw new Error('Invalid .rumi-preview.json: provide original and edit')
+              finish = 'blender'; original = metadata.original; edit = metadata.edit
+            }
+          }
+          if (args.action === 'open' && finish === 'blender') {
+            if (typeof original !== 'string' || !original) throw new Error('Provide the preserved original path')
+            original = await realpath(resolve(record.cwd, original))
+            const inside = relative(await realpath(record.cwd), original)
+            if (!inside || inside === '..' || inside.startsWith(`..${sep}`)) throw new Error('Preserved original must be a file inside the project')
+            originalHash = createHash('sha256').update(await readFile(original)).digest('hex')
+          }
+          const shape = args.action === 'open'
+            ? record.source.shape({ ...args, finish, edit, original, originalHash, path: await realpath(resolve(record.cwd, args.path)) })
+            : record.source.state().analog
           const receipt = receipts.wait(sessionId, args.action === 'freeze' ? `${shape.id}:freeze` : shape.id, exec.signal)
           events.notify(sessionId)
           return { shape, receipt }
         })
         const status = await receipt
         exec.signal.throwIfAborted()
-        if (status !== 'rendered') return JSON.stringify({ status: 'not_rendered', reason: status, id: shape.id })
+        if (status !== 'rendered') return JSON.stringify({ status: 'not_rendered', reason: status, id: shape.id,
+          error: record.source.state().analog?.id === shape.id ? record.source.state().analog.error ?? null : null,
+          message: status === 'viewer_hidden' ? 'The viewer is hidden. Bring Rumi to the foreground; controls will render when visible. This does not mean the binding is unsupported.'
+            : status === 'render_failed' ? 'The control preview failed. Correct the reported binding or model error before reopening controls.'
+            : 'No rendering acknowledgment arrived. Check viewer visibility and errors before retrying; a timeout does not establish that parameter controls are unsupported.' })
         if (args.action === 'freeze') {
           await record.source.poll()
           const recipe = record.source.freezeShape(args.id)
+          if (recipe.finish === 'blender' && createHash('sha256').update(await readFile(recipe.original)).digest('hex') !== recipe.originalHash) throw new Error('Preserved original changed; reopen controls with the correct source')
           const directory = resolve(record.cwd, 'artifacts', 'shape-controls')
           await mkdir(directory, { recursive: true })
           const inside = relative(await realpath(record.cwd), await realpath(directory))
@@ -741,24 +804,6 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       return JSON.stringify(source.state())
     },
   })), 'print viewer: camera')
-
-  ctx.effect(() => ctx.tools.register(defineTool({
-    name: 'mesh_state',
-    description: 'Read the 3D preview scene without changing it: every object, its placement, and the measurements of its composed mesh. '
-      + 'Includes discovered models and the selected model. Saved GLB and JavaScript models reload when the viewer opens; STL scene objects remain in memory. Read this tool instead of assuming what is on screen.',
-    parameters: {},
-    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
-    isConcurrencySafe: () => true,
-    timeoutMs: 10_000,
-    async execute(_args, exec) {
-      const agent = exec.agent
-      if (agent === undefined) throw new Error('Mesh preview requires a conversation')
-      const record = recordFor(agent.session.id)
-      const cwd = await ctx.workingDirectory.ensure(agent, exec.signal)
-      record.models = await discoverModels(cwd)
-      return JSON.stringify({ ...sceneReport(record), workingModels: focus.paths(agent.session.id) }, undefined, 2)
-    },
-  })), 'print-studio: read scene tool')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'mesh_open',

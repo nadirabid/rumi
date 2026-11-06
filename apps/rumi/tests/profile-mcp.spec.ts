@@ -37,11 +37,25 @@ it('retains shared resources and question dependencies for existing sessions', (
     for (const id of ['standard', 'ptc', 'cordis']) {
       expect(rows.find(row => row.id === `preset-${id}`)?.disabled).toBe(true)
     }
-    expect(rows.find(row => row.id === 'rumi-presets')).toMatchObject({ name: '@rumi/brand/preset' })
+    expect(rows.find(row => row.id === 'rumi-presets')).toMatchObject({
+      name: '@rumi/brand/preset', config: { compactionThresholdRatio: 0.3 },
+    })
     expect(warnings).toEqual([])
   } finally {
     rmSync(home, { recursive: true, force: true })
   }
+})
+
+it('registers the configured compaction threshold on every active Rumi preset', async () => {
+  const { apply, Config } = await import('../brand/preset.js')
+  const registered: string[] = []
+  const ctx = { agentPresets: { register(preset: { id: string; plugins: { id: string; config: { name: string; config: object }[] }[] }) {
+    const group = preset.plugins.find(row => row.id === 'compaction')!
+    expect(group.config.find(row => row.name === '@deepseek-ai/dsh-compaction-basic')?.config).toEqual({ thresholdRatio: 0.3 })
+    registered.push(preset.id)
+  } } }
+  for await (const _ of apply(ctx, Config.parse({ compactionThresholdRatio: 0.3 }))) { /* Registration runs while the plugin mounts. */ }
+  expect(registered).toEqual(['standard', 'ptc', 'cordis'])
 })
 
 it('removes questionnaire tools while retaining all other preset capabilities', async () => {

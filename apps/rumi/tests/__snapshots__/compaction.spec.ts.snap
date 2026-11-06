@@ -1,0 +1,17 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`uses the registered 0.3 policy for automatic session compaction 1`] = `
+{
+  "belowThreshold": true,
+  "ratio": 0.3,
+  "summaries": 1,
+}
+`;
+
+exports[`uses the registered 0.8 policy for automatic session compaction 1`] = `
+{
+  "belowThreshold": false,
+  "ratio": 0.8,
+  "summaries": 0,
+}
+`;

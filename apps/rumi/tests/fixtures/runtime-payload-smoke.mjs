@@ -135,6 +135,11 @@ function checkHtml() {
 try {
   const builtin = requireRuntime('node-addon-require-builtin')
   assert.equal(typeof builtin.requireBuiltin('internal/modules/esm/loader').getOrInitializeCascadedLoader, 'function')
+  console.error('runtime payload: Print Studio configuration')
+  const { Config } = await import(pathToFileURL(requireRuntime.resolve('@rumi/print-studio')).href)
+  assert.equal(Config({}).viewerLoadTimeoutMs, 8000)
+  for (const value of [1, 25000]) assert.equal(Config({ viewerLoadTimeoutMs: value }).viewerLoadTimeoutMs, value)
+  for (const value of [0, 25001, 1.5]) assert.throws(() => Config({ viewerLoadTimeoutMs: value }))
   console.error('runtime payload: pnpm')
   await checkPnpm(resourcesRuntime)
   console.error('runtime payload: koffi')

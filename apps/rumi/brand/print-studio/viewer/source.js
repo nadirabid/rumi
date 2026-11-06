@@ -221,7 +221,9 @@ export async function createSource(ctx, path, workspace) {
           throw new Error('Invalid model measurement report')
         }
       }
+      const parameters = value.parameters === undefined ? state.parameters : parameterValues(value.parameters)
       state.report = value.report ?? null
+      if (value.report) state.parameters = parameters
       buildError = value.error ? { kind: 'build', message: String(value.error).slice(0, 2000) } : null
     },
     dispose,

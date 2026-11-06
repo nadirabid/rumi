@@ -65,7 +65,7 @@ it('exposes Blender preview fields on the controls tool', () => {
   expect(tool.parameters.properties).toMatchObject({ finish: { enum: ['parameters', 'blender'] }, original: { type: 'string' }, edit: { type: 'string' } })
 })
 
-function fixture(source: Uint8Array = stl(box()), cwd = '/workspace') {
+function fixture(source: Uint8Array = stl(box()), cwd = '/workspace', loadTimeoutMs = 1) {
   const routes = new Map<string, (request: Request) => Promise<Response>>()
   const contexts = new Map<string, { text(context: object): string }>()
   const tools = new Map<string, any>() // The fixture captures dynamically registered JavaScript tool definitions.
@@ -87,7 +87,7 @@ function fixture(source: Uint8Array = stl(box()), cwd = '/workspace') {
   }
   const diagnosticsDirectory = mkdtempSync(join(tmpdir(), 'rumi-viewer-diagnostics-'))
   diagnosticRoots.push(diagnosticsDirectory)
-  applyViewer(ctx, defineTool, diagnosticsDirectory)
+  applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs)
   owner.provide('systemPrompt', {
     getContextOrder: () => 210, getSectionOrder: () => 2600,
     section: () => () => {},
@@ -631,4 +631,91 @@ it('rejects malformed preview metadata, external originals, and marker symlinks 
     await rm(marker); await writeFile(join(outside, 'marker.json'), '{}'); await symlink(join(outside, 'marker.json'), marker)
     await expect(open()).rejects.toThrow('Preview marker must stay inside the project')
   } finally { await f.dispose(); await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }) }
+})
+
+it('returns matching rendered measurements from viewer_load without another model round', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-load-ready-'))
+  const f = fixture(undefined, root, 8000)
+  try {
+    await writeFile(join(root, 'model.js'), 'export const parameters = { width: 12 }; export function build(T) { return new T.Group() }')
+    const controller = new AbortController()
+    let settled = false
+    const loading = f.raw('viewer_load').execute({ path: 'model.js' }, {
+      agent: { session: { id: 'session-a' } }, signal: controller.signal,
+    }).then((result: string) => { settled = true; return JSON.parse(result) })
+    await vi.waitFor(async () => expect((await f.meshState()).design?.url).toBeTruthy())
+    const scene = await f.state()
+    expect(settled).toBe(false)
+    const response = await f.routes.get('/api/print-studio/viewer/feedback')!(new Request(
+      'http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
+        method: 'POST', body: JSON.stringify({
+          revision: scene.design.revision, url: scene.design.url, transform: scene.design.transform,
+          volume: scene.volume, loadStatus: 'ready', parameters: { width: 12 },
+          report: { status: 'ok', dimensions: { x: 12, y: 12, z: 2 }, checks: [] },
+        }),
+      },
+    ))
+    expect(response.status).toBe(200)
+    const result = await loading
+    expect(result).toMatchObject({ load: { status: 'ready' }, design: {
+      revision: scene.design.revision, url: scene.design.url, parameters: { width: 12 },
+      report: { dimensions: { x: 12, y: 12, z: 2 } },
+    } })
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it.each([
+  { loadStatus: 'build_failed', error: 'Missing geometry', expected: 'build_failed' },
+  { loadStatus: 'viewer_hidden', expected: 'viewer_hidden' },
+])('returns $expected from matching load feedback', async ({ loadStatus, error, expected }) => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-load-outcome-'))
+  const f = fixture(undefined, root, 8000)
+  try {
+    await writeFile(join(root, 'model.js'), 'export function build(T) { return new T.Group() }')
+    const loading = f.run('viewer_load', { path: 'model.js' })
+    await vi.waitFor(async () => expect((await f.meshState()).design?.url).toBeTruthy())
+    const scene = await f.state()
+    const event = await f.request('/api/print-studio/viewer/events?sessionId=session-a&after=0')
+    expect((await event.json()).version).toBeGreaterThan(0)
+    await f.routes.get('/api/print-studio/viewer/feedback')!(new Request(
+      'http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
+        method: 'POST', body: JSON.stringify({ revision: scene.design.revision, url: scene.design.url,
+          transform: scene.design.transform, volume: scene.volume, loadStatus, error,
+          ...error ? {} : { report: { status: 'ok', dimensions: { x: 12, y: 12, z: 2 }, checks: [] } },
+        }),
+      },
+    ))
+    const result = await loading
+    expect(result.load.status).toBe(expected)
+    expect(result.design.error).toEqual(error ? { kind: 'build', message: error } : null)
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it('ignores stale feedback and supersedes a load when its source changes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-load-stale-'))
+  const f = fixture(undefined, root, 8000)
+  try {
+    await writeFile(join(root, 'model.js'), 'export function build(T) { return new T.Group() }')
+    let settled = false
+    const loading = f.run('viewer_load', { path: 'model.js' }).then((result) => { settled = true; return result })
+    await vi.waitFor(async () => expect((await f.meshState()).design?.url).toBeTruthy())
+    const scene = await f.state()
+    const feedback = f.routes.get('/api/print-studio/viewer/feedback')!
+    for (const identity of [{ url: '/old/model.js' }, { revision: scene.design.revision + 1 }, { volume: { x: 1, y: 1, z: 1 } }]) {
+      await feedback(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
+        method: 'POST', body: JSON.stringify({ revision: scene.design.revision, url: scene.design.url,
+          transform: scene.design.transform, volume: scene.volume, ...identity, loadStatus: 'ready',
+          report: { status: 'ok', dimensions: { x: 12, y: 12, z: 2 }, checks: [] },
+        }),
+      }))
+      expect(settled).toBe(false)
+    }
+    await writeFile(join(root, 'model.js'), 'export function build(T) { return new T.Mesh() }')
+    await f.state()
+    await f.state()
+    const result = await loading
+    expect(result.load.status).toBe('superseded')
+    expect(result.load.requested.url).toBe(scene.design.url)
+    expect(result.design.report).toBeNull()
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
 })

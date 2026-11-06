@@ -8,11 +8,15 @@ import { en, zh } from '../viewer/locales.js'
 import { encodeStl } from '../viewer/stl.js'
 
 vi.mock('../viewer/viewer.module.css', () => ({ default: '' }))
-const viewport = vi.hoisted(() => ({ renderedHighlight: vi.fn(), captureCursor: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
+const viewport = vi.hoisted(() => ({ modelParameters: vi.fn(() => ({ width: 12 })), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
 vi.mock('../viewer/viewport/index.js', () => ({
   createViewport: (...args: unknown[]) => {
     viewport.create(...args)
-    return { renderedHighlight: viewport.renderedHighlight, captureCursor: viewport.captureCursor, setHighlightVisible: viewport.setHighlightVisible, thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose }
+    return {
+      modelParameters: viewport.modelParameters, renderedHighlight: viewport.renderedHighlight,
+      captureCursor: viewport.captureCursor, setHighlightVisible: viewport.setHighlightVisible,
+      thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose,
+    }
   },
 }))
 
@@ -327,7 +331,25 @@ it('reports the rendered identity and client timing for a visible highlight', as
   expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/feedback?sessionId=session-a', expect.objectContaining({
     body: expect.stringContaining('"highlightId":"region-visible"'),
   }))
+  const delivered = view.fetch.mock.calls.find(([url]) => String(url).includes('/feedback?'))!
+  expect(JSON.parse(String(delivered[1]?.body))).toMatchObject({
+    revision: 1, url: design.url, transform: design.transform, volume: null,
+    loadStatus: 'ready', parameters: { width: 12 },
+  })
   expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/trace?sessionId=session-a', expect.objectContaining({
     body: expect.stringContaining('"phase":"apply_finished"'),
   }))
+})
+
+it('reports viewport initialization failure for the requested model instead of waiting for timeout', async () => {
+  viewport.create.mockImplementationOnce(() => { throw new Error('WebGL unavailable') })
+  const design = { url: '/source/failed/model.js', revision: 3, transform: { scale: 1 } }
+  const view = fixture({ scene: { ...scene([]), design } })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  const delivered = view.fetch.mock.calls.filter(([url]) => String(url).includes('/feedback?'))
+  expect(delivered.length).toBeGreaterThan(0)
+  expect(JSON.parse(String(delivered.at(-1)![1]?.body))).toMatchObject({
+    revision: 3, url: design.url, volume: null, loadStatus: 'build_failed', error: 'WebGL unavailable',
+  })
 })

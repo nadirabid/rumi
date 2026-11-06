@@ -19,3 +19,10 @@
         compactionThresholdRatio: 0.3
 - id: ui-user-questions
   disabled: true
+
+- id: llm-deepseek
+  config:
+    reasoningEffort: low
+- id: llm-deepseek-account
+  config:
+    reasoningEffort: low

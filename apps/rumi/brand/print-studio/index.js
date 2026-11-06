@@ -14,6 +14,7 @@ import { homedir } from 'node:os'
 import z from '@deepseek-ai/schemastery'
 import * as skillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { createDeveloperMessage } from '@deepseek-ai/dsh-llm'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import {
   DOWNLOAD_URL, MODELS, detectSlicer, discoverPrinters, mqttAuthorized, printStudioNextSteps, reachable, readPrinterConfig, text, writePrinterConfig,
@@ -24,6 +25,7 @@ import { handoffToBambuConnect, hasBambuConnect } from './connect.js'
 import { readPrinterStatus } from './monitor.js'
 import { applyBlender } from './blender/host.js'
 import { applyViewer } from './viewer/host.js'
+import { applyContextRetention } from './viewer/context-retention.js'
 import * as analogWorkflow from './viewer/analog/workflow.js'
 
 /** The plugin row id, also the card identity. */
@@ -206,6 +208,7 @@ const PRINT_TYPE = {
 export function apply(ctx, config) {
   ctx.plugin(analogWorkflow)
   applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory)
+  ctx.inject(['sessionProjections'], scoped => applyContextRetention(scoped, createDeveloperMessage))
   applyBlender(ctx, defineTool, config)
   // A project-type plugin contributes; it does not own the creation flow.
   ctx.inject(['rumiProjectTypes'], (scoped) => {

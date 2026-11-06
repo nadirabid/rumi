@@ -1,4 +1,6 @@
 import { createShapeDeformer } from '../analog/gpu.js'
+import { createParameterPreview } from '../analog/parameters.js'
+import { parameterValues } from '../analog/control-spec.js'
 import { loadGlbModel } from './glb.js'
 /**
  * Three.js viewport: owns rendering, model replacement, and GPU resources.
@@ -45,9 +47,9 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
   const designRoot = new THREE.Group()
   designRoot.matrixAutoUpdate = false
   scene.add(designRoot)
-  let shapeDeformer = null, shapeId = null, shapeFrame = null, shapeValues = null, inputTime = 0
+  let shapeDeformer = null, shapeId = null, shapeOperation = null, shapeFrame = null, shapeValues = null, inputTime = 0
   const shapeMetrics = { frames: 0, maxInputToDrawMs: 0, lastDrawMs: 0 }
-  function clearShape() { if (shapeFrame !== null) cancelAnimationFrame(shapeFrame); shapeFrame = null; shapeDeformer?.dispose(); shapeDeformer = null; shapeId = null }
+  function clearShape() { if (shapeFrame !== null) cancelAnimationFrame(shapeFrame); shapeFrame = null; shapeDeformer?.dispose(); shapeDeformer = null; shapeId = null; shapeOperation = null }
   let highlightOverlay = null, highlightId = null, highlightVisible = true
   let design = null, designUrl = null, requestedUrl = null, generation = 0, cameraCommand = null
   let sceneRevision = 0
@@ -196,7 +198,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
       if (!design) throw new Error('Load the model before its shape controls')
       if (spec.id !== shapeId) {
         clearShape(); hover.clear(); syncHighlight()
-        shapeDeformer = createShapeDeformer(design.root, spec); shapeId = spec.id
+        shapeDeformer = spec.operation === 'parameters' ? createParameterPreview(designRoot, design, spec) : createShapeDeformer(design.root, spec); shapeId = spec.id
+        shapeOperation = spec.operation
         shapeMetrics.frames = 0; shapeMetrics.maxInputToDrawMs = 0; shapeMetrics.lastDrawMs = 0
       }
       shapeDeformer.setGuideVisible?.(!spec.frozen && highlightVisible)
@@ -205,6 +208,9 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
     },
     updateShape(values) {
       if (!shapeDeformer) return
+      if (shapeOperation === 'parameters') {
+        shapeDeformer.update(values); render(); return
+      }
       shapeValues = values; inputTime = performance.now()
       if (shapeFrame !== null) return
       shapeFrame = requestAnimationFrame(() => {
@@ -344,7 +350,10 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
           else {
             const module = await import(/* @vite-ignore */ spec.url)
             if (closed || request !== generation) return null
-            next = buildModel(module.build)
+            const defaults = parameterValues(module.parameters ?? {}), saved = parameterValues(spec.parameters ?? {})
+            if (Object.keys(saved).some(key => !Object.hasOwn(defaults, key))) throw new Error('Saved parameters must exist in the model')
+            const parameters = { ...defaults, ...saved }
+            next = { ...buildModel(module.build, parameters), build: module.build, parameters }
           }
           if (closed || request !== generation) { disposeModel(next.root); return null }
           // Validate placement before replacing the last successful design.

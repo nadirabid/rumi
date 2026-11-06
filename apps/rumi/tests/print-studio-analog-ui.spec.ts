@@ -82,3 +82,29 @@ it.each(['cut', 'bulge'])('resets each %s control to exact neutral values withou
     expect(released).toHaveBeenCalledTimes(count)
   } finally { await act(async () => root.unmount()); vi.unstubAllGlobals() }
 })
+
+it('binds custom labels, units, resets and stepped pad/curve keyboard input', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.createElement('div'), root = createRoot(container), Panel = createAnalogPanel(React)
+  const changed = vi.fn(), released = vi.fn()
+  const axis = (key: string, min: number, max: number, step: number, reset: number) => ({ key, min, max, step, reset })
+  try {
+    await act(async () => root.render(React.createElement(Panel, {
+      spec: { id: 'custom', operation: 'parameters', label: 'Eyes', values: { tilt: 10, x: 0, z: 0, roundness: 3 }, controls: [
+        { kind: 'slider', label: 'Eye tilt', axes: [axis('tilt', -25, 25, .5, 10)] },
+        { kind: 'pad', label: 'Position', axes: [axis('x', -50, 50, 3, 0), axis('z', -20, 20, 2, 0)] },
+        { kind: 'curve', label: 'Roundness', axes: [axis('roundness', 1, 9, 1, 3)] },
+      ] }, t: (key: string) => key === 'shapeReset' ? 'Reset {control}' : key, onChange: changed, onRelease: released,
+    })))
+    const slider = container.querySelector<HTMLInputElement>('input[aria-label="Eye tilt"]')!
+    expect([slider.min, slider.max, slider.step, slider.value]).toEqual(['-25', '25', '0.5', '10'])
+    await act(async () => { slider.value = '-12.5'; slider.dispatchEvent(new Event('input', { bubbles: true })) })
+    expect(changed).toHaveBeenLastCalledWith({ tilt: -12.5, x: 0, z: 0, roundness: 3 })
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Reset Eye tilt"]')!.click())
+    expect(slider.value).toBe('10')
+    await act(async () => container.querySelector('[aria-label="Position"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })))
+    expect(released).toHaveBeenLastCalledWith({ tilt: 10, x: 3, z: 0, roundness: 3 })
+    await act(async () => container.querySelector('[aria-label="Roundness"][role="slider"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })))
+    expect(released).toHaveBeenLastCalledWith({ tilt: 10, x: 3, z: 0, roundness: 4 })
+  } finally { await act(async () => root.unmount()); vi.unstubAllGlobals() }
+})

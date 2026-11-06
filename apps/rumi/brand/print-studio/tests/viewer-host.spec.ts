@@ -1,13 +1,14 @@
 /** A session's scene is edited by commands; geometry is read once and never rewritten by placement. */
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm, symlink } from 'node:fs/promises'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { applyViewer } from '../viewer/host.js'
 import { parseStl } from '../viewer/stl.js'
+import { legacyControls } from '../viewer/analog/control-spec.js'
 
 function box(x = 12, y = 12, z = 2) {
   const points = [[0, 0, 0], [x, 0, 0], [x, y, 0], [0, y, 0], [0, 0, z], [x, 0, z], [x, y, z], [0, y, z]]
@@ -51,15 +52,22 @@ it('documents creating multiple models and bringing a named entry into view', as
     cursor: f.raw('viewer_cursor_snapshot').description,
     highlight: f.raw('viewer_highlight').description,
     clarification: await readFile(new URL('../skills/clarify-mesh-changes/SKILL.md', import.meta.url), 'utf8'),
-    state: f.raw('mesh_state').description,
+    stateToolAvailable: Boolean(f.raw('mesh_state')),
     working: f.raw('viewer_working_model').description,
-    analog: f.raw('viewer_shape_controls').description,
+    analog: f.raw('viewer_controls').description,
+    interactive: await readFile(new URL('../skills/interactive-controls/SKILL.md', import.meta.url), 'utf8'),
     shaping: await readFile(new URL('../skills/analog-shaping/SKILL.md', import.meta.url), 'utf8'),
   }).toMatchSnapshot()
 })
 
+it('exposes Blender preview fields on the controls tool', () => {
+  const tool = fixture().raw('viewer_controls')
+  expect(tool.parameters.properties).toMatchObject({ finish: { enum: ['parameters', 'blender'] }, original: { type: 'string' }, edit: { type: 'string' } })
+})
+
 function fixture(source: Uint8Array = stl(box()), cwd = '/workspace') {
   const routes = new Map<string, (request: Request) => Promise<Response>>()
+  const contexts = new Map<string, { text(context: object): string }>()
   const tools = new Map<string, any>() // The fixture captures dynamically registered JavaScript tool definitions.
   const owner = new Context()
   owners.push(owner)
@@ -80,12 +88,24 @@ function fixture(source: Uint8Array = stl(box()), cwd = '/workspace') {
   const diagnosticsDirectory = mkdtempSync(join(tmpdir(), 'rumi-viewer-diagnostics-'))
   diagnosticRoots.push(diagnosticsDirectory)
   applyViewer(ctx, defineTool, diagnosticsDirectory)
+  owner.provide('systemPrompt', {
+    getContextOrder: () => 210, getSectionOrder: () => 2600,
+    section: () => () => {},
+    context(value: { name: string; text(context: object): string }) {
+      contexts.set(value.name, value)
+      return () => { contexts.delete(value.name) }
+    },
+  })
+  const meshState = async (sessionId = 'session-a') => {
+    await vi.waitFor(() => expect(contexts.has('rumi:mesh-state')).toBe(true))
+    return JSON.parse(contexts.get('rumi:mesh-state')!.text({ agent: { session: { id: sessionId } } })).meshState
+  }
   const signal = () => new AbortController().signal
   const run = async (name: string, args: object = {}, sessionId = 'session-a') => JSON.parse(
     await tools.get(name).execute(args, { agent: { session: { id: sessionId } }, signal: signal() }),
   )
   return {
-    routes, run, owner, ctx, diagnosticsDirectory,
+    routes, run, owner, ctx, diagnosticsDirectory, meshState, contexts,
     raw: (name: string) => tools.get(name),
     request: (path: string) => routes.get(path.split('?')[0])!(new Request(`http://rumi${path}`)),
     state: async (sessionId = 'session-a') => (await (await routes.get('/api/print-studio/viewer/state')!(
@@ -215,9 +235,9 @@ it('places a second copy of the same file on one datablock the browser already f
 
 it('reads the scene without changing it', async () => {
   const f = fixture()
-  expect((await f.run('mesh_state')).objectCount).toBe(0)
+  expect(await f.meshState()).toEqual({ status: 'unavailable', reason: 'viewer_not_initialized' })
   await f.run('mesh_open', { path: 'box.stl' })
-  const report = await f.run('mesh_state')
+  const report = await f.meshState()
   expect(report.objectCount).toBe(1)
   expect(report.objects[0].dimensions).toEqual({ x: 12, y: 12, z: 2 })
 })
@@ -320,7 +340,7 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
       revisionMatches: true, urlMatches: true, transformMatches: true,
     })
     expect(trace.at(-1).data.status).toBe('rendered')
-    expect((await f.run('mesh_state')).design.highlight).toEqual(highlighted.highlight)
+    expect((await f.meshState()).design.highlight).toEqual(highlighted.highlight)
     expect((await f.run('viewer_highlight', reference, 'another-session')).status).toBe('model_required')
     expect((await f.run('viewer_highlight', { ...reference, revision: 99 })).status).toBe('stale_model')
     expect((await f.run('viewer_highlight', { ...reference, blobs: [], label: '' })).status).toBe('cleared')
@@ -332,9 +352,9 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
     await feedback(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
       method: 'POST', body: JSON.stringify({ revision: 1, url: loaded.design.url, transform: placed.design.transform, error: 'Invalid geometry' }),
     }))
-    expect((await f.run('mesh_state')).design.error).toEqual({ kind: 'build', message: 'Invalid geometry' })
+    expect((await f.meshState()).design.error).toEqual({ kind: 'build', message: 'Invalid geometry' })
     await expect(f.run('viewer_transform', { scale: -1 })).rejects.toThrow()
-    expect((await f.run('mesh_state')).design.transform.scale).toBe(2)
+    expect((await f.meshState()).design.transform.scale).toBe(2)
   } finally {
     await f.dispose()
     await rm(root, { recursive: true, force: true })
@@ -450,32 +470,29 @@ it('opens analog controls and freezes a fresh viewer capture without rewriting t
     const text = JSON.stringify({ asset: { version: '2.0' }, scene: 0, scenes: [{ nodes: [] }], nodes: [] })
     const content = Buffer.from(text + ' '.repeat((4 - text.length % 4) % 4)), bytes = Buffer.alloc(20 + content.length)
     ;[0x46546c67, 2, bytes.length, content.length, 0x4e4f534a].forEach((n, i) => bytes.writeUInt32LE(n, i * 4)); content.copy(bytes, 20)
-    let editContext: { text(context: { agent?: { session: { id: string } } }): string } | undefined
-    f.owner.provide('systemPrompt', {
-      getContextOrder: () => 210,
-      context(value: NonNullable<typeof editContext>) { editContext = value; return () => { editContext = undefined } },
-    })
+    await vi.waitFor(() => expect(f.contexts.has('rumi:active-shape')).toBe(true))
+    const editContext = f.contexts.get('rumi:active-shape')
     const path = join(root, 'model.glb'); await writeFile(path, bytes)
     await f.run('viewer_load', { path })
     const design = (await f.state()).design
     const values = { amount: .65, spread: .5, peakX: .5, peakY: .5, falloff: .5, angle: .5 }
-    const opened = f.run('viewer_shape_controls', { action: 'open', path: design.path, url: design.url, revision: design.revision, operation: 'bulge', label: 'Back', center: [0, 0, 0], radii: [30, 30, 30], direction: [0, 1, 0], limit: 10, parts: [], values })
+    const opened = f.run('viewer_controls', { action: 'open', path: 'model.glb', url: design.url, revision: design.revision, operation: 'bulge', label: 'Back', center: [0, 0, 0], radii: [30, 30, 30], direction: [0, 1, 0], limit: 10, parts: [], values, controls: legacyControls('bulge') })
     let controls: { id: string }
     await vi.waitFor(async () => { controls = (await f.state()).design.analog; expect(controls).toBeTruthy() })
     const feedback = (body: object) => f.routes.get('/api/print-studio/viewer/shape-feedback')!(new Request('http://rumi/api/print-studio/viewer/shape-feedback?sessionId=session-a', { method: 'POST', body: JSON.stringify({ id: controls.id, url: design.url, ...body }) }))
     expect((await feedback({ status: 'rendered' })).status).toBe(200)
     expect(await opened).toMatchObject({ status: 'rendered' })
-    expect(editContext?.text({ agent: { session: { id: 'session-a' } } })).toContain('Unresolved mesh edit:')
+    expect(editContext?.text({ agent: { session: { id: 'session-a' } } })).toContain('Unresolved model edit:')
     expect(editContext?.text({ agent: { session: { id: 'other-session' } } })).toBe('')
     expect(editContext?.text({})).toBe('')
-    const freezing = f.run('viewer_shape_controls', { action: 'freeze', id: controls.id })
+    const freezing = f.run('viewer_controls', { action: 'freeze', id: controls.id })
     await vi.waitFor(async () => expect((await f.state()).design.analog.freezeRequested).toBe(true))
     expect((await feedback({ status: 'frozen', sequence: 3, values: { ...values, amount: .87 } })).status).toBe(200)
     const result = await freezing
     expect(result).toMatchObject({ status: 'frozen', recipe: { values: { amount: .87 } } })
     expect(JSON.parse(await readFile(result.recipePath, 'utf8'))).toEqual(result.recipe)
     expect(await readFile(path)).toEqual(bytes)
-    expect(await f.run('viewer_shape_controls', { action: 'close', id: controls.id })).toEqual({ status: 'closed' })
+    expect(await f.run('viewer_controls', { action: 'close', id: controls.id })).toEqual({ status: 'closed' })
     expect((await feedback({ status: 'adjusted', sequence: 4, values })).status).toBe(409)
     expect(editContext?.text({ agent: { session: { id: 'session-a' } } })).toBe('')
   } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
@@ -511,4 +528,107 @@ it('declares work without switching the viewer and rejects missing or cancelled 
     await expect(declare('models/cup/model.js')).rejects.toThrow()
     expect((await f.state()).workingModels).toEqual([])
   } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it.each(['viewer_hidden', 'render_failed'])('reports control %s immediately and accepts a later visible render', async (status) => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-control-feedback-')), f = fixture(undefined, root)
+  try {
+    const path = join(root, 'model.mjs')
+    await writeFile(path, 'export const parameters={size:60};export function build(){}\n')
+    await f.run('viewer_load', { path })
+    const design = (await f.state()).design
+    const pending = f.run('viewer_controls', { action: 'open', path, revision: design.revision, url: design.url,
+      operation: 'parameters', label: 'Size', values: { size: 60 },
+      controls: [{ kind: 'slider', label: 'Size', axes: [{ key: 'size', min: 20, max: 120, step: 1, reset: 60 }] }],
+    })
+    let id: string
+    await vi.waitFor(async () => { id = (await f.state()).design.analog?.id; expect(id).toBeTruthy() })
+    const feedback = (body: object) => f.routes.get('/api/print-studio/viewer/shape-feedback')!(new Request(
+      'http://rumi/api/print-studio/viewer/shape-feedback?sessionId=session-a', {
+        method: 'POST', body: JSON.stringify({ id, url: design.url, ...body }),
+      },
+    ))
+    expect((await feedback({ status, error: status === 'render_failed' ? 'Undeclared parameter' : undefined })).status).toBe(200)
+    expect(await pending).toMatchObject({ status: 'not_rendered', reason: status, error: { kind: status } })
+    expect((await f.state()).design.analog.rendered).toBe(false)
+    expect((await feedback({ status: 'rendered' })).status).toBe(200)
+    expect((await f.state()).design.analog).toMatchObject({ rendered: true, error: null })
+    const freezing = f.run('viewer_controls', { action: 'freeze', id })
+    await vi.waitFor(async () => expect((await f.state()).design.analog.freezeRequested).toBe(true))
+    expect((await feedback({ status: 'viewer_hidden' })).status).toBe(200)
+    expect(await freezing).toMatchObject({ status: 'not_rendered', reason: 'viewer_hidden' })
+    expect((await f.state()).design.analog.frozen).toBe(false)
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it('rejects freezing a Blender preview when its preserved original changed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-original-')), f = fixture(undefined, root)
+  try {
+    const path = join(root, 'model.js'), original = join(root, 'original.glb')
+    await writeFile(path, 'export const parameters={size:60};export function build(){}\n')
+    await writeFile(original, 'original')
+    await f.run('viewer_load', { path })
+    const design = (await f.state()).design
+    const pending = f.run('viewer_controls', { action: 'open', path, revision: design.revision, url: design.url,
+      operation: 'parameters', label: 'Size', finish: 'blender', original, edit: 'Set the box width to size millimetres.', values: { size: 60 },
+      controls: [{ kind: 'slider', label: 'Size', axes: [{ key: 'size', min: 20, max: 120, step: 1, reset: 60 }] }],
+    })
+    let id: string
+    await vi.waitFor(async () => { id = (await f.state()).design.analog?.id; expect(id).toBeTruthy() })
+    const feedback = (body: object) => f.routes.get('/api/print-studio/viewer/shape-feedback')!(new Request(
+      'http://rumi/api/print-studio/viewer/shape-feedback?sessionId=session-a', {
+        method: 'POST', body: JSON.stringify({ id, url: design.url, ...body }),
+      },
+    ))
+    await feedback({ status: 'rendered' }); expect(await pending).toMatchObject({ status: 'rendered' })
+    await writeFile(original, 'changed')
+    const freezing = f.run('viewer_controls', { action: 'freeze', id })
+    await vi.waitFor(async () => expect((await f.state()).design.analog.freezeRequested).toBe(true))
+    await feedback({ status: 'frozen', sequence: 1, values: { size: 90 } })
+    await expect(freezing).rejects.toThrow('Preserved original changed')
+    expect(await readFile(original, 'utf8')).toBe('changed')
+    expect((await f.state()).design.analog).toMatchObject({ frozen: true, values: { size: 90 } })
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it.each([undefined, 'parameters'])('uses preview metadata when finish is %s', async (finish) => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-marker-')), f = fixture(undefined, root)
+  try {
+    const path = join(root, 'model.js'), original = join(root, 'original.blend')
+    await writeFile(path, 'export const parameters={size:60};export function build(){}\n')
+    await writeFile(original, 'original')
+    await writeFile(join(root, '.rumi-preview.json'), JSON.stringify({ original: 'original.blend', edit: 'Set width to size; preserve height.' }))
+    await f.run('viewer_load', { path })
+    const design = (await f.state()).design
+    const pending = f.run('viewer_controls', { action: 'open', path, revision: design.revision, url: design.url,
+      operation: 'parameters', label: 'Size', ...(finish ? { finish } : {}), values: { size: 60 },
+      controls: [{ kind: 'slider', label: 'Size', axes: [{ key: 'size', min: 20, max: 120, step: 1, reset: 60 }] }],
+    })
+    let analog: any
+    await vi.waitFor(async () => { analog = (await f.state()).design.analog; expect(analog?.id).toBeTruthy() })
+    await f.routes.get('/api/print-studio/viewer/shape-feedback')!(new Request('http://rumi/api/print-studio/viewer/shape-feedback?sessionId=session-a', {
+      method: 'POST', body: JSON.stringify({ id: analog.id, url: design.url, status: 'rendered' }),
+    }))
+    expect(await pending).toMatchObject({ status: 'rendered', controls: { finish: 'blender', original: await realpath(original), edit: 'Set width to size; preserve height.' } })
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it('rejects malformed preview metadata, external originals, and marker symlinks outside the project', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-marker-')), outside = await mkdtemp(join(tmpdir(), 'rumi-marker-outside-')), f = fixture(undefined, root)
+  try {
+    const path = join(root, 'model.js'), marker = join(root, '.rumi-preview.json')
+    await writeFile(path, 'export const parameters={size:60};export function build(){}\n')
+    await f.run('viewer_load', { path })
+    const design = (await f.state()).design
+    const open = () => f.run('viewer_controls', { action: 'open', path, revision: design.revision, url: design.url,
+      operation: 'parameters', label: 'Size', values: { size: 60 },
+      controls: [{ kind: 'slider', label: 'Size', axes: [{ key: 'size', min: 20, max: 120, step: 1, reset: 60 }] }],
+    })
+    await writeFile(marker, '{}'); await expect(open()).rejects.toThrow('Invalid .rumi-preview.json')
+    const external = join(outside, 'original.blend'); await writeFile(external, 'original')
+    await writeFile(marker, JSON.stringify({ original: external, edit: 'Set width.' }))
+    await expect(open()).rejects.toThrow('inside the project')
+    await rm(marker); await writeFile(join(outside, 'marker.json'), '{}'); await symlink(join(outside, 'marker.json'), marker)
+    await expect(open()).rejects.toThrow('Preview marker must stay inside the project')
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }) }
 })

@@ -1,116 +1,88 @@
-/** Continuous controls on independent floating glass surfaces. */
+/** Labeled controls render declarations independently of the model operation. */
+import { legacyControls } from './control-spec.js'
+
+/** Build the shared control panel. @param {object} React Renderer primitives. @returns {Function} Control panel component. */
 export function createAnalogPanel(React) {
   const h = React.createElement
   const clamp = value => Math.max(0, Math.min(1, value))
+  const fraction = (axis, value) => (value - axis.min) / (axis.max - axis.min)
+  const fromFraction = (axis, value) => Math.max(axis.min, Math.min(axis.max, axis.min + Math.round(clamp(value) * (axis.max - axis.min) / axis.step) * axis.step))
   return function AnalogPanel({ spec, t, onChange, onRelease }) {
     const [values, setValues] = React.useState(spec.values)
-    const current = React.useRef(spec.values)
-    const dragging = React.useRef(false)
+    const current = React.useRef(spec.values), dragging = React.useRef(false)
     const locked = spec.frozen || spec.freezeRequested
-    // Host echoes cannot rewind a newer local gesture within the same control session.
+    const definitions = spec.controls ?? legacyControls(spec.operation).map(control => ({ ...control, label: t(control.label) }))
     React.useEffect(() => { current.current = spec.values; setValues(spec.values) }, [spec.id])
     function update(patch) {
       if (locked) return
-      current.current = { ...current.current, ...patch }
-      setValues(current.current)
-      onChange(current.current)
+      const next = { ...current.current, ...patch }
+      if (onChange(next) === false) return
+      current.current = next; setValues(next)
     }
-    function release() {
-      dragging.current = false
-      if (!locked) onRelease(current.current)
-    }
-    const reset = (keys, label) => h('button', {
-      type: 'button', className: 'av-reset', disabled: locked,
-      title: t('shapeReset').replace('{control}', t(label)),
-      'aria-label': t('shapeReset').replace('{control}', t(label)),
-      onClick: () => { if (!locked) { update(Object.fromEntries(keys.map(key => [key, .5]))); release() } },
-    }, h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+    function release() { dragging.current = false; if (!locked) onRelease(current.current) }
+    function reset(control) {
+      return h('button', {
+        type: 'button', className: 'av-reset', disabled: locked,
+        title: t('shapeReset').replace('{control}', control.label), 'aria-label': t('shapeReset').replace('{control}', control.label),
+        onClick: () => { if (!locked) { update(Object.fromEntries(control.axes.map(axis => [axis.key, axis.reset]))); release() } },
+      }, h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
       h('path', { d: 'M3 10a9 9 0 1 1 2.5 8.5M3 4v6h6' })))
-    const slider = (key, label) => h('div', { className: 'av-glass av-slider', key },
-      h('span', null, t(label)),
-      h('input', {
-        type: 'range', min: 0, max: 1, step: .001, value: values[key], disabled: locked,
-        'aria-label': t(label), style: { '--av-value': `${values[key] * 100}%` },
-        onPointerDown: () => { dragging.current = true },
-        onInput: event => update({ [key]: Number(event.currentTarget.value) }),
-        onPointerUp: release, onPointerCancel: release, onKeyUp: release,
-        onBlur: () => { if (dragging.current) release() },
-      }), reset([key], label))
-    function point(event, kind) {
-      const box = event.currentTarget.getBoundingClientRect()
-      if (kind === 'pad') {
-        update({ peakX: clamp((event.clientX - box.left) / box.width), peakY: clamp(1 - (event.clientY - box.top) / box.height) })
-      } else {
+    }
+    function point(event, control) {
+      const box = event.currentTarget.getBoundingClientRect(), [x, y] = control.axes
+      if (control.kind === 'pad') update({ [x.key]: fromFraction(x, (event.clientX - box.left) / box.width), [y.key]: fromFraction(y, 1 - (event.clientY - box.top) / box.height) })
+      else {
         const height = clamp(1 - ((event.clientY - box.top) / box.height - .1) / .8)
-        update({ falloff: clamp((Math.log(Math.max(.001, height)) / Math.log(.75) - 1.5) / 4) })
+        update({ [x.key]: fromFraction(x, (Math.log(Math.max(.001, height)) / Math.log(.75) - 1.5) / 4) })
       }
     }
-    const gestures = kind => ({
-      onPointerDown: event => {
-        if (locked || event.button !== 0) return
-        dragging.current = true
-        event.currentTarget.setPointerCapture(event.pointerId)
-        point(event, kind)
-        event.preventDefault()
-      },
-      onPointerMove: event => {
-        if (!locked && dragging.current && event.currentTarget.hasPointerCapture(event.pointerId)) point(event, kind)
-      },
-      onPointerUp: event => {
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId)
+    function gestures(control) {
+      return {
+        onPointerDown: event => { if (!locked && event.button === 0) { dragging.current = true; event.currentTarget.setPointerCapture(event.pointerId); point(event, control); event.preventDefault() } },
+        onPointerMove: event => { if (!locked && dragging.current && event.currentTarget.hasPointerCapture(event.pointerId)) point(event, control) },
+        onPointerUp: event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { event.currentTarget.releasePointerCapture(event.pointerId); release() } },
+        onPointerCancel: event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { event.currentTarget.releasePointerCapture(event.pointerId); release() } },
+        onKeyDown: event => {
+          const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[event.key]
+          if (!delta || locked) return
+          event.preventDefault()
+          const [x, y] = control.axes
+          const change = axis => Math.max(1, Math.round((axis.max - axis.min) * .02 / axis.step)) * axis.step
+          const bound = (axis, value) => Math.max(axis.min, Math.min(axis.max, value))
+          update(control.kind === 'pad'
+            ? { [x.key]: bound(x, current.current[x.key] + delta[0] * change(x)), [y.key]: bound(y, current.current[y.key] + delta[1] * change(y)) }
+            : { [x.key]: bound(x, current.current[x.key] + (delta[0] || delta[1]) * change(x)) })
           release()
-        }
-      },
-      onPointerCancel: event => {
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId)
-          release()
-        }
-      },
-    })
-    const exponent = 1.5 + 4 * values.falloff
-    const curve = Array.from({ length: 49 }, (_, i) => {
-      const x = i / 48
-      return `${i ? 'L' : 'M'}${x * 100},${90 - 80 * Math.pow(Math.max(0, 1 - (2 * x - 1) ** 2), exponent)}`
-    }).join(' ')
+        },
+      }
+    }
+    function render(control) {
+      const [x, y] = control.axes, key = control.axes.map(axis => axis.key).join(':')
+      if (control.kind === 'slider') return h('div', { className: 'av-glass av-slider', key },
+        h('span', null, control.label), h('input', {
+          type: 'range', min: x.min, max: x.max, step: x.step, value: values[x.key], disabled: locked,
+          'aria-label': control.label, style: { '--av-value': `${fraction(x, values[x.key]) * 100}%` },
+          onPointerDown: () => { dragging.current = true }, onInput: event => update({ [x.key]: Number(event.currentTarget.value) }),
+          onPointerUp: release, onPointerCancel: release, onKeyUp: release, onBlur: () => { if (dragging.current) release() },
+        }), reset(control))
+      const normalized = fraction(x, values[x.key]), exponent = 1.5 + 4 * normalized
+      const curve = Array.from({ length: 49 }, (_, i) => `${i ? 'L' : 'M'}${i / 48 * 100},${90 - 80 * Math.pow(Math.max(0, 1 - (2 * i / 48 - 1) ** 2), exponent)}`).join(' ')
+      return h('div', { className: 'av-glass av-field', key },
+        h('div', { className: 'av-field-header' }, h('span', null, control.label), reset(control)),
+        h('div', {
+          className: control.kind === 'pad' ? 'av-pad' : 'av-curve', role: control.kind === 'pad' ? 'group' : 'slider',
+          tabIndex: locked ? -1 : 0, 'aria-label': control.label, 'aria-disabled': locked,
+          ...(control.kind === 'curve' ? { 'aria-valuemin': x.min, 'aria-valuemax': x.max, 'aria-valuenow': values[x.key] } : {}),
+          ...gestures(control),
+        }, control.kind === 'pad' ? [
+          h('span', { key: 'x', className: 'av-cross av-cross-x' }), h('span', { key: 'y', className: 'av-cross av-cross-y' }),
+          h('span', { key: 'handle', className: 'av-handle', style: { left: `${normalized * 100}%`, top: `${(1 - fraction(y, values[y.key])) * 100}%` } }),
+        ] : [
+          h('svg', { key: 'curve', viewBox: '0 0 100 100', preserveAspectRatio: 'none', 'aria-hidden': true }, h('path', { d: curve, className: 'av-curve-line' })),
+          h('span', { key: 'handle', className: 'av-handle', style: { left: '75%', top: `${90 - 80 * Math.pow(.75, exponent)}%` } }),
+        ]))
+    }
     if (spec.frozen) return h('div', { className: 'av-saving av-glass', role: 'status' }, t('shapeFrozen'))
-    if (spec.operation === 'cut') return h('section', { className: 'av-controls', 'aria-label': `${t('shapeControls')}: ${spec.label}`, 'aria-busy': locked },
-      slider('amount', 'cutHeight'), slider('angle', 'cutTilt'), slider('spread', 'cutLean'))
-    return h('section', { className: 'av-controls', 'aria-label': `${t('shapeControls')}: ${spec.label}`, 'aria-busy': locked },
-      slider('amount', 'shapeAmount'),
-      slider('spread', 'shapeSpread'),
-      spec.operation === 'bulge' ? slider('angle', 'shapeAngle') : null,
-      h('div', { className: 'av-spatial' },
-        h('div', { className: 'av-glass av-field' },
-          h('div', { className: 'av-field-header' }, h('span', null, t('shapePeak')), reset(['peakX', 'peakY'], 'shapePeak')),
-          h('div', {
-            className: 'av-pad', role: 'group', 'aria-label': t('shapePeak'), 'aria-disabled': locked,
-            tabIndex: locked ? -1 : 0, ...gestures('pad'),
-            onKeyDown: event => {
-              const delta = { ArrowLeft: [-.02, 0], ArrowRight: [.02, 0], ArrowUp: [0, .02], ArrowDown: [0, -.02] }[event.key]
-              if (!delta || locked) return
-              event.preventDefault()
-              update({ peakX: clamp(current.current.peakX + delta[0]), peakY: clamp(current.current.peakY + delta[1]) })
-              release()
-            },
-          },
-          h('span', { className: 'av-cross av-cross-x' }), h('span', { className: 'av-cross av-cross-y' }),
-          h('span', { className: 'av-handle', style: { left: `${values.peakX * 100}%`, top: `${(1 - values.peakY) * 100}%` } }))),
-        h('div', { className: 'av-glass av-field' },
-          h('div', { className: 'av-field-header' }, h('span', null, t('shapeCurve')), reset(['falloff'], 'shapeCurve')),
-          h('div', {
-            className: 'av-curve', role: 'slider', tabIndex: locked ? -1 : 0,
-            'aria-label': t('shapeCurve'), 'aria-valuemin': 0, 'aria-valuemax': 100,
-            'aria-valuenow': Math.round(values.falloff * 100), 'aria-disabled': locked, ...gestures('curve'),
-            onKeyDown: event => {
-              if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key) || locked) return
-              event.preventDefault()
-              update({ falloff: clamp(current.current.falloff + (['ArrowUp', 'ArrowRight'].includes(event.key) ? .02 : -.02)) })
-              release()
-            },
-          },
-          h('svg', { viewBox: '0 0 100 100', preserveAspectRatio: 'none', 'aria-hidden': true }, h('path', { d: curve, className: 'av-curve-line' })),
-          h('span', { className: 'av-handle', style: { left: '75%', top: `${90 - 80 * Math.pow(.75, exponent)}%` } })))))
+    return h('section', { className: 'av-controls', 'aria-label': `${t('shapeControls')}: ${spec.label}`, 'aria-busy': locked }, definitions.map(render))
   }
 }

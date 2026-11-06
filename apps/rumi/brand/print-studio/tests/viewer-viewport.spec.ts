@@ -17,7 +17,7 @@ vi.mock('three', async (importOriginal) => {
         }
         this.domElement.toDataURL = vi.fn(() => 'data:image/png;base64,cG5n')
         this.ratio = 1
-        this.setPixelRatio = vi.fn(value => { this.ratio = value })
+        this.setPixelRatio = vi.fn((value) => { this.ratio = value })
         this.getPixelRatio = () => this.ratio
         this.getSize = target => target.set(this.domElement.width, this.domElement.height)
         this.setSize = (width: number, height: number) => { this.domElement.width = width; this.domElement.height = height }
@@ -391,5 +391,18 @@ it('reuses measured geometry and GPU resources for highlight-only changes', asyn
     const resized = await viewport.applyDesign({ ...spec, transform: { scale: 2 } }, null)
     expect(resized).not.toBe(report)
     expect(resized.dimensions).toEqual({ x: 20, y: 40, z: 60 })
+  } finally { viewport.dispose() }
+})
+
+it('updates parameter controls opened after loading synchronously and preserves geometry on a failed rebuild', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  const url = 'data:text/javascript,' + encodeURIComponent('export const parameters={size:60};export function build(THREE,p){if(p.size>80)throw new Error("Too large");return new THREE.Mesh(new THREE.BoxGeometry(p.size,p.size,p.size),new THREE.MeshStandardMaterial())}')
+  try {
+    await viewport.applyDesign({ url, transform: {}, analog: null }, null)
+    viewport.applyShape({ id: 'parameters', operation: 'parameters', label: 'Size', values: { size: 60 }, controls: [
+      { kind: 'slider', label: 'Size', axes: [{ key: 'size', min: 20, max: 120, step: 1, reset: 60 }] },
+    ] })
+    expect(() => viewport.updateShape({ size: 90 })).toThrow('Too large')
+    expect(() => viewport.updateShape({ size: 70 })).not.toThrow()
   } finally { viewport.dispose() }
 })

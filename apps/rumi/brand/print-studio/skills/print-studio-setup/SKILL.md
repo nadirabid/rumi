@@ -51,7 +51,7 @@ ask the adult to update it.
 ## Before any print
 
 - Use `printer-awareness` to resolve the selected machine profile, nozzle mode and loaded filament. Do not infer these from installed presets.
-- Call `mesh_state` before saying what the preview shows. Load editable GLB or JavaScript models with `viewer_load`, or STL with `mesh_open`; pass only a verified build envelope. The viewer's rectangular box does not include every nozzle or exclusion constraint.
+- Call the current `meshState` context before saying what the preview shows. Load editable GLB or JavaScript models with `viewer_load`, or STL with `mesh_open`; pass only a verified build envelope. The viewer's rectangular box does not include every nozzle or exclusion constraint.
 - Use `viewer_transform` for editable-model placement or `mesh_transform` for STL scene placement. Opening the same STL again adds a second copy.
 - Follow `fdm-design` for geometry, bed attachment, supports and slicer validation. Preview checks do not establish print readiness.
 - Ask the adult which loaded AMS filament to use.

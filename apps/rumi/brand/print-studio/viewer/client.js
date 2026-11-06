@@ -174,6 +174,7 @@ export function installViewer(ctx, React, primitives) {
     const holder = React.useRef(null)
     const viewport = React.useRef(null)
     const designReady = React.useRef(Promise.resolve(null))
+    const viewportError = React.useRef(null)
     const [failed, setFailed] = React.useState(false)
     const [buildError, setBuildError] = React.useState(null)
     const [cursorMode, setCursorMode] = React.useState('patch')
@@ -181,10 +182,10 @@ export function installViewer(ctx, React, primitives) {
     const analogAbort = React.useRef(null)
     React.useEffect(() => {
       try {
-        viewport.current = createViewport(holder.current, () => setFailed(true), setCursorMode)
+        viewport.current = createViewport(holder.current, () => { viewportError.current = '3D viewer rendering failed'; setFailed(true) }, setCursorMode)
         setFailed(false)
-      } catch {
-        // Without WebGL the pane still displays the failure.
+      } catch (error) {
+        viewportError.current = error instanceof Error ? error.message : String(error)
         setFailed(true)
       }
       return () => { viewport.current?.dispose(); viewport.current = null }
@@ -221,7 +222,7 @@ export function installViewer(ctx, React, primitives) {
       if (view !== null) viewport.current?.apply(view)
     }, [view])
     React.useEffect(() => {
-      if (!viewport.current?.applyDesign) return
+      if (!view?.design) { viewport.current?.applyDesign?.(null, view?.volume ?? null); return }
       let active = true
       const controller = new AbortController()
       const receivedAt = performance.now()
@@ -239,10 +240,15 @@ export function installViewer(ctx, React, primitives) {
         trace('feedback_started')
         const response = await fetch(`${ROUTE}/feedback?sessionId=${encodeURIComponent(view.sessionId)}`, {
           method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
-          body: JSON.stringify({ revision: view.design.revision, url: view.design.url, transform: view.design.transform, diagnostics: diagnostics(), ...value }),
+          body: JSON.stringify({ revision: view.design.revision, url: view.design.url, transform: view.design.transform, volume: view.volume, diagnostics: diagnostics(), ...value }),
         })
         if (!response.ok) { trace('feedback_failed'); throw new Error(`Build feedback unavailable (${response.status})`) }
         trace('feedback_delivered')
+      }
+      if (!viewport.current?.applyDesign || failed) {
+        void feedback({ loadStatus: 'build_failed', error: viewportError.current ?? '3D viewer unavailable' })
+          .catch(() => { if (active) setBuildError('feedbackFailed') })
+        return () => { active = false; controller.abort() }
       }
       trace('apply_started')
       designReady.current = viewport.current.applyDesign(view?.design ?? null, view?.volume ?? null)
@@ -252,7 +258,7 @@ export function installViewer(ctx, React, primitives) {
         const report = await viewport.current.applyDesign(view?.design ?? null, view?.volume ?? null)
         if (!active || !report) return
         const highlightId = viewport.current?.renderedHighlight?.() ?? null
-        await feedback({ report, highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })
+        await feedback({ report, parameters: viewport.current.modelParameters(), loadStatus: document.hidden ? 'viewer_hidden' : 'ready', highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })
       }
       const visible = () => {
         if (!document.hidden) void reportRendered().catch(() => { if (active) setBuildError('feedbackFailed') })
@@ -263,18 +269,18 @@ export function installViewer(ctx, React, primitives) {
         setBuildError(null)
         trace('apply_finished')
         const highlightId = viewport.current?.renderedHighlight?.() ?? null
-        await feedback({ report, highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })
+        await feedback({ report, parameters: viewport.current.modelParameters(), loadStatus: document.hidden ? 'viewer_hidden' : 'ready', highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })
       }).catch(async (error) => {
         if (!active) return
         trace('apply_or_feedback_failed')
         setBuildError('buildFailed')
-        try { await feedback({ error: error instanceof Error ? error.message : String(error), requestedHighlightId: view?.design?.highlight?.id ?? null, highlightStatus: 'render_failed' }) }
+        try { await feedback({ loadStatus: 'build_failed', error: error instanceof Error ? error.message : String(error), requestedHighlightId: view?.design?.highlight?.id ?? null, highlightStatus: 'render_failed' }) }
         catch (_feedbackError) { if (active) setBuildError('feedbackFailed') }
       })
       return () => { trace('effect_disposed'); active = false; controller.abort(); document.removeEventListener('visibilitychange', visible) }
     }, [
       view?.design?.highlight?.id, view?.design?.url, JSON.stringify(view?.design?.transform), view?.design?.camera?.id,
-      view?.sessionId, JSON.stringify(view?.volume),
+      view?.sessionId, JSON.stringify(view?.volume), failed,
     ])
     function sendShape(status, values, error) {
       const spec = view?.design?.analog

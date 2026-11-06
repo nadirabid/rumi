@@ -35,6 +35,7 @@ export const name = 'print-studio'
 export const Config = z.object({
   blenderExecutable: z.string().default(''),
   blenderHome: z.string().default(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi')),
+  viewerLoadTimeoutMs: z.number().step(1).min(1).max(25000).default(8000),
   viewerDiagnosticsDirectory: z.string().default(join(homedir(), '.rumi', 'viewer-logs')),
 })
 
@@ -207,7 +208,7 @@ const PRINT_TYPE = {
  */
 export function apply(ctx, config) {
   ctx.plugin(analogWorkflow)
-  applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory)
+  applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory, config.viewerLoadTimeoutMs)
   ctx.inject(['sessionProjections'], scoped => applyContextRetention(scoped, createDeveloperMessage))
   applyBlender(ctx, defineTool, config)
   // A project-type plugin contributes; it does not own the creation flow.

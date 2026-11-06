@@ -96,7 +96,7 @@ it.skipIf(!enabled).each(cases)('agent opens and uses generic controls: $name', 
         } })
       } },
     }
-    applyViewer(facade, defineTool, join(root, 'diagnostics'))
+    applyViewer(facade, defineTool, join(root, 'diagnostics'), 8000)
     await ctx.plugin(workflow)
     ctx.systemPrompt.section({ name: 'fixture', order: 1, text: 'You are Rumi, a model-editing tool. Work only on the current project. Preserve the current model while opening user controls. Available skills: interactive-controls and analog-shaping; read them with read using skills/<name>/SKILL.md. The current model is already loaded. Camera and rendering are supplied by the test viewer. Use the tools and then give a short status.' })
     ctx.tools.register(defineTool({ name: 'read', description: 'Read a project model or a skill.', parameters: { path: { type: 'string', required: true } },

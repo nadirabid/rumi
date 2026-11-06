@@ -26,3 +26,5 @@ import '../brand/print-studio/tests/model-focus.spec.ts'
 
 import '../brand/print-studio/tests/context-retention.spec.ts'
 import '../brand/print-studio/tests/controls.spec.ts'
+import '../brand/print-studio/tests/viewer-load-receipts.spec.ts'
+import '../brand/print-studio/tests/viewer-load-session.spec.ts'

@@ -18,6 +18,7 @@ import { placeMesh } from './transform.js'
 
 import { createViewerDiagnostics } from './diagnostics.js'
 import { createHighlightReceipts } from './receipts.js'
+import { createLoadReceipts } from './load-receipts.js'
 import { createViewerEvents } from './events.js'
 import { createCursorRequests, cursorIdentity } from './cursor.js'
 import { cursorCommand } from './cursor-commands.js'
@@ -171,17 +172,26 @@ function sceneReport(record) {
   }
 }
 
+/** Exact source and measurement context awaited by viewer_load. */
+function loadIdentity(record) {
+  const design = record.source?.state()
+  return design ? { path: design.path, revision: design.revision, url: design.url,
+    transform: design.transform, volume: record.history.current().volume } : null
+}
+
 /**
  * Register the preview routes and the scene tools.
  * @param {object} ctx - Cordis host context with connection, tools, fs, and workingDirectory.
  * @param {Function} defineTool - DSH's schema-validating tool factory from the host entrypoint.
  * @param {string} diagnosticsDirectory - Private local journal directory.
+ * @param {number} loadTimeoutMs - Maximum renderer acknowledgment wait, in milliseconds.
  * @returns {void}
  */
-export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
+export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs) {
   const diagnostics = createViewerDiagnostics(diagnosticsDirectory)
   const sessions = new Map()
   const receipts = createHighlightReceipts()
+  const loads = createLoadReceipts(loadTimeoutMs)
   const events = createViewerEvents()
   const focus = createModelFocus(ctx, { read: id => sessions.get(id), notify: id => events.notify(id) })
   const cursors = createCursorRequests(sessionId => events.notify(sessionId))
@@ -209,6 +219,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
   let closed = false
   ctx.effect(() => async () => {
     closed = true
+    loads.dispose()
     receipts.dispose()
     events.dispose()
     cursors.dispose()
@@ -234,13 +245,14 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       sessions.set(sessionId, existing)
       return existing
     }
-    const record = { history: createHistory(), datablocks: new Map(), byPath: new Map(), measurements: new Map(), pending: Promise.resolve() }
+    const record = { sessionId, history: createHistory(), datablocks: new Map(), byPath: new Map(), measurements: new Map(), pending: Promise.resolve() }
     sessions.set(sessionId, record)
     while (sessions.size > MAX_SESSIONS) {
       const key = [...sessions.keys()].find(id => id !== sessionId && !sessions.get(id).busy && focus.paths(id).length === 0)
       if (key === undefined) break
       const source = sessions.get(key).source
       if (source) ctx.effect(async () => { await source.dispose(); return () => {} }, 'print viewer: evict source')
+      loads.cancel(key)
       receipts.cancel(key)
       events.forget(key)
       cursors.cancel(key)
@@ -290,6 +302,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
         record.history.apply({ type: 'setVolume', volume })
         refresh(record)
       }
+      loads.update(record.sessionId, loadIdentity(record))
     } catch (error) {
       await source.dispose()
       throw error
@@ -305,6 +318,8 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       if (path) await loadSource(record, cwd, path, saved?.volume)
     }
     await record.source?.poll()
+    loads.update(sessionId, loadIdentity(record), record.source?.state().error?.kind === 'source'
+      ? { status: 'source_failed', error: record.source.state().error } : undefined)
     record.catalogError = null
   }
 
@@ -352,6 +367,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
           if (!record.models.some(model => model.path === value.path)) throw new Error('Model entry not found')
           await loadSource(record, cwd, value.path)
         })
+        events.notify(sessionId)
         return json({ ok: true })
       } catch (_error) { return json({ error: 'selection_failed' }, 409) }
     },
@@ -408,6 +424,17 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       }
       try { source.feedback(value) } catch (_error) { diagnostics.record(sessionId, 'viewer.feedback_rejected', { reason: 'invalid_report' }); return json({ error: 'invalid_feedback' }, 400) }
       const current = source.state()
+      const record = sessions.get(sessionId)
+      if (record?.source === source && value.revision === current.revision && value.url === current.url
+        && JSON.stringify(value.transform) === JSON.stringify(current.transform)
+        && JSON.stringify(value.volume) === JSON.stringify(record.history.current().volume)) {
+        const status = current.error ? current.error.kind === 'source' ? 'source_failed' : 'build_failed'
+          : value.loadStatus === 'viewer_hidden' ? 'viewer_hidden'
+          : value.loadStatus === 'ready' && current.report ? 'ready' : null
+        if (status) loads.update(sessionId, loadIdentity(record), {
+          status, scene: structuredClone(sceneReport(record)), ...(current.error ? { error: current.error } : {}),
+        })
+      }
       if (value.highlightId && value.highlightId === current.highlight?.id
         && value.revision === current.revision && value.url === current.url
         && JSON.stringify(value.transform) === JSON.stringify(current.transform)) {
@@ -550,7 +577,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       + 'Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. '
       + 'Self-contained static GLB only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. '
       + 'Legacy .js/.mjs entries exporting synchronous build(THREE) remain supported in millimetres and Z up. '
-      + 'Read the current meshState context for load errors and measurements. Loading does not certify print readiness.',
+      + 'Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.',
     parameters: {
       path: { type: 'string', required: true, description: 'Model entry to bring into view, for example models/helmet/model.glb.' },
       buildVolume: {
@@ -569,18 +596,28 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       if (!exec.agent) throw new Error('Model preview requires a conversation')
       const volume = args.buildVolume === undefined ? undefined
         : createHistory().apply({ type: 'setVolume', volume: args.buildVolume }).volume
-      const record = recordFor(exec.agent.session.id)
+      const sessionId = exec.agent.session.id
+      const record = recordFor(sessionId)
+      let completion, requested, initialScene
       const disposeLoad = ctx.effect(async () => {
         const cwd = await ctx.workingDirectory.ensure(exec.agent, exec.signal)
         exec.signal.throwIfAborted()
         if (closed) throw new Error('Model preview is closed')
-        await serialize(record, () => loadSource(record, cwd, args.path, volume, exec.signal))
+        await serialize(record, async () => {
+          await loadSource(record, cwd, args.path, volume, exec.signal)
+          record.models = await discoverModels(cwd)
+          exec.signal.throwIfAborted()
+          requested = loadIdentity(record)
+          initialScene = structuredClone(sceneReport(record))
+          completion = loads.wait(sessionId, requested, exec.signal)
+          events.notify(sessionId)
+        })
         return () => {}
       }, 'print viewer: load model')
       await disposeLoad
       if (closed) throw new Error('Model preview is closed')
-      record.models = await discoverModels(record.cwd)
-      return JSON.stringify(sceneReport(record), undefined, 2)
+      const { scene = initialScene, ...outcome } = await completion
+      return JSON.stringify({ ...scene, load: { ...outcome, requested } }, undefined, 2)
     },
   })), 'print viewer: load source')
 
@@ -599,6 +636,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
       if (!record?.source) throw new Error('Load a model with viewer_load first')
       focus.assertSelected(exec.agent, record.selectedModel)
       record.source.transform(Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined)))
+      loads.update(exec.agent.session.id, loadIdentity(record))
       return JSON.stringify(sceneReport(record), undefined, 2)
     },
   })), 'print viewer: source placement')
@@ -842,6 +880,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory) {
         const volume = createHistory().apply({ type: 'setVolume', volume: args.buildVolume }).volume
         if (record.source) await saveSelection(cwd, record.selectedModel, volume)
         record.history.apply({ type: 'setVolume', volume })
+        loads.update(agent.session.id, loadIdentity(record))
       }
       const datablockId = datablockFor(record, target.displayPath ?? args.path, positions, encodeStl(positions))
       const scene = record.history.apply({ type: 'addObject', datablockId, name: basename(args.path) })

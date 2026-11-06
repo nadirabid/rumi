@@ -399,6 +399,7 @@ it('updates parameter controls opened after loading synchronously and preserves 
   const url = 'data:text/javascript,' + encodeURIComponent('export const parameters={size:60};export function build(THREE,p){if(p.size>80)throw new Error("Too large");return new THREE.Mesh(new THREE.BoxGeometry(p.size,p.size,p.size),new THREE.MeshStandardMaterial())}')
   try {
     await viewport.applyDesign({ url, transform: {}, analog: null }, null)
+    expect(viewport.modelParameters()).toEqual({ size: 60 })
     viewport.applyShape({ id: 'parameters', operation: 'parameters', label: 'Size', values: { size: 60 }, controls: [
       { kind: 'slider', label: 'Size', axes: [{ key: 'size', min: 20, max: 120, step: 1, reset: 60 }] },
     ] })

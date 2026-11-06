@@ -193,6 +193,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
   }
 
   return {
+    /** Effective parameters of the successfully loaded model, including defaults. */
+    modelParameters() { return { ...design?.parameters } },
     applyShape(spec) {
       if (!spec) { clearShape(); syncHighlight(); render(); return null }
       if (!design) throw new Error('Load the model before its shape controls')

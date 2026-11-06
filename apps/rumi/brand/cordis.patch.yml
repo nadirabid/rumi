@@ -15,5 +15,7 @@
 - insert:
     - id: rumi-presets
       name: '@rumi/brand/preset'
+      config:
+        compactionThresholdRatio: 0.3
 - id: ui-user-questions
   disabled: true

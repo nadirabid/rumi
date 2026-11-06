@@ -100,6 +100,8 @@ It moves the profile, Sessions, storages, and Print Studio state, copies the cre
 
 Rumi derives its standard, PTC, and Cordis presets from the shipped definitions with the questionnaire tool removed. Clarification stays in the conversation for text and voice. The question-card UI is disabled; the underlying question service remains available for compatibility with other consumers.
 
+Rumi's active presets compact at 30% of the routed model's context window, subject to the harness's lower input-budget safety limit. Configure `compactionThresholdRatio` on the `rumi-presets` row; the stock `preset-standard`, `preset-ptc`, and `preset-cordis` rows are disabled and do not control resumed Rumi sessions.
+
 `apps/rumi/brand/` holds the packages Rumi carries inside its own runtime and enables in every new profile. `@rumi/brand` draws the wordmark and owns the Live Voice key page; `@rumi/settings` exposes the stock settings dialog and Plugins page through Rumi → Settings… (⌘,) and Rumi → Plugins…. `@rumi/live-voice` adds full-duplex voice and contributes the project's instructions through `ctx.liveVoice`. Packaging installs these bundles beside `dsh` and declares them in the bundled installation manifest, so the profile resolves them without a package manager. See [native settings integration](apps/rumi/brand/settings/README.md) for the menu wiring.
 
 A package that ships skills keeps them at `skills/<name>/SKILL.md` and publishes them by mounting the stock `@deepseek-ai/dsh-skill-filesystem` provider on that directory, so the frontmatter is parsed and the body loads on demand. `@rumi/print-studio` is the reference: `skills/print-studio-setup/` with a `providerName` of its own and `includeDefaultRoots` off.

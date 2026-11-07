@@ -10,6 +10,7 @@ import { normalizeControls } from '../viewer/analog/control-spec.js'
 import { createParameterPreview } from '../viewer/analog/parameters.js'
 import { buildModel, disposeModel } from '../viewer/viewport/model.js'
 import { build, parameters } from './fixtures/parameter-faceplate.js'
+import { readMotion } from '../viewer/motion.js'
 import { createSource } from '../viewer/source.js'
 
 const controls = [{ kind: 'slider', label: 'Eye tilt', axes: [{ key: 'eyeTilt', min: -25, max: 25, step: .5, reset: 10 }] }]
@@ -99,4 +100,14 @@ it('keeps a Blender preview frozen with its latest values and refuses to save it
     expect(source.state().analog?.frozen).toBe(true)
     await expect(readFile(join(root, '.rumi-parameters.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it('validates persistent movement declarations and retains only compatible pose values', () => {
+  const model = { eyeTilt: 10, width: 20 }
+  expect(readMotion(undefined, model)).toBeNull()
+  expect(readMotion([], model)).toBeNull()
+  expect(readMotion(controls, model, { eyeTilt: -5, removed: 7 })).toEqual({ controls, values: { eyeTilt: -5 } })
+  expect(readMotion(controls, model, { eyeTilt: 100 }).values).toEqual({ eyeTilt: 10 })
+  expect(() => readMotion(controls, { width: 20 })).toThrow('Missing')
+  expect(() => readMotion('invalid', model)).toThrow('controls')
 })

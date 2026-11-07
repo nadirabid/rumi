@@ -92,6 +92,10 @@ GLB 快照直接通过后台 Blender 检查。JavaScript 快照在渲染进程�
 
 在本包目录运行 `Blender --background --factory-startup --python-exit-code 1 --python tests/blender-validation.py` 可执行真实 Toolbox 回归。会话测试覆盖回合结束触发、未变化修订、渲染进程交接、过期结果和失败。
 
+## 持久活动部件控件
+
+JavaScript 模型可以导出 `motionControls`，使用与[交互控件](skills/interactive-controls/SKILL.md#persistent-movement-controls)相同的声明格式。这些模型自有的控件位于查看器右下角，与左下角的光标控件分开，与临时编辑控件独立。模型修订会保留兼容的本地姿态值；重新打开查看器则使用已保存的参数。活动部件交互不会写入 `.rumi-parameters.json`，也不会改变验证输入。临时编辑期间面板保持可见但禁用，编辑结束后恢复姿态。请求绑定源模型的光标编辑前，请先重置为已保存的姿态。没有活动部件声明的模型不显示此面板；不支持 GLB 活动部件绑定。渲染器反馈通过 `design.motion` 提供已验证的声明。
+
 ## 可编辑的 Three.js 模型
 
 将每个独立模型保存在 `models/<name>/model.js`（或 `model.mjs`）中，辅助文件放在同一目录内。查看器会自动发现这些入口，以文件夹名标记圆角玻璃按钮，并在下次轮询时发现新增或删除的模型。即使只有一个模型，每个按钮也保留清晰的边框和阴影。使用入口路径调用 `viewer_load` 可将该模型显示在视图中；`meshState` 列出已发现的模型及当前选择。现有的 `source/model.js` 仍可被发现。模块导出同步的 `build(THREE)` 函数，返回新的 `THREE.Mesh` 或 `THREE.Group`。单位为毫米，Z 轴向上。向 `viewer_load` 传入 `buildVolume` 可显示打印空间并启用适配检查；省略时保留当前打印上下文。[桌子示例](assets/example-model.js) 展示了命名部件、共享几何数据、材质和参数。

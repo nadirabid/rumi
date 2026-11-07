@@ -40,7 +40,7 @@ it('delivers rendered load measurements to the next model request in a keyless s
   try {
     const root = await realpath(temporary)
     await mkdir(join(root, 'models', 'box'), { recursive: true })
-    await writeFile(join(root, 'models', 'box', 'model.js'), 'export const parameters={width:12}; export function build(T,p){return new T.Mesh(new T.BoxGeometry(p.width,12,2),new T.MeshStandardMaterial())}\n')
+    await writeFile(join(root, 'models', 'box', 'model.js'), 'export const parameters={width:12,angle:0}; export const motionControls=[{kind: "slider",label: "Door",axes:[{key: "angle",min:0,max:90,step:1,reset:0}]}]; export function build(T,p){const m=new T.Mesh(new T.BoxGeometry(p.width,12,2),new T.MeshStandardMaterial());m.rotation.z=p.angle*Math.PI/180;return m}\n')
     await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
     const harness = await mountAgentLoopTestHarness(ctx)
     const adapter = new LoadReplay()
@@ -72,7 +72,8 @@ it('delivers rendered load measurements to the next model request in a keyless s
       const { scene } = await request('state')
       await request('feedback', {
         revision: scene.design.revision, url: scene.design.url, transform: scene.design.transform,
-        volume: scene.volume, loadStatus: 'ready', parameters: { width: 12 },
+        volume: scene.volume, loadStatus: 'ready', parameters: { width: 12, angle: 0 },
+        motion: { values: { angle: 0 }, controls: [{ kind: 'slider', label: 'Door', axes: [{ key: 'angle', min: 0, max: 90, step: 1, reset: 0 }] }] },
         report: { status: 'ok', dimensions: { x: 12, y: 12, z: 2 }, checks: [] },
       })
     })()
@@ -86,7 +87,7 @@ it('delivers rendered load measurements to the next model request in a keyless s
     const normalized = output.text.replaceAll(root, '<project>').replace(/\/api\/print-studio\/viewer\/source\/[^/]+/g, '/api/print-studio/viewer/source/<revision>')
     const result = JSON.parse(normalized)
     expect(result).toMatchObject({ load: { status: 'ready' }, design: {
-      parameters: { width: 12 }, report: { dimensions: { x: 12, y: 12, z: 2 } },
+      parameters: { width: 12, angle: 0 }, motion: { values: { angle: 0 } }, report: { dimensions: { x: 12, y: 12, z: 2 } },
     } })
     const events = agent.session.snapshotEvents()
     expect(events.filter(event => event.type === 'tool/call').map(event => event.data.name)).toEqual(['viewer_load'])
@@ -96,11 +97,32 @@ it('delivers rendered load measurements to the next model request in a keyless s
         "design": {
           "analog": null,
           "camera": null,
-          "contentHash": "331f34e07b8aa72829d42bafa3bfa6326324ec1c8e6137b79d412f8af4beecdf",
+          "contentHash": "b4cfe1e376d36db7d3f8b524f35240b22634b2693f926e8637fd13758345b827",
           "error": null,
           "format": "javascript",
           "highlight": null,
+          "motion": {
+            "controls": [
+              {
+                "axes": [
+                  {
+                    "key": "angle",
+                    "max": 90,
+                    "min": 0,
+                    "reset": 0,
+                    "step": 1,
+                  },
+                ],
+                "kind": "slider",
+                "label": "Door",
+              },
+            ],
+            "values": {
+              "angle": 0,
+            },
+          },
           "parameters": {
+            "angle": 0,
             "width": 12,
           },
           "path": "<project>/models/box/model.js",

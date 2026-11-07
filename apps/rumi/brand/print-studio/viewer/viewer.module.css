@@ -196,3 +196,27 @@
   border-radius: 50%;
   background: var(--dsw-alias-state-error-primary);
 }
+
+.rumi-print-viewer .pv-bottom-controls {
+  position: absolute; bottom: 12px; left: 12px; right: 28px; z-index: 3;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, min(264px, calc(100% - 120px)));
+  align-items: end; gap: 10px; max-height: 45%;
+  pointer-events: none;
+}
+.rumi-print-viewer .pv-bottom-controls .pv-cursor-controls {
+  position: relative; inset: auto; grid-column: 1; grid-row: 1; justify-self: start;
+  max-width: 100%; pointer-events: auto;
+}
+.rumi-print-viewer .pv-motion-controls {
+  grid-column: 2; grid-row: 1; justify-self: end;
+  min-width: 0; width: 264px; max-width: 100%; min-height: 0;
+  margin: 0; padding: 0; border: 0; overflow-y: auto; pointer-events: auto;
+}
+.rumi-print-viewer .pv-motion-controls .av-controls {
+  position: static; width: 100%; max-width: 100%; max-height: none;
+  animation: none;
+}
+.rumi-print-viewer .pv-motion-controls:disabled { opacity: .55; }
+.rumi-print-viewer:has(.pv-motion-controls) > .pv-content .av-controls:not(.pv-motion-controls .av-controls) { max-height: calc(50% - 68px); }
+
+.rumi-print-viewer .pv-bottom-controls:not(:has(.pv-motion-controls)) { grid-template-columns: minmax(0, 1fr); }

@@ -8,11 +8,12 @@ import { en, zh } from '../viewer/locales.js'
 import { encodeStl } from '../viewer/stl.js'
 
 vi.mock('../viewer/viewer.module.css', () => ({ default: '' }))
-const viewport = vi.hoisted(() => ({ modelParameters: vi.fn(() => ({ width: 12 })), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
+const viewport = vi.hoisted(() => ({ motionControls: vi.fn(), updateMotion: vi.fn(), modelParameters: vi.fn(() => ({ width: 12 })), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
 vi.mock('../viewer/viewport/index.js', () => ({
   createViewport: (...args: unknown[]) => {
     viewport.create(...args)
     return {
+      motionControls: viewport.motionControls, updateMotion: viewport.updateMotion,
       modelParameters: viewport.modelParameters, renderedHighlight: viewport.renderedHighlight,
       captureCursor: viewport.captureCursor, setHighlightVisible: viewport.setHighlightVisible,
       thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose,
@@ -29,6 +30,8 @@ const disposers: (() => void | Promise<void>)[] = []
 
 beforeEach(() => {
   vi.useFakeTimers()
+  viewport.motionControls.mockReset().mockReturnValue(null)
+  viewport.updateMotion.mockReset().mockReturnValue(true)
   viewport.applyDesign.mockReset().mockResolvedValue(null)
   viewport.captureCursor.mockReset().mockReturnValue({ status: 'no_hit' })
   viewport.renderedHighlight.mockReset().mockReturnValue(null)
@@ -372,4 +375,36 @@ it('shows only a discreet error dot, retaining unresolved findings until a fresh
   view.setScene({ ...base, validation: { error: null, models: [{ status: 'unavailable' }] } })
   await settle(2000)
   expect(screen.getByLabelText(en.validationUnavailable)).toBeTruthy()
+})
+
+it('keeps movement controls in their own area across model reloads without opening an edit', async () => {
+  const controls = [{ kind: 'slider', label: 'Doors', axes: [{ key: 'doorAngle', min: 0, max: 100, step: 1, reset: 0 }] }]
+  const motion = { id: 'first', values: { doorAngle: 0 }, controls }
+  viewport.motionControls.mockReturnValue(motion)
+  viewport.applyDesign.mockResolvedValue({ status: 'review', dimensions: { x: 20, y: 20, z: 20 }, checks: [] })
+  const design = { path: 'models/car/model.js', url: '/first.js', revision: 1, transform: {} }
+  const view = fixture({ scene: { ...scene([]), design } })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  const slider = screen.getByRole('slider', { name: 'Doors' })
+  expect(slider.closest('.pv-motion-controls')).toBeTruthy()
+  expect(slider.closest('.pv-bottom-controls')).toBeTruthy()
+  fireEvent.input(slider, { target: { value: '58' } })
+  expect(viewport.updateMotion).toHaveBeenCalledWith({ doorAngle: 58 })
+  viewport.motionControls.mockReturnValue({ ...motion, id: 'second', values: { doorAngle: 58 } })
+  view.setScene({ ...scene([]), design: { ...design, url: '/second.js', revision: 2 } })
+  await settle(2000)
+  expect(screen.getByRole('slider', { name: 'Doors' }).getAttribute('value')).toBe('58')
+  expect(view.fetch.mock.calls.some(([url]) => String(url).includes('/shape-feedback'))).toBe(false)
+  view.setScene({ ...scene([]), design: { ...design, url: '/second.js', revision: 2, analog: {
+    id: 'width-edit', operation: 'parameters', label: 'Size', values: { width: 20 },
+    controls: [{ kind: 'slider', label: 'Width', axes: [{ key: 'width', min: 10, max: 40, step: 1, reset: 20 }] }],
+  } } })
+  await settle(2000)
+  expect(screen.getByRole('slider', { name: 'Doors' }).closest('fieldset')?.disabled).toBe(true)
+  expect(screen.getByRole('slider', { name: 'Width' }).closest('.pv-motion-controls')).toBeNull()
+  viewport.motionControls.mockReturnValue(null)
+  view.setScene({ ...scene([]), design: { ...design, url: '/without-movement.js', revision: 3 } })
+  await settle(2000)
+  expect(screen.queryByRole('slider', { name: 'Doors' })).toBeNull()
 })

@@ -190,6 +190,7 @@ export function installViewer(ctx, React, primitives) {
     const [failed, setFailed] = React.useState(false)
     const [buildError, setBuildError] = React.useState(null)
     const [cursorMode, setCursorMode] = React.useState('patch')
+    const [motion, setMotion] = React.useState(null)
     const analogValues = React.useRef(null), analogId = React.useRef(null), analogSequence = React.useRef(0), analogDelivery = React.useRef(Promise.resolve())
     const analogAbort = React.useRef(null)
     React.useEffect(() => {
@@ -270,7 +271,7 @@ export function installViewer(ctx, React, primitives) {
         const report = await viewport.current.applyDesign(view?.design ?? null, view?.volume ?? null)
         if (!active || !report) return
         const highlightId = viewport.current?.renderedHighlight?.() ?? null
-        await feedback({ report, parameters: viewport.current.modelParameters(), loadStatus: document.hidden ? 'viewer_hidden' : 'ready', highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })
+        await feedback({ report, parameters: viewport.current.modelParameters(), motion: viewport.current.motionControls?.() ?? null, loadStatus: document.hidden ? 'viewer_hidden' : 'ready', highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })
       }
       const visible = () => {
         if (!document.hidden) void reportRendered().catch(() => { if (active) setBuildError('feedbackFailed') })
@@ -279,9 +280,10 @@ export function installViewer(ctx, React, primitives) {
       designReady.current.then(async (report) => {
         if (!active || !report) return
         setBuildError(null)
+        setMotion(viewport.current.motionControls?.() ?? null)
         trace('apply_finished')
         const highlightId = viewport.current?.renderedHighlight?.() ?? null
-        await feedback({ report, parameters: viewport.current.modelParameters(), loadStatus: document.hidden ? 'viewer_hidden' : 'ready', highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })
+        await feedback({ report, parameters: viewport.current.modelParameters(), motion: viewport.current.motionControls?.() ?? null, loadStatus: document.hidden ? 'viewer_hidden' : 'ready', highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })
       }).catch(async (error) => {
         if (!active) return
         trace('apply_or_feedback_failed')
@@ -373,11 +375,18 @@ export function installViewer(ctx, React, primitives) {
       return () => { active = false; clearTimeout(timer); controller.abort() }
     }, [view])
     return h(React.Fragment, null,
+      h('div', { className: 'pv-bottom-controls' },
+      motion && h('fieldset', { className: 'pv-motion-controls', disabled: Boolean(view?.design?.analog), inert: Boolean(view?.design?.analog), 'aria-label': t('motionControls') },
+        h(AnalogPanel, { key: motion.id, spec: { ...motion, label: t('motionControls') }, t,
+          onChange: values => {
+            try { return viewport.current?.updateMotion(values) !== false }
+            catch (_error) { setBuildError('buildFailed'); return false }
+          }, onRelease: () => {} })),
       !view?.design?.analog && h('div', { className: 'pv-cursor-controls', role: 'group', 'aria-label': t('cursorHighlighting') },
         ['patch', 'surface', 'part', 'edge'].map(mode => h(Button, {
           key: mode, variant: 'ghost', size: 'sm', 'aria-pressed': cursorMode === mode,
           onClick: () => { setCursorMode(mode); viewport.current?.setCursorMode(mode) },
-        }, t(`cursor_${mode}`)))),
+        }, t(`cursor_${mode}`))))),
       view?.design?.analog ? h(AnalogPanel, { key: view.design.analog.id, spec: view.design.analog, t, onChange: values => {
         try { viewport.current?.updateShape(values) }
         catch (_error) { setBuildError('buildFailed'); return false }

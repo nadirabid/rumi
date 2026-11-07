@@ -3,6 +3,7 @@ import { readdir, readFile, realpath, stat, writeFile, rename, rm } from 'node:f
 import { dirname, extname, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { validateGlb, GLB_MAX_BYTES } from './glb.js'
+import { readMotion } from './motion.js'
 import { normalizeHighlight } from './highlight.js'
 import { normalizePlacement } from './transform.js'
 import { normalizeShape, normalizeValues } from './analog/spec.js'
@@ -109,6 +110,7 @@ export async function createSource(ctx, path, workspace) {
       state.revision++
       state.highlight = null
       state.analog = null
+      delete state.motion
       state.contentHash = format === 'glb' ? createHash('sha256').update(next.files.get(entryName)).digest('hex') : next.hash
       state.parameters = next.parameters
       sourceError = null
@@ -224,6 +226,9 @@ export async function createSource(ctx, path, workspace) {
         }
       }
       const parameters = value.parameters === undefined ? state.parameters : parameterValues(value.parameters)
+      const motion = value.motion ? readMotion(value.motion.controls, parameters, parameterValues(value.motion.values)) : null
+      if (motion) state.motion = motion
+      else delete state.motion
       state.report = value.report ?? null
       if (value.report) state.parameters = parameters
       buildError = value.error ? { kind: 'build', message: String(value.error).slice(0, 2000) } : null

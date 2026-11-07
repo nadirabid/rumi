@@ -407,3 +407,34 @@ it('updates parameter controls opened after loading synchronously and preserves 
     expect(() => viewport.updateShape({ size: 70 })).not.toThrow()
   } finally { viewport.dispose() }
 })
+
+it('retains model movement after reload and editing without changing saved geometry', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  const controls = [{ kind: 'slider', label: 'Doors', axes: [{ key: 'angle', min: 0, max: 100, step: 1, reset: 0 }] }]
+  const module = `export const parameters={angle:0,width:20};export const motionControls=${JSON.stringify(controls)};export function build(THREE,p){const m=new THREE.Mesh(new THREE.BoxGeometry(p.width,10,10),new THREE.MeshStandardMaterial());m.rotation.z=p.angle*Math.PI/180;return m}`
+  const spec = { path: 'models/car/model.js', url: 'data:text/javascript,' + encodeURIComponent(module), transform: {} }
+  try {
+    const report = await viewport.applyDesign(spec, null)
+    viewport.applyShape(null)
+    expect(viewport.motionControls().values).toEqual({ angle: 0 })
+    viewport.updateMotion({ angle: 58 })
+    expect(viewport.modelParameters()).toEqual({ angle: 0, width: 20 })
+    expect(await viewport.applyDesign(spec, null)).toEqual(report)
+    viewport.applyShape({ id: 'edit', operation: 'parameters', label: 'Width', values: { width: 20 }, controls: [
+      { kind: 'slider', label: 'Width', axes: [{ key: 'width', min: 10, max: 40, step: 1, reset: 20 }] },
+    ] })
+    expect(viewport.motionControls().values).toEqual({ angle: 58 })
+    expect(viewport.updateMotion({ angle: 90 })).toBe(false)
+    viewport.updateShape({ width: 30 })
+    viewport.applyShape(null)
+    expect(viewport.motionControls().values).toEqual({ angle: 58 })
+    await viewport.applyDesign({ ...spec, url: spec.url + '%0A' }, null)
+    viewport.applyShape(null)
+    expect(viewport.motionControls().values).toEqual({ angle: 58 })
+    const visible: THREE.Mesh[] = []
+    rendered().traverseVisible((node: THREE.Object3D) => { if (node instanceof THREE.Mesh) visible.push(node) })
+    expect(visible.some(mesh => Math.abs(mesh.rotation.z - 58 * Math.PI / 180) < .001)).toBe(true)
+    await viewport.applyDesign({ ...spec, url: 'data:text/javascript,' + encodeURIComponent(module.replace(`export const motionControls=${JSON.stringify(controls)};`, '')) }, null)
+    expect(viewport.motionControls()).toBeNull()
+  } finally { viewport.dispose() }
+})

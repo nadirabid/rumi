@@ -1,5 +1,6 @@
 /** Copy shared by the mesh preview tab and the STL document preview. */
 export const en = {
+  motionControls: 'Movement',
   validationChanged: 'Geometry changed — checked after Rumi finishes editing.',
   validationChecking: 'Checking the model…',
   validationRepair: 'Unresolved print geometry errors.',
@@ -29,6 +30,7 @@ export const en = {
 }
 
 export const zh = {
+  motionControls: '活动部件',
   validationChanged: '几何已更改，将在 Rumi 完成编辑后检查。',
   validationChecking: '正在检查模型…',
   validationRepair: '打印几何仍有未解决的错误。',

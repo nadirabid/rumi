@@ -9,6 +9,24 @@ description: Open labeled sliders, two-axis pads, and curves when someone wants 
 
 Use `viewer_controls` with explicit `controls`, `values`, and the current design's exact `path`, `revision`, and `url`. Choose short labels in the person's language. Initial values must reproduce the current model; `reset` is the meaningful neutral or saved starting value. The tool returns `rendered` only after the visible viewer acknowledges the preview. Do not say controls are ready after `not_rendered` or a failed build. A `viewer_hidden` reason means the window must be brought forward; the viewer retries the same controls when visible. A `render_failed` reason includes the actual binding or model error. A timeout alone does not establish that parameter controls are unsupported; do not replace requested controls with static alternatives on that evidence.
 
+## Persistent movement controls
+
+Doors, wheels, hinges, and other movable features use model-owned movement controls instead of a temporary `viewer_controls` edit. Export `motionControls` from the JavaScript model using the same labeled slider/pad/curve declarations below, bound to numeric entries in `parameters`. The viewer discovers these declarations on load and keeps them at the bottom-right as long as the loaded model declares them. Preserve the declarations and their bindings when repairing or replacing the model; remove a declaration only when its movable feature is removed. Do not infer motion from parameter names.
+
+```js
+export const parameters = { wheelSpin: 0, doorAngle: 0 }
+export const motionControls = [
+  { kind: 'slider', label: 'Wheels', axes: [
+    { key: 'wheelSpin', min: -360, max: 360, step: 1, reset: 0 },
+  ] },
+  { kind: 'slider', label: 'Doors', axes: [
+    { key: 'doorAngle', min: 0, max: 100, step: 1, reset: 0 },
+  ] },
+]
+```
+
+Movement changes only the local preview pose, never the saved parameters or validation input, and needs no freeze/save/close. The panel remains visible but disabled while a temporary edit owns the preview; the movement pose returns after that edit ends. Compatible pose values survive model revisions and switching between recent models while the viewer is mounted; reopening the viewer starts from saved values. A posed preview cannot supply a source-bound cursor edit: reset the movement controls to the saved pose first. `viewer_load` feedback exposes the discovered declarations under `design.motion`. GLB does not yet expose these JavaScript parameter bindings. Animation does not establish printable joint mechanics.
+
 ## Declare controls
 
 Each declaration has `kind`, `label`, and `axes`. A slider or curve has one axis; a pad has horizontal and vertical axes. Each axis has `key`, `min`, `max`, `step`, and `reset`. Keys bind entries in `values`. Labels are presentation, not behavior. A curve adjusts one bounded scalar with a curve-shaped gesture; it is not arbitrary curve geometry unless the model binds that scalar to its geometry.

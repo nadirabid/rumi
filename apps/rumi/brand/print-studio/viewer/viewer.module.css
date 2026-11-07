@@ -33,14 +33,16 @@
   border-radius: 999px;
   corner-shape: round;
   border: 1px solid var(--dsw-alias-border-l2);
-  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 78%, transparent);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--dsw-alias-label-primary-foreground) 45%, transparent), transparent 55%), color-mix(in srgb, var(--dsw-alias-bg-layer-2) 65%, transparent);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-label-primary-foreground) 55%, transparent), 0 1px 3px var(--dsw-alias-bg-mask-2);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-label-primary-foreground) 70%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent), 0 3px 12px var(--dsw-alias-bg-mask-2);
 }
 .rumi-print-viewer .pv-cursor-controls button {
-  height: 34px;
-  padding: 0 12px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
   border: 1px solid transparent;
   border-radius: 999px;
   corner-shape: round;
@@ -67,11 +69,33 @@
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 2px;
 }
+/* Keep the selected mode reachable before revealing the remaining choices. */
+@media (hover: hover) and (pointer: fine) {
+  .rumi-print-viewer .pv-cursor-controls:not(:hover):not(:focus-within) button:not([aria-pressed='true']) { display: none; }
+  .rumi-print-viewer .pv-cursor-controls:not(:hover):not(:focus-within) button[aria-pressed='true'] {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+  .rumi-print-viewer .pv-cursor-controls:not(:hover):not(:focus-within)::after {
+    content: '';
+    align-self: center;
+    width: 4px;
+    height: 4px;
+    margin-inline: 0 8px;
+    border-inline-end: 1px solid var(--dsw-alias-label-secondary);
+    border-bottom: 1px solid var(--dsw-alias-label-secondary);
+    transform: rotate(-45deg);
+  }
+}
+@media (prefers-contrast: more) {
+  .rumi-print-viewer .pv-cursor-controls { border-color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); }
+}
 @media (prefers-reduced-motion: reduce) {
   .rumi-print-viewer .pv-cursor-controls button { transition: none; }
 }
 @media (prefers-reduced-transparency: reduce) {
-  .rumi-print-viewer .pv-cursor-controls { background: var(--dsw-alias-bg-layer-2); backdrop-filter: none; }
+  .rumi-print-viewer .pv-cursor-controls { background: var(--dsw-alias-bg-layer-2); backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
 @media (pointer: coarse) {
   .rumi-print-viewer .pv-cursor-controls button { min-height: 44px; }

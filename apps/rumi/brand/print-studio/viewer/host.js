@@ -23,6 +23,7 @@ import { createViewerEvents } from './events.js'
 import { createCursorRequests, cursorIdentity } from './cursor.js'
 import { cursorCommand } from './cursor-commands.js'
 import { createModelFocus } from './model-focus.js'
+import { createValidation } from './validation.js'
 import { createSource } from './source.js'
 import { discoverModels, readSelection, saveSelection } from './catalog.js'
 
@@ -111,7 +112,8 @@ function summaryOf(record) {
   if (designReport) measured.push(designReport)
   const errors = measured.reduce((total, report) => total + report.checks.filter(check => check.severity === 'error').length, 0)
   const warnings = measured.reduce((total, report) => total + report.checks.filter(check => check.severity === 'warning').length, 0)
-  return { status: errors > 0 ? 'blocked' : warnings > 0 ? 'review' : 'ok', errors, warnings }
+  const pending = measured.some(report => report.checks.some(check => check.severity === 'pending'))
+  return { status: errors > 0 ? 'blocked' : warnings > 0 || pending ? 'review' : 'ok', errors, warnings }
 }
 
 /**
@@ -185,15 +187,28 @@ function loadIdentity(record) {
  * @param {Function} defineTool - DSH's schema-validating tool factory from the host entrypoint.
  * @param {string} diagnosticsDirectory - Private local journal directory.
  * @param {number} loadTimeoutMs - Maximum renderer acknowledgment wait, in milliseconds.
+ * @param {object} [validationConfig] Resolved validator settings; omitted by isolated viewer fixtures.
+ * @param {Function} [createUserMessage] DSH message factory for automatic repair turns.
  * @returns {void}
  */
-export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs) {
+export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs, validationConfig, createUserMessage) {
   const diagnostics = createViewerDiagnostics(diagnosticsDirectory)
   const sessions = new Map()
   const receipts = createHighlightReceipts()
   const loads = createLoadReceipts(loadTimeoutMs)
   const events = createViewerEvents()
   const focus = createModelFocus(ctx, { read: id => sessions.get(id), notify: id => events.notify(id) })
+  const validation = validationConfig ? createValidation(ctx, validationConfig, {
+    createUserMessage,
+    notify: id => events.notify(id),
+    view: id => {
+      const record = sessions.get(id), scene = record?.history.current(), design = record?.source?.state()
+      return { selectedModel: record?.selectedModel, transform: design?.transform,
+        sourceHash: design?.contentHash, analog: design?.analog, volume: scene?.volume ?? null, meshes: (scene?.objects ?? []).filter(object => object.visible).map(object => ({
+          path: `stl:${object.id}`, bytes: new Uint8Array(record.datablocks.get(object.datablockId).bytes), transform: object.transform,
+        })) }
+    },
+  }) : null
   const cursors = createCursorRequests(sessionId => events.notify(sessionId))
   const captureJobs = new Set()
   ctx.inject(['systemPrompt'], scoped => {
@@ -203,8 +218,8 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         if (!agent) return ''
         const record = sessions.get(agent.session.id)
         return JSON.stringify({ meshState: record
-          ? { ...sceneReport(record), workingModels: focus.paths(agent.session.id) }
-          : { status: 'unavailable', reason: 'viewer_not_initialized' } })
+          ? { ...sceneReport(record), validation: validation?.read(agent.session.id), workingModels: focus.paths(agent.session.id) }
+          : { status: 'unavailable', reason: 'viewer_not_initialized', validation: validation?.read(agent.session.id) } })
       },
     }), 'print viewer: live mesh context')
     scoped.effect(() => scoped.systemPrompt.context({
@@ -219,6 +234,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   let closed = false
   ctx.effect(() => async () => {
     closed = true
+    await validation?.dispose()
     loads.dispose()
     receipts.dispose()
     events.dispose()
@@ -342,7 +358,8 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       catch (error) { record.catalogError = String(error) }
     })
     if (receipts.has(sessionId)) diagnostics.record(sessionId, 'viewer.state_delivered', { highlightId: record.source?.state().highlight?.id ?? null })
-    return json({ cursorRequest: cursors.read(sessionId), scene: {
+    return json({ validationRequests: validation?.requests(sessionId) ?? [], cursorRequest: cursors.read(sessionId), scene: {
+      validation: validation?.read(sessionId),
       ...sceneState(record), design: record.source?.state() ?? null,
       models: record.models ?? [], selectedModel: record.selectedModel ?? null,
       workingModels: focus.paths(sessionId),
@@ -372,6 +389,20 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       } catch (_error) { return json({ error: 'selection_failed' }, 409) }
     },
   }), 'print viewer: select model')
+
+  ctx.effect(() => ctx.connection.fetch.register({
+    path: `${ROUTE}/validation`, methods: ['POST'], requestBody: 'buffered',
+    fetch: async request => {
+      const url = new URL(request.url), id = url.searchParams.get('sessionId'), job = url.searchParams.get('id')
+      if (!id || !job || !validation) return json({ error: 'validation_not_found' }, 404)
+      try {
+        const bytes = new Uint8Array(await request.arrayBuffer())
+        if (bytes.byteLength > STL_LIMITS.maxBytes) return json({ error: 'mesh_too_large' }, 413)
+        const error = request.headers.get('content-type') === 'text/plain' ? new TextDecoder().decode(bytes) : null
+        return validation.submit(id, job, bytes, error) ? json({ ok: true }) : json({ error: 'stale_validation' }, 409)
+      } catch (_error) { return json({ error: 'invalid_validation_mesh' }, 400) }
+    },
+  }), 'print viewer: validation geometry')
 
   route('/model', async (request) => {
     const query = new URL(request.url).searchParams

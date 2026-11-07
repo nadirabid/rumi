@@ -353,3 +353,23 @@ it('reports viewport initialization failure for the requested model instead of w
     revision: 3, url: design.url, volume: null, loadStatus: 'build_failed', error: 'WebGL unavailable',
   })
 })
+
+it('shows only a discreet error dot, retaining unresolved findings until a fresh pass', async () => {
+  const base = scene([object()])
+  const view = fixture({ scene: { ...base, validation: { error: null, models: [{ status: 'checking' }] } } })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  expect(screen.queryByLabelText(en.validationRepair)).toBeNull()
+  for (const model of [{ status: 'needs_repair' }, { status: 'checking', previousReport: { status: 'needs_repair' } }]) {
+    view.setScene({ ...base, validation: { error: null, models: [model] } })
+    await settle(2000)
+    expect(screen.getByLabelText(en.validationRepair).className).toBe('pv-validation-dot')
+    expect(screen.queryByText(en.validationRepair)).toBeNull()
+  }
+  view.setScene({ ...base, validation: { error: null, models: [{ status: 'passed', report: { status: 'passed' } }] } })
+  await settle(2000)
+  expect(screen.queryByLabelText(en.validationRepair)).toBeNull()
+  view.setScene({ ...base, validation: { error: null, models: [{ status: 'unavailable' }] } })
+  await settle(2000)
+  expect(screen.getByLabelText(en.validationUnavailable)).toBeTruthy()
+})

@@ -9,6 +9,7 @@
 import { createModelSelector } from './model-selector.js'
 import { createAnalogPanel } from './analog/controls.js'
 import { parseStl } from './stl.js'
+import { validationMesh } from './viewport/validation.js'
 import { createViewport } from './viewport/index.js'
 import { placeMesh } from './transform.js'
 import { en, zh } from './locales.js'
@@ -103,6 +104,16 @@ export function installViewer(ctx, React, primitives) {
       const response = await readScene(sessionId)
       const scene = response.scene ?? null
       if (stopped()) return
+      for (const job of response.validationRequests ?? []) {
+        let bytes, contentType = 'application/octet-stream'
+        try { bytes = await validationMesh(job) }
+        catch (error) { bytes = String(error.message ?? error); contentType = 'text/plain' }
+        if (stopped()) return
+        const submitted = await fetch(`${ROUTE}/validation?sessionId=${encodeURIComponent(sessionId)}&id=${encodeURIComponent(job.id)}`, {
+          method: 'POST', headers: { 'content-type': contentType }, body: bytes, signal: controller.signal,
+        })
+        if (!submitted.ok && submitted.status !== 409) throw new Error('Validation geometry delivery failed')
+      }
       if (response.cursorRequest) {
         let snapshot
         try { snapshot = captures.get(sessionId)?.(response.cursorRequest) ?? { status: 'viewer_unavailable' } }
@@ -119,6 +130,7 @@ export function installViewer(ctx, React, primitives) {
       if (scene === null) { publish(sessionId, EMPTY); return }
       const unchanged = current?.scene != null && current.scene.revision === scene.revision
         && JSON.stringify(current.scene.design) === JSON.stringify(scene.design)
+        && JSON.stringify(current.scene.validation) === JSON.stringify(scene.validation)
         && JSON.stringify(current.scene.models) === JSON.stringify(scene.models)
         && JSON.stringify(current.scene.workingModels) === JSON.stringify(scene.workingModels)
         && current.scene.selectedModel === scene.selectedModel
@@ -376,6 +388,15 @@ export function installViewer(ctx, React, primitives) {
         ? h('p', { role: 'alert', className: view?.design?.analog ? 'pv-error av-error' : 'pv-error' }, t(buildError)) : null)
   }
 
+  function validationLabel(scene) {
+    const validation = scene?.validation
+    if (!validation) return null
+    if (validation.error || validation.models.some(item => item.status === 'unavailable')) return 'validationUnavailable'
+    if (validation.models.some(item => item.status === 'needs_repair'
+      || (item.report ?? item.previousReport)?.status === 'needs_repair')) return 'validationRepair'
+    return null
+  }
+
   function MeshPane({ useScene, t, selectModel }) {
     const state = useScene(value => value)
     const scene = state.scene
@@ -397,6 +418,8 @@ export function installViewer(ctx, React, primitives) {
       h(ModelSelector, { scene, busy, select, t }),
       failed || scene?.catalogFailed ? h('p', { className: 'pv-catalog-error', role: 'alert' },
         t(failed ? 'selectionFailed' : 'catalogFailed')) : null,
+      validationLabel(scene) && h('span', { role: 'img', className: 'pv-validation-dot',
+        'aria-label': t(validationLabel(scene)), title: t(validationLabel(scene)) }),
       h('div', { className: 'pv-content' }, h(MeshContent, { state, t })))
   }
 

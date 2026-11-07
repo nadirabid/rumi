@@ -161,3 +161,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.pv-validation-dot {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 3;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-error-primary);
+}

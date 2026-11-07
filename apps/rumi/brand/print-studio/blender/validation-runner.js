@@ -1,0 +1,53 @@
+/** Bounded background Blender validation of immutable input bytes. */
+import { spawn } from 'node:child_process'
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { blenderStatus } from './host.js'
+
+/**
+ * Run the bundled Toolbox with explicit thresholds; failures never yield a passing report.
+ * @param {object} config Resolved plugin configuration.
+ * @param {object} input Immutable bytes, format, placement, and volume.
+ * @param {AbortSignal} signal Owner cancellation; completion awaits process close.
+ * @returns {Promise<object>} Validated structured findings.
+ */
+export async function runValidation(config, input, signal) {
+  const blender = await blenderStatus(config.blenderExecutable, config.blenderHome)
+  if (blender.status !== 'ready') throw new Error(blender.message)
+  const directory = await mkdtemp(join(tmpdir(), 'rumi-validation-'))
+  try {
+    const path = join(directory, `model.${input.format}`), output = join(directory, 'result.json')
+    await writeFile(path, input.bytes, { flag: 'wx', mode: 0o600 })
+    const request = join(directory, 'request.json')
+    await writeFile(request, JSON.stringify({ input: path, output, transform: input.transform, volume: input.volume,
+      settings: config.validation }), { flag: 'wx', mode: 0o600 })
+    const script = fileURLToPath(new URL('./validate.py', import.meta.url)).replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`)
+    signal.throwIfAborted()
+    await new Promise((resolve, reject) => {
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/KEY|SECRET|TOKEN|PASSWORD|^PYTHON/i.test(key)))
+      const child = spawn(blender.executable, ['--background', '--factory-startup', '--disable-autoexec', '--python-exit-code', '1', '--python', script, '--', request],
+        { env: { ...env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
+      let diagnostic = '', failure
+      const collect = chunk => { diagnostic = (diagnostic + chunk.toString()).slice(-4000) }
+      child.stdout.on('data', collect); child.stderr.on('data', collect)
+      const abort = () => { failure = new Error('Blender validation cancelled'); child.kill('SIGKILL') }
+      signal.addEventListener('abort', abort, { once: true })
+      const timer = setTimeout(() => { failure = new Error('Blender validation timed out'); child.kill('SIGKILL') }, config.validationTimeoutMs)
+      child.on('error', error => { failure = error })
+      child.on('close', code => {
+        clearTimeout(timer); signal.removeEventListener('abort', abort)
+        if (failure || code !== 0) reject(failure ?? new Error(`Blender validation failed: ${diagnostic}`))
+        else resolve()
+      })
+      if (signal.aborted) abort()
+    })
+    const report = JSON.parse(await readFile(output, 'utf8'))
+    if (report?.version !== 1 || !['passed', 'review', 'needs_repair'].includes(report.status)
+      || report.printReady !== false || !Array.isArray(report.checks) || report.checks.length > 32
+      || !report.checks.every(c => typeof c.code === 'string' && Number.isSafeInteger(c.count) && c.count >= 0 && ['warning', 'error'].includes(c.severity))
+      || !['x', 'y', 'z'].every(a => Number.isFinite(report.dimensions?.[a]) && report.dimensions[a] >= 0)) throw new Error('Invalid Blender validation report')
+    return report
+  } finally { await rm(directory, { recursive: true, force: true }) }
+}

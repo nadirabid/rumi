@@ -209,12 +209,12 @@ it('keeps an explicit selection after an overlapping automatic restore', async (
 it('opens a mesh into a scene the browser can draw and the agent can talk about', async () => {
   const f = fixture()
   const report = await f.run('mesh_open', { path: 'box.stl' })
-  expect(report).toMatchObject({ objectCount: 1, status: 'ok', volume: null })
+  expect(report).toMatchObject({ objectCount: 1, status: 'review', volume: null })
   expect(report.objects[0]).toMatchObject({ name: 'box.stl', dimensions: { x: 12, y: 12, z: 2 } })
 
   const state = await f.state()
   expect(state.revision).toBe(1) // one addObject command
-  expect(state.summary).toEqual({ status: 'ok', errors: 0, warnings: 0 })
+  expect(state.summary).toEqual({ status: 'review', errors: 0, warnings: 0 })
   expect(state.objects[0].matrix).toHaveLength(16)
   // The seat placement centres the mesh on the plate.
   expect(state.objects[0].matrix.slice(12, 15)).toEqual([-6, -6, 0])

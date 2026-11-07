@@ -1,5 +1,21 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`automatically queues one repair turn with durable findings and stops on unchanged geometry 1`] = `
+[
+  "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+
+{"validation":null}",
+  "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+
+{"validation":{"status":"changed","report":null,"previousReport":{"version":1,"status":"needs_repair","checks":[{"code":"intersecting_faces","count":2,"severity":"error"}],"printReady":false}}}",
+]
+`;
+
+exports[`collects every model before sending one repair and does not repair unavailable checks 1`] = `
+"Automatic print validation found blocking geometry errors. Repair the affected saved models now, preserving the requested design and moving parts. Inspect the findings and source; do not hide errors by removing requested features. Do not print or send to a printer. A fresh Blender check runs automatically after your turn. Passing geometry checks does not certify joint clearance, assembly, or slicer readiness. If you cannot safely resolve the errors, say so briefly. Findings:
+[{"path":"models/car/model.js","fingerprint":"<revision>","report":{"version":1,"status":"needs_repair","checks":[{"code":"intersecting_faces","count":2,"severity":"error"}],"printReady":false}},{"path":"models/second/model.js","fingerprint":"<revision>","report":{"version":1,"status":"needs_repair","checks":[{"code":"intersecting_faces","count":2,"severity":"error"}],"printReady":false}}]"
+`;
+
 exports[`documents creating multiple models and bringing a named entry into view 1`] = `
 {
   "analog": "Open labeled sliders, pads, or curves bound to real model values. Read interactive-controls first. Supply controls with labels, axis keys, ranges, steps and reset values, plus initial values. operation parameters binds exported parameters of a JavaScript model build(THREE, parameters); one key can drive multiple features such as both eyes. Other operations bind GLB deformation values; read analog-shaping for their geometry. If a requested parameter is not exposed, prepare a faithful parametric model before opening controls; never claim a cosmetic label is a working binding. Open controls before making a requested user adjustment. Only rendered confirms visibility. Freeze captures the latest visible values. For final parameter models, save persists frozen values and closes the edit. For a temporary parameter preview of an edit to an existing model, set finish to blender, provide the preserved original and semantic edit recipe, then freeze and apply the values to the original in Blender, check printability, publish and load the result. For GLB deformations, apply the frozen recipe through Blender and load the saved revision. Close cancels and restores the saved preview. Preserve unrelated features and the original model.",
@@ -28,6 +44,10 @@ Use \`printer-awareness\` before supplying a build volume or making printer-spec
 Use the cursor snapshot associated with the request and visually ground named regions through \`viewer_highlight\`, following \`clarify-mesh-changes\`. Check the model revision before editing; a Gaussian region is a soft reference, not an exact vertex selection or semantic part boundary. Changes to topology invalidate old triangle indices.
 
 Keep \`.blend\` files as editable originals and GLB as viewing artifacts. Export print meshes separately from the intended evaluated solids and verify units, wall thickness, manifoldness, fit, supports and slicer output using \`fdm-design\`. Blender operations and viewer checks do not certify print readiness. Whole-model placement still uses \`viewer_transform\`; it does not rewrite the Blender original.
+
+Print Studio automatically runs Blender geometry validation after each agent turn for changed discovered models. Read \`meshState.validation\` for revision-specific findings; \`previousReport\` is historical. Do not claim the current edit passed before its matching result exists. This validation does not certify joint motion, assembly, or slicing.
+
+Blocking geometry findings automatically start a repair turn with model paths and checked revisions. Preserve the requested design and moving parts while repairing; do not remove requested features merely to pass checks. Repairs are checked again after the turn, with a bounded automatic retry budget. If a repair cannot be made safely, report the remaining limitation briefly; never claim printability from geometry checks alone.
 ",
   "clarification": "---
 name: clarify-mesh-changes

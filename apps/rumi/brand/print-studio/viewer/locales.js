@@ -1,5 +1,12 @@
 /** Copy shared by the mesh preview tab and the STL document preview. */
 export const en = {
+  validationChanged: 'Geometry changed — checked after Rumi finishes editing.',
+  validationChecking: 'Checking the model…',
+  validationRepair: 'Unresolved print geometry errors.',
+  validationReview: 'Geometry warnings need review before printing.',
+  validationPassed: 'Geometry checks passed. Slicer and moving-joint checks are still required.',
+  validationUnavailable: 'Print geometry could not be checked.',
+
   shapeReset: 'Reset {control}', cutHeight: 'Height', cutTilt: 'Tilt', cutLean: 'Lean', shapeControls: 'Shape controls', shapeAmount: 'Strength', shapeSpread: 'Spread', shapeAngle: 'Tilt', shapePeak: 'Peak position', shapeCurve: 'Softness', shapeHint: 'Drag to shape. Tell Rumi when it feels right.', shapeFrozen: 'Keeping this shape…',
   cursorHighlighting: 'Cursor driven mesh highlighting',
   cursor_patch: 'Local patch', cursor_surface: 'Surface', cursor_part: 'Whole part', cursor_edge: 'Edge',
@@ -22,6 +29,13 @@ export const en = {
 }
 
 export const zh = {
+  validationChanged: '几何已更改，将在 Rumi 完成编辑后检查。',
+  validationChecking: '正在检查模型…',
+  validationRepair: '打印几何仍有未解决的错误。',
+  validationReview: '打印前需要复核几何警告。',
+  validationPassed: '几何检查通过。仍需切片和活动关节检查。',
+  validationUnavailable: '无法检查打印几何。',
+
   shapeReset: '重置{control}', cutHeight: '高度', cutTilt: '倾斜', cutLean: '侧倾', shapeControls: '形状控制', shapeAmount: '强度', shapeSpread: '范围', shapeAngle: '倾斜', shapePeak: '峰值位置', shapeCurve: '柔和度', shapeHint: '拖动调整形状。满意后告诉 Rumi。', shapeFrozen: '正在保存形状…',
   cursorHighlighting: '光标驱动的网格高亮',
   cursor_patch: '局部', cursor_surface: '表面', cursor_part: '整个部件', cursor_edge: '边缘',

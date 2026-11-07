@@ -28,7 +28,7 @@ export async function createSource(ctx, path, workspace) {
   let root, entryName
   const format = extname(path).toLowerCase() === '.glb' ? 'glb' : 'javascript'
   let closed = false
-  let pending, hash, candidate
+  let pending, hash, candidate, snapshotFiles
   let sourceError = null
   let buildError = null
   const snapshots = []
@@ -104,6 +104,7 @@ export async function createSource(ctx, path, workspace) {
       snapshots.push(disposeSnapshot)
       candidate = null
       hash = next.hash
+      snapshotFiles = next.files
       state.url = `${prefix}/${entryName.split('/').map(encodeURIComponent).join('/')}`
       state.revision++
       state.highlight = null
@@ -140,6 +141,7 @@ export async function createSource(ctx, path, workspace) {
   await dispose
   return {
     state: () => ({ ...state, error: sourceError ?? buildError }),
+    snapshotBytes: () => format === 'glb' ? snapshotFiles.get(entryName).slice() : null,
     poll() {
       if (closed) return Promise.resolve()
       if (!pending) pending = update(false).finally(() => { pending = undefined })

@@ -14,7 +14,7 @@ import { homedir } from 'node:os'
 import z from '@deepseek-ai/schemastery'
 import * as skillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { createDeveloperMessage } from '@deepseek-ai/dsh-llm'
+import { createDeveloperMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import {
   DOWNLOAD_URL, MODELS, detectSlicer, discoverPrinters, mqttAuthorized, printStudioNextSteps, reachable, readPrinterConfig, text, writePrinterConfig,
@@ -35,12 +35,21 @@ export const name = 'print-studio'
 export const Config = z.object({
   blenderExecutable: z.string().default(''),
   blenderHome: z.string().default(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi')),
+  validationRepairAttempts: z.number().step(1).min(0).max(10).default(3),
+  validationTimeoutMs: z.number().step(1).min(1000).max(300000).default(60000),
+  validation: z.object({
+    minimumThicknessMm: z.number().min(0.01).max(10).default(1),
+    degenerateThreshold: z.number().min(0.000000001).max(0.1).default(0.000001),
+    overhangDegrees: z.number().min(1).max(89).default(45),
+    sharpDegrees: z.number().min(1).max(180).default(160),
+    distortionDegrees: z.number().min(1).max(89).default(45),
+  }).default({}),
   viewerLoadTimeoutMs: z.number().step(1).min(1).max(25000).default(8000),
   viewerDiagnosticsDirectory: z.string().default(join(homedir(), '.rumi', 'viewer-logs')),
 })
 
 /** Services this host half reaches. */
-export const inject = ['connection', 'tools', 'credentials', 'fs', 'workingDirectory', 'sessionQuery', 'attachments']
+export const inject = ['connection', 'tools', 'credentials', 'fs', 'workingDirectory', 'sessionQuery', 'attachments', 'agents']
 
 const ROUTE = '/api/print-studio'
 const SKILL_NAME = 'print-studio-setup'
@@ -208,7 +217,7 @@ const PRINT_TYPE = {
  */
 export function apply(ctx, config) {
   ctx.plugin(analogWorkflow)
-  applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory, config.viewerLoadTimeoutMs)
+  applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory, config.viewerLoadTimeoutMs, config, createUserMessage)
   ctx.inject(['sessionProjections'], scoped => applyContextRetention(scoped, createDeveloperMessage))
   applyBlender(ctx, defineTool, config)
   // A project-type plugin contributes; it does not own the creation flow.

@@ -91,6 +91,12 @@ export function smokeBlenderRuntime(resources: string, target: Target): void {
     '    assert pathlib.Path(report["preview"]).read_bytes()[:4] == b"glTF"',
     '    bpy.ops.wm.open_mainfile(filepath=report["blend"])',
     '    assert len([o for o in bpy.context.scene.objects if o.type == "MESH"]) == 1',
+    `validator = runpy.run_path(str(pathlib.Path(${JSON.stringify(helper)}).with_name("validate.py")))`,
+    'with tempfile.TemporaryDirectory(prefix="rumi-validation-smoke-") as directory:',
+    '    source = str(pathlib.Path(directory) / "cube.stl")',
+    '    bpy.ops.wm.stl_export(filepath=source, global_scale=1000)',
+    '    result = validator["validate"]({"input": source, "transform": {"scale": 1, "rotate": {"x": 0, "y": 0, "z": 0}, "position": {"x": 0, "y": 0, "z": 0}}, "volume": None, "settings": {"minimumThicknessMm": 1, "degenerateThreshold": .000001, "overhangDegrees": 45, "sharpDegrees": 160, "distortionDegrees": 45}})',
+    '    assert result["printReady"] is False and result["status"] != "needs_repair", result',
     'print("RUMI_BUNDLED_BLENDER_OK")',
   ].join('\n')
   const output = execFileSync(executable, ['--background', '--factory-startup', '--python-exit-code', '1', '--python-expr', python], { encoding: 'utf8', timeout: 60_000 })

@@ -139,6 +139,8 @@ The projects plugin supplies the current `AGENTS_TEMPLATE.md` to the backend sys
 
 Print Studio supplies live mesh state before each backend model request and retires superseded runtime snapshots from model-visible history; the full log retains them. Viewer selection stays independent of the agent's work target. See [live model context](apps/rumi/brand/print-studio/README.md#live-model-context).
 
+Additional 3D models require an explicit user request or agreement to a clearly proposed separate model. Edits and fixes stay in the existing model, with revisions and backups under it. This instruction applies to backend and live voice sessions, including existing projects.
+
 ## Print Studio
 
 `apps/rumi/brand/print-studio/` is the 3D-print setup slice. It detects Bambu Studio, the H2D profiles, and discovers the printer over SSDP; the **Plugins → Print Studio** card adopts the printer automatically and signs in once with a Bambu account to fetch the configured printer’s access code. A different account-bound printer never supplies a fallback code for a known serial. The bundled `print-studio-setup` skill guides setup. The access code lives in the credential store, never in the profile patch.

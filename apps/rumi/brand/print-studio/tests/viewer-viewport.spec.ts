@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import * as THREE from 'three'
 import { createViewport } from '../viewer/viewport/index.js'
+import { assemblyGlb } from './fixtures/assembly-glb.js'
 
 const state = vi.hoisted(() => ({ renderer: null, controls: null, resize: null }))
 vi.mock('three', async (importOriginal) => {
@@ -63,59 +64,64 @@ function container() {
 const positions = () => new Float32Array([0, 0, 0, 12, 0, 0, 0, 12, 0])
 const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
 const object = (id: string, datablockId: string = 'd1', matrix: number[] = identity) => ({ id, datablockId, positions: positions(), matrix, blocked: false })
-const meshes = () => state.renderer.render.mock.calls.at(-1)[0].children.filter(child => child.isMesh)
+const meshes = () => {
+  const result: THREE.Mesh[] = []
+  state.renderer.render.mock.calls.at(-1)[0].traverse((node: THREE.Object3D) => { if (node instanceof THREE.Mesh) result.push(node) })
+  return result
+}
 const rendered = () => state.renderer.render.mock.calls.at(-1)[0]
 
-it('draws one object per scene entry and applies the matrix the host measured with', () => {
+it('draws one object per scene entry and applies the matrix the host measured with', async () => {
   const viewport = createViewport(container(), vi.fn())
   const matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 6, 7, 1]
-  viewport.apply({ volume: null, objects: [object('o1', 'd1', matrix)] })
+  await viewport.apply({ volume: null, objects: [object('o1', 'd1', matrix)] })
   const [mesh] = meshes()
-  expect(mesh.matrix.elements).toEqual(matrix)
+  expect(mesh.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([5, 6, 7])
   expect(mesh.geometry.getAttribute('position').count).toBe(3)
   viewport.dispose()
 })
 
-it('shares one geometry between placements of the same datablock and disposes it with the last one', () => {
+it('shares one geometry between placements of the same datablock and disposes it with the last one', async () => {
   const dispose = vi.spyOn(THREE.BufferGeometry.prototype, 'dispose')
   const viewport = createViewport(container(), vi.fn())
-  viewport.apply({ volume: null, objects: [object('o1'), object('o2')] })
+  await viewport.apply({ volume: null, objects: [object('o1'), object('o2')] })
   const [first, second] = meshes()
   expect(first.geometry.getAttribute('position').array).toEqual(second.geometry.getAttribute('position').array)
-  expect(dispose).not.toHaveBeenCalled()
-  viewport.apply({ volume: null, objects: [object('o2')] })
+  const generationDisposals = dispose.mock.calls.length
+  await viewport.apply({ volume: null, objects: [object('o2')] })
   expect(meshes()).toHaveLength(1)
-  expect(dispose).toHaveBeenCalledTimes(1)
-  viewport.apply({ volume: null, objects: [] })
-  expect(dispose).toHaveBeenCalledTimes(3)
+  expect(dispose).toHaveBeenCalledTimes(generationDisposals + 1)
+  await viewport.apply({ volume: null, objects: [] })
+  expect(dispose).toHaveBeenCalledTimes(generationDisposals + 3)
   viewport.dispose()
 })
 
-it('draws the plate, grid, and envelope for a print volume and replaces them when it changes', () => {
+it('draws the plate, grid, and envelope for a print volume and replaces them when it changes', async () => {
   const dispose = vi.spyOn(THREE.BufferGeometry.prototype, 'dispose')
   const viewport = createViewport(container(), vi.fn())
-  viewport.apply({ volume: { x: 300, y: 320, z: 320 }, objects: [object('o1')] })
+  await viewport.apply({ volume: { x: 300, y: 320, z: 320 }, objects: [object('o1')] })
   expect(rendered().children.filter(child => child.isLineSegments)).toHaveLength(2)
-  expect(rendered().children.filter(child => child.isMesh)).toHaveLength(2)
-  viewport.apply({ volume: { x: 200, y: 200, z: 200 }, objects: [object('o1')] })
-  expect(dispose).toHaveBeenCalledTimes(3)
+  expect(meshes()).toHaveLength(2)
+  const generationDisposals = dispose.mock.calls.length
+  await viewport.apply({ volume: { x: 200, y: 200, z: 200 }, objects: [object('o1')] })
+  expect(dispose).toHaveBeenCalledTimes(generationDisposals + 3)
   expect(rendered().children.filter(child => child.isLineSegments)).toHaveLength(2)
   viewport.dispose()
 })
 
-it('keeps the camera across scene updates and frames once', () => {
+it('keeps the camera across scene updates and frames once', async () => {
   const viewport = createViewport(container(), vi.fn())
-  viewport.apply({ volume: null, objects: [object('o1')] })
+  await viewport.apply({ volume: null, objects: [object('o1')] })
   const camera = state.renderer.render.mock.calls.at(-1)[1]
   const position = camera.position.clone()
-  viewport.apply({ volume: null, objects: [object('o1', 'd1', [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 40, 0, 0, 1])] })
+  await viewport.apply({ volume: null, objects: [object('o1', 'd1', [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 40, 0, 0, 1])] })
   expect(camera.position.distanceTo(position)).toBe(0)
   viewport.dispose()
 })
 
-it('frames the scene once the canvas has a size, using the field that actually fits', () => {
+it('frames the scene once the canvas has a size, using the field that actually fits', async () => {
   const viewport = createViewport(container(), vi.fn())
-  viewport.apply({ volume: null, objects: [object('o1')] })
+  await viewport.apply({ volume: null, objects: [object('o1')] })
   state.resize?.()
   const camera = state.renderer.render.mock.calls.at(-1)[1]
   expect(camera.position.length()).toBeGreaterThan(0)
@@ -124,9 +130,9 @@ it('frames the scene once the canvas has a size, using the field that actually f
   viewport.dispose()
 })
 
-it('releases the renderer, the controls, and every resource once', () => {
+it('releases the renderer, the controls, and every resource once', async () => {
   const viewport = createViewport(container(), vi.fn())
-  viewport.apply({ volume: { x: 100, y: 100, z: 100 }, objects: [object('o1')] })
+  await viewport.apply({ volume: { x: 100, y: 100, z: 100 }, objects: [object('o1')] })
   viewport.dispose()
   viewport.dispose()
   expect(state.controls.dispose).toHaveBeenCalledOnce()
@@ -202,10 +208,10 @@ it('frames the current design before applying a requested camera angle', async (
 })
 
 
-it('captures loaded geometry at cover size and restores the viewport even when encoding fails', () => {
+it('captures loaded geometry at cover size and restores the viewport even when encoding fails', async () => {
   const viewport = createViewport(container(), vi.fn())
   expect(viewport.thumbnail()).toBeNull()
-  viewport.apply({ volume: { x: 200, y: 200, z: 200 }, objects: [object('cover')] })
+  await viewport.apply({ volume: { x: 200, y: 200, z: 200 }, objects: [object('cover')] })
   state.resize()
   const scene = rendered()
   const geometry = meshes()[0].geometry
@@ -337,7 +343,7 @@ it('captures the same displayed Gaussian in model coordinates and restores scree
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
   try {
-    viewport.apply({ revision: 7, volume: null, objects: [] })
+    await viewport.apply({ revision: 7, volume: null, objects: [] })
     const url = `data:text/javascript,${encodeURIComponent('export function build(T) { const m = new T.Mesh(new T.BoxGeometry(10,10,10)); m.name="faceplate"; return m }')}`
     const transform = { scale: 2, rotate: { x: 0, y: 0, z: 30 }, position: { x: 4, y: 8, z: 0 } }
     await viewport.applyDesign({ path: '/model.js', revision: 3, url, transform }, null)
@@ -394,47 +400,78 @@ it('reuses measured geometry and GPU resources for highlight-only changes', asyn
   } finally { viewport.dispose() }
 })
 
-it('updates parameter controls opened after loading synchronously and preserves geometry on a failed rebuild', async () => {
+it('regenerates GLB for parameter controls and preserves geometry on a failed rebuild', async () => {
   const viewport = createViewport(container(), vi.fn())
   const url = 'data:text/javascript,' + encodeURIComponent('export const parameters={size:60};export function build(THREE,p){if(p.size>80)throw new Error("Too large");return new THREE.Mesh(new THREE.BoxGeometry(p.size,p.size,p.size),new THREE.MeshStandardMaterial())}')
   try {
     await viewport.applyDesign({ url, transform: {}, analog: null }, null)
     expect(viewport.modelParameters()).toEqual({ size: 60 })
-    viewport.applyShape({ id: 'parameters', operation: 'parameters', label: 'Size', values: { size: 60 }, controls: [
+    await viewport.applyShape({ id: 'parameters', operation: 'parameters', label: 'Size', values: { size: 60 }, controls: [
       { kind: 'slider', label: 'Size', axes: [{ key: 'size', min: 20, max: 120, step: 1, reset: 60 }] },
     ] })
-    expect(() => viewport.updateShape({ size: 90 })).toThrow('Too large')
-    expect(() => viewport.updateShape({ size: 70 })).not.toThrow()
+    await expect(viewport.updateShape({ size: 90 })).rejects.toThrow('Too large')
+    expect(await viewport.updateShape({ size: 70 })).toBe(true)
   } finally { viewport.dispose() }
 })
 
 it('retains model movement after reload and editing without changing saved geometry', async () => {
   const viewport = createViewport(container(), vi.fn())
   const controls = [{ kind: 'slider', label: 'Doors', axes: [{ key: 'angle', min: 0, max: 100, step: 1, reset: 0 }] }]
-  const module = `export const parameters={angle:0,width:20};export const motionControls=${JSON.stringify(controls)};export function build(THREE,p){const m=new THREE.Mesh(new THREE.BoxGeometry(p.width,10,10),new THREE.MeshStandardMaterial());m.rotation.z=p.angle*Math.PI/180;return m}`
+  const module = `export const parameters={angle:0,width:20};export const motionControls=${JSON.stringify(controls)};
+export const assembly={version:1,root:'frame',parts:[{id:'frame',mesh:'Frame'},{id:'door',mesh:'Door'}],connections:[{id:'hinge',parent:'frame',child:'door',kind:'revolute',axis:[0,0,1],pivot:[0,0,0],range:[0,100],control:'angle'}],manufacturing:{mode:'print-in-place'}};
+export function build(THREE,p){const g=new THREE.Group();const f=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial());f.name='Frame';f.position.x=-20;g.add(f);const m=new THREE.Mesh(new THREE.BoxGeometry(p.width,10,10),new THREE.MeshStandardMaterial());m.name='Door';m.rotation.z=p.angle*Math.PI/180;g.add(m);return g}`
   const spec = { path: 'models/car/model.js', url: 'data:text/javascript,' + encodeURIComponent(module), transform: {} }
   try {
     const report = await viewport.applyDesign(spec, null)
-    viewport.applyShape(null)
+    await viewport.applyShape(null)
     expect(viewport.motionControls().values).toEqual({ angle: 0 })
     viewport.updateMotion({ angle: 58 })
     expect(viewport.modelParameters()).toEqual({ angle: 0, width: 20 })
     expect(await viewport.applyDesign(spec, null)).toEqual(report)
-    viewport.applyShape({ id: 'edit', operation: 'parameters', label: 'Width', values: { width: 20 }, controls: [
+    await viewport.applyShape({ id: 'edit', operation: 'parameters', label: 'Width', values: { width: 20 }, controls: [
       { kind: 'slider', label: 'Width', axes: [{ key: 'width', min: 10, max: 40, step: 1, reset: 20 }] },
     ] })
     expect(viewport.motionControls().values).toEqual({ angle: 58 })
     expect(viewport.updateMotion({ angle: 90 })).toBe(false)
-    viewport.updateShape({ width: 30 })
-    viewport.applyShape(null)
+    await viewport.updateShape({ width: 30 })
+    await viewport.applyShape(null)
     expect(viewport.motionControls().values).toEqual({ angle: 58 })
     await viewport.applyDesign({ ...spec, url: spec.url + '%0A' }, null)
-    viewport.applyShape(null)
+    await viewport.applyShape(null)
     expect(viewport.motionControls().values).toEqual({ angle: 58 })
     const visible: THREE.Mesh[] = []
     rendered().traverseVisible((node: THREE.Object3D) => { if (node instanceof THREE.Mesh) visible.push(node) })
-    expect(visible.some(mesh => Math.abs(mesh.rotation.z - 58 * Math.PI / 180) < .001)).toBe(true)
-    await viewport.applyDesign({ ...spec, url: 'data:text/javascript,' + encodeURIComponent(module.replace(`export const motionControls=${JSON.stringify(controls)};`, '')) }, null)
+    expect(visible.some(mesh => Math.abs(Math.atan2(mesh.matrix.elements[1], mesh.matrix.elements[0])
+      - 58 * Math.PI / 180) < .001)).toBe(true)
+    await viewport.applyDesign({ ...spec, url: 'data:text/javascript,' + encodeURIComponent(module.replace(`export const motionControls=${JSON.stringify(controls)};`, '').replace(/export const assembly=.*;\n/, '')) }, null)
     expect(viewport.motionControls()).toBeNull()
+  } finally { viewport.dispose() }
+})
+
+it('shows GLB movement, retains its pose across reloads and restores saved geometry for edits', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(assemblyGlb())))
+  const spec = { path: 'models/car/model.glb', format: 'glb', url: 'https://example.test/model.glb', transform: {} }
+  try {
+    const report = await viewport.applyDesign(spec, null)
+    await viewport.applyShape(null)
+    expect(viewport.motionControls().controls.map(control => control.label)).toEqual(['Right door', 'Slide'])
+    expect(viewport.updateMotion({ joint0: 60, joint1: 5 })).toBe(true)
+    expect(viewport.modelParameters()).toEqual({ joint0: 0, joint1: 0 })
+    expect(() => viewport.updateMotion({ joint0: 200, joint1: 5 })).toThrow('outside range')
+    expect(viewport.motionControls().values).toEqual({ joint0: 60, joint1: 5 })
+    await viewport.applyDesign({ ...spec, url: spec.url + '?revision=2' }, null)
+    await viewport.applyShape(null)
+    expect(viewport.motionControls().values).toEqual({ joint0: 60, joint1: 5 })
+    expect(await viewport.applyDesign({ ...spec, url: spec.url + '?revision=2' }, null)).toEqual(report)
+    const visible = []
+    rendered().traverseVisible((node) => { if (node.isMesh && node.name === 'Slide') visible.push(node) })
+    expect(visible).toHaveLength(1)
+    expect(Math.atan2(visible[0].matrix.elements[1], visible[0].matrix.elements[0])).toBeCloseTo(Math.PI / 3)
+    viewport.updateMotion({ joint0: 0, joint1: 0 })
+    const reset = []
+    rendered().traverseVisible((node) => { if (node.isMesh && node.name === 'Slide') reset.push(node) })
+    expect(reset).toHaveLength(1)
+    expect(reset[0].matrix.elements[1]).toBe(0)
   } finally { viewport.dispose() }
 })

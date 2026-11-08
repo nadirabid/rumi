@@ -9,7 +9,7 @@
 import { createModelSelector } from './model-selector.js'
 import { createAnalogPanel } from './analog/controls.js'
 import { parseStl } from './stl.js'
-import { validationMesh } from './viewport/validation.js'
+import { createModelArtifacts } from './generation/artifacts.js'
 import { createViewport } from './viewport/index.js'
 import { placeMesh } from './transform.js'
 import { en, zh } from './locales.js'
@@ -35,6 +35,13 @@ const EMPTY = Object.freeze({ scene: null, view: null })
  * @returns {void}
  */
 export function installViewer(ctx, React, primitives) {
+  const artifacts = createModelArtifacts()
+  const viewportDisposals = new Set(), liveViewports = new Set()
+  ctx.effect(() => async () => {
+    await Promise.allSettled([...viewportDisposals, ...[...liveViewports].map(viewport => viewport.dispose())])
+    liveViewports.clear()
+    await artifacts.dispose()
+  }, 'print viewer: generated artifacts')
   const h = React.createElement
   const AnalogPanel = createAnalogPanel(React)
   const { PluginArtworkDefault, Button } = primitives
@@ -106,7 +113,7 @@ export function installViewer(ctx, React, primitives) {
       if (stopped()) return
       for (const job of response.validationRequests ?? []) {
         let bytes, contentType = 'application/octet-stream'
-        try { bytes = await validationMesh(job) }
+        try { bytes = (await artifacts.resolve(job)).bytes }
         catch (error) { bytes = String(error.message ?? error); contentType = 'text/plain' }
         if (stopped()) return
         const submitted = await fetch(`${ROUTE}/validation?sessionId=${encodeURIComponent(sessionId)}&id=${encodeURIComponent(job.id)}`, {
@@ -191,17 +198,25 @@ export function installViewer(ctx, React, primitives) {
     const [buildError, setBuildError] = React.useState(null)
     const [cursorMode, setCursorMode] = React.useState('patch')
     const [motion, setMotion] = React.useState(null)
+    const analogRendered = React.useRef(null), analogInput = React.useRef(0)
     const analogValues = React.useRef(null), analogId = React.useRef(null), analogSequence = React.useRef(0), analogDelivery = React.useRef(Promise.resolve())
     const analogAbort = React.useRef(null)
     React.useEffect(() => {
       try {
-        viewport.current = createViewport(holder.current, () => { viewportError.current = '3D viewer rendering failed'; setFailed(true) }, setCursorMode)
+        viewport.current = createViewport(holder.current, () => { viewportError.current = '3D viewer rendering failed'; setFailed(true) }, setCursorMode, artifacts)
+        liveViewports.add(viewport.current)
         setFailed(false)
       } catch (error) {
         viewportError.current = error instanceof Error ? error.message : String(error)
         setFailed(true)
       }
-      return () => { viewport.current?.dispose(); viewport.current = null }
+      return () => {
+        liveViewports.delete(viewport.current)
+        const disposal = Promise.resolve(viewport.current?.dispose())
+        viewportDisposals.add(disposal)
+        void disposal.finally(() => viewportDisposals.delete(disposal)).catch(error => console.warn('Viewer disposal failed', error))
+        viewport.current = null
+      }
     }, [])
     React.useEffect(() => {
       const sessionId = view?.sessionId
@@ -232,7 +247,9 @@ export function installViewer(ctx, React, primitives) {
       }
     }, [view?.sessionId])
     React.useEffect(() => {
-      if (view !== null) viewport.current?.apply(view)
+      let active = true
+      if (view !== null) Promise.resolve(viewport.current?.apply(view)).catch(() => { if (active) setBuildError('buildFailed') })
+      return () => { active = false }
     }, [view])
     React.useEffect(() => {
       if (!view?.design) { viewport.current?.applyDesign?.(null, view?.volume ?? null); return }
@@ -317,6 +334,7 @@ export function installViewer(ctx, React, primitives) {
       const spec = view?.design?.analog
       if (analogId.current !== spec?.id) {
         analogAbort.current?.abort(); analogAbort.current = new AbortController()
+        analogInput.current++; analogRendered.current = spec?.values
         analogId.current = spec?.id; analogValues.current = spec?.values; analogSequence.current = spec?.editRevision ?? 0
         analogDelivery.current = Promise.resolve()
       }
@@ -331,7 +349,8 @@ export function installViewer(ctx, React, primitives) {
           if (spec && !spec.frozen && document.hidden) {
             status = 'viewer_hidden'
           } else {
-            const id = viewport.current.applyShape?.(spec ? { ...spec, values } : null)
+            const id = await viewport.current.applyShape?.(spec ? { ...spec, values } : null)
+            if (!active || request !== attempt) return
             if (id && !spec.frozen) { setBuildError(null); status = spec.freezeRequested ? 'frozen' : 'rendered' }
           }
         } catch (error) {
@@ -387,10 +406,18 @@ export function installViewer(ctx, React, primitives) {
           key: mode, variant: 'ghost', size: 'sm', 'aria-pressed': cursorMode === mode,
           onClick: () => { setCursorMode(mode); viewport.current?.setCursorMode(mode) },
         }, t(`cursor_${mode}`))))),
-      view?.design?.analog ? h(AnalogPanel, { key: view.design.analog.id, spec: view.design.analog, t, onChange: values => {
-        try { viewport.current?.updateShape(values) }
-        catch (_error) { setBuildError('buildFailed'); return false }
-        analogValues.current = values; setBuildError(null); return true
+      view?.design?.analog ? h(AnalogPanel, { key: view.design.analog.id, spec: view.design.analog, t, onChange: async values => {
+        const id = analogId.current, input = ++analogInput.current
+        analogValues.current = values
+        try {
+          const updated = await viewport.current?.updateShape(values)
+          if (updated === false || id !== analogId.current || input !== analogInput.current) return false
+        }
+        catch (_error) {
+          if (id === analogId.current && input === analogInput.current) { analogValues.current = analogRendered.current; setBuildError('buildFailed') }
+          return false
+        }
+        analogRendered.current = values; setBuildError(null); return true
       }, onRelease: values => { void sendShape('adjusted', values).catch(_error => { /* sendShape reports delivery failure in the viewer. */ }) } }) : null,
       h('div', { className: 'pv-stage', ref: holder, role: 'img', 'aria-label': t('view'), 'data-testid': 'print-viewport' }),
       buildError && !failed && view?.design?.error?.kind !== 'source'
@@ -403,6 +430,7 @@ export function installViewer(ctx, React, primitives) {
     if (validation.error || validation.models.some(item => item.status === 'unavailable')) return 'validationUnavailable'
     if (validation.models.some(item => item.status === 'needs_repair'
       || (item.report ?? item.previousReport)?.status === 'needs_repair')) return 'validationRepair'
+    if (validation.models.some(item => (item.report ?? item.previousReport)?.mechanics?.status === 'review')) return 'validationMechanicsReview'
     return null
   }
 

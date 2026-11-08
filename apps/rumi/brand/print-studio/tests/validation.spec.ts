@@ -1,19 +1,24 @@
 /** Turn completion validates source revisions independently of selection and tool use. */
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createValidation } from '../viewer/validation.js'
+import { preserveMovement, validationState } from '../viewer/validation-state.js'
+import { normalizePlacement } from '../viewer/transform.js'
 import { encodeStl } from '../viewer/stl.js'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { MockAdapter, textResponse } from '../../../../../packages/core/agent-loop/tests/mock-adapter.ts'
+import * as mechanicalWorkflow from '../bullet/workflow.js'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 const report = { version: 1, status: 'needs_repair', checks: [{ code: 'intersecting_faces', count: 2, severity: 'error' }], printReady: false }
+const mechanicalReport = { ...report, checks: [{ code: 'unretained_part', count: 1, severity: 'error', mechanism: 'door' }],
+  mechanics: { version: 1, engine: 'bullet', status: 'needs_repair', printReady: false, checks: [{ code: 'unretained_part', count: 1, severity: 'error', mechanism: 'door' }] } }
 async function fixture(run = vi.fn(async () => report), agent?: { status: string; followup: ReturnType<typeof vi.fn> }) {
   const root = await mkdtemp(join(tmpdir(), 'rumi-validation-test-'))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
@@ -25,15 +30,21 @@ async function fixture(run = vi.fn(async () => report), agent?: { status: string
     connection: { fetch: { register: (spec: { path: string }) => {
       routes.set(spec.path, spec); return () => routes.delete(spec.path)
     } } } }
-  const validation = createValidation(ctx, { validation: {}, validationRepairAttempts: 2 }, { createUserMessage, run, notify: () => {},
+  const makeValidation = () => createValidation(ctx, { validation: {}, validationRepairAttempts: 2, validationStateDirectory: join(root, 'validation-state') }, { createUserMessage, run, notify: () => {},
     view: () => ({ selectedModel: null, volume: null, meshes: [] }) })
+  const validation = makeValidation()
   cleanup.push(() => validation.dispose())
   await mkdir(join(root, 'models/car'), { recursive: true })
   await writeFile(join(root, 'models/car/model.js'), 'export function build() {}')
   const emit = (type: string, data = { reason: { kind: 'completed' } }) => listeners.get('session/event')!({ id: 'a', header: { cwd: root } }, { type, data })
   const ready = async () => { await expect.poll(() => validation.requests('a').length).toBe(1); return validation.requests('a')[0] }
   const bytes = new Uint8Array(encodeStl(new Float32Array([0,0,0,1,0,0,0,1,0])))
-  return { root, validation, run, emit, ready, bytes, routes }
+  return { root, validation, run, emit, ready, bytes, routes, restart: async () => {
+    await validation.dispose()
+    const next = makeValidation()
+    cleanup.push(() => next.dispose())
+    return next
+  } }
 }
 
 it('runs after turn/end without a viewer_load, skips unchanged turns, and detects helper and parameter edits', async () => {
@@ -42,13 +53,13 @@ it('runs after turn/end without a viewer_load, skips unchanged turns, and detect
   f.emit('turn/end'); let job = await f.ready()
   expect(f.validation.submit('a', job.id, f.bytes, null)).toBe(true)
   await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('needs_repair')
-  f.emit('turn/start'); expect(f.validation.read('a').models[0].report).toBeNull()
-  f.emit('turn/end'); await expect.poll(() => f.validation.read('a').models[0].status).toBe('needs_repair')
+  f.emit('turn/start'); expect(f.validation.read('a').models[0]!.report).toBeNull()
+  f.emit('turn/end'); await expect.poll(() => f.validation.read('a').models[0]!.status).toBe('needs_repair')
   expect(f.run).toHaveBeenCalledTimes(1)
-  for (const [file, text] of [['helper.js', 'export const x=1'], ['.rumi-parameters.json', '{"angle":20}']]) {
+  for (const [file, text] of [['helper.js', 'export const x=1'], ['.rumi-parameters.json', '{"angle":20}']] as const) {
     f.emit('turn/start'); await writeFile(join(f.root, 'models/car', file), text); f.emit('turn/end')
     job = await f.ready(); f.validation.submit('a', job.id, f.bytes, null)
-    await expect.poll(() => f.validation.read('a').models[0].status).toBe('needs_repair')
+    await expect.poll(() => f.validation.read('a').models[0]!.status).toBe('needs_repair')
   }
   expect(f.run).toHaveBeenCalledTimes(3)
 })
@@ -97,7 +108,7 @@ it('records the automatic validation lifecycle for the next model request', asyn
   const pending = f.validation.read('a').models[0]
   f.validation.submit('a', job.id, f.bytes, null)
   await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('needs_repair')
-  expect({ pending: pending.status, result: f.validation.read('a').models[0].report }).toMatchInlineSnapshot(`
+  expect({ pending: pending!.status, result: f.validation.read('a').models[0]!.report }).toMatchInlineSnapshot(`
     {
       "pending": "awaiting_viewer",
       "result": {
@@ -116,17 +127,18 @@ it('records the automatic validation lifecycle for the next model request', asyn
   `)
 })
 
-it('automatically queues one repair turn with durable findings and stops on unchanged geometry', async () => {
+it.each([{ kind: 'geometry', result: report }, { kind: 'mechanics', result: mechanicalReport }])('automatically queues one repair turn with durable $kind findings and stops on unchanged geometry', async ({ kind, result }) => {
   const f = await fixture()
   const ctx = new Context()
   cleanup.push(() => ctx.fiber.dispose())
   await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(mechanicalWorkflow)
   const harness = await mountAgentLoopTestHarness(ctx)
   const adapter = new MockAdapter([textResponse('Saved the car.'), textResponse('The intersections need repair.')])
   ctx.effect(() => ctx.llm.registerAdapter(['mock'], adapter))
   const validator = createValidation({ agents: ctx.agents, on: ctx.on.bind(ctx), effect: ctx.effect.bind(ctx),
-    connection: { fetch: { register: () => () => {} } } }, { validation: {}, validationRepairAttempts: 3 }, {
-    createUserMessage, view: () => ({ selectedModel: null, volume: null, meshes: [] }), notify: () => {}, run: async () => report,
+    connection: { fetch: { register: () => () => {} } } }, { validation: {}, validationRepairAttempts: 3, validationStateDirectory: join(f.root, 'validation-state') }, {
+    createUserMessage, view: () => ({ selectedModel: null, volume: null, meshes: [] }), notify: () => {}, run: async () => result,
   })
   cleanup.push(() => validator.dispose())
   ctx.effect(() => ctx.systemPrompt.context({ name: 'validation-fixture', order: 210, required: true,
@@ -139,16 +151,36 @@ it('automatically queues one repair turn with durable findings and stops on unch
   await agent.whenIdle()
   await expect.poll(() => validator.requests(agent.session.id).length).toBe(1)
   validator.submit(agent.session.id, validator.requests(agent.session.id)[0].id, f.bytes, null)
-  await expect.poll(() => validator.read(agent.session.id).models[0].status).toBe('needs_repair')
+  await expect.poll(() => validator.read(agent.session.id).models[0]!.status).toBe('needs_repair')
   await expect.poll(() => agent.session.snapshotEvents().filter(event => event.type === 'turn/end').length).toBe(2)
   await agent.whenIdle()
-  const contexts = agent.session.snapshotEvents().flatMap(event => event.type === 'user/message' && event.data.source.kind === 'runtime-context'
+  const contexts = agent.session.snapshotEvents().flatMap(event => event.type === 'user/message' && String(event.data.source.kind) === 'runtime-context'
     ? event.data.content.flatMap(block => block.type === 'text' ? [block.text] : []) : [])
-  expect(contexts.some(text => text.includes('intersecting_faces'))).toBe(true)
+  expect(contexts.some(text => text.includes(result.checks[0]!.code))).toBe(true)
   expect(contexts).toMatchSnapshot()
-  const repair = agent.session.snapshotEvents().find(event => event.type === 'user/message' && String(event.data.source.kind) === 'print-validation')
-  expect(repair?.data.content).toMatchObject([{ type: 'text', text: expect.stringContaining('intersecting_faces') }])
+  const repair = agent.session.snapshotEvents().flatMap(event => event.type === 'user/message' && String(event.data.source.kind) === 'print-validation' ? [event.data] : [])[0]
+  expect(repair?.content).toMatchObject([{ type: 'text', text: expect.stringContaining(result.checks[0]!.code) }])
+  if (kind === 'mechanics') {
+    const prompt = adapter.requests[0]!.messages.flatMap(message => message.role === 'system'
+      ? message.content.flatMap(block => block.type === 'text' ? block.text.split('\n') : []) : [])
+      .find(line => line.startsWith('For multi-part or movable prints'))
+    expect(prompt).toContain('bundled Bullet')
+    expect(prompt).toMatchSnapshot('physical movement instructions')
+  }
   expect(agent.session.snapshotEvents().filter(event => event.type === 'turn/end')).toHaveLength(2)
+})
+
+it('keeps inconclusive mechanical checks visible and queues repair once per revision', async () => {
+  const agent = { status: 'idle', followup: vi.fn() }
+  const f = await fixture(vi.fn(async () => ({ ...report, status: 'review', checks: [{ code: 'probe_inconclusive', severity: 'warning', count: 1 }],
+    mechanics: { status: 'review' } })), agent)
+  f.emit('turn/end'); const job = await f.ready(); f.validation.submit('a', job.id, f.bytes, null)
+  await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('review')
+  expect(agent.followup).toHaveBeenCalledTimes(1)
+  expect(f.validation.presentation('a', 'models/car/model.js')).toBeNull()
+  f.emit('turn/end')
+  await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('review')
+  expect(agent.followup).toHaveBeenCalledTimes(1)
 })
 
 it('checks GLB snapshots without a renderer and detects source changes during validation', async () => {
@@ -206,7 +238,7 @@ it('collects every model before sending one repair and does not repair unavailab
   expect(agent.followup).not.toHaveBeenCalled()
   f.validation.submit('a', second.id, f.bytes, null)
   await expect.poll(() => agent.followup.mock.calls.length).toBe(1)
-  const message = agent.followup.mock.calls[0][0]
+  const message = agent.followup.mock.calls[0]![0]
   expect(message.source.kind).toBe('print-validation')
   expect(message.content[0].text.replaceAll(/"fingerprint":"[a-f0-9]+"/g, '"fingerprint":"<revision>"')).toMatchSnapshot()
   const failed = await fixture(vi.fn(async () => { throw new Error('Missing Blender') }), agent)
@@ -215,4 +247,187 @@ it('collects every model before sending one repair and does not repair unavailab
   failed.validation.submit('a', request.id, failed.bytes, null)
   await expect.poll(() => failed.validation.read('a').models[0]?.status).toBe('unavailable')
   expect(agent.followup).toHaveBeenCalledTimes(1)
+})
+
+
+it('promotes only passed candidates and retains the accepted source across later edits and restart', async () => {
+  const run = vi.fn(async () => ({ ...report, status: 'passed', checks: [] }))
+  const f = await fixture(run)
+  f.emit('turn/end')
+  let request = await f.ready()
+  expect(f.validation.presentation('a', 'models/car/model.js')).toBeNull()
+  f.validation.submit('a', request.id, f.bytes, null)
+  await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('passed')
+  const accepted = f.validation.presentation('a', 'models/car/model.js')
+  expect(accepted).toMatchObject({ revision: 1 })
+  run.mockImplementation(async () => ({ ...report, status: 'review', checks: [] }))
+  for (let index = 0; index < 10; index++) {
+    f.emit('turn/start')
+    await writeFile(join(f.root, 'models/car/model.js'), `export const revision = ${index}`)
+    f.emit('turn/end')
+    request = await f.ready()
+    f.validation.submit('a', request.id, f.bytes, null)
+    await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('review')
+  }
+  expect(f.validation.presentation('a', 'models/car/model.js').url).toBe(accepted.url)
+  expect(f.routes.has(accepted.url)).toBe(true)
+  const restarted = await f.restart()
+  await restarted.restore('a', f.root, 'models/car/model.js')
+  const restored = restarted.presentation('a', 'models/car/model.js')
+  expect(restored.contentHash).toBe(accepted.contentHash)
+  expect(restored.path).toBe(accepted.path)
+  expect(await (await f.routes.get(restored.url).fetch()).text()).toBe('export function build() {}')
+})
+
+it('persists movement requirements across restart and blocks removing or shrinking controls', async () => {
+  const intent = { assembly: null, motionKeys: ['door'], motionRanges: [{ key: 'door', range: [0, 90] }] }
+  const run = vi.fn(async () => ({ ...report, intent }))
+  const f = await fixture(run)
+  f.emit('turn/end')
+  let request = await f.ready()
+  f.validation.submit('a', request.id, f.bytes, null)
+  await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('needs_repair')
+  const restarted = await f.restart()
+  run.mockImplementation(async () => ({ ...report, status: 'passed', checks: [], intent: { ...intent, motionRanges: [{ key: 'door', range: [0, 45] }] } }))
+  await writeFile(join(f.root, 'models/car/model.js'), 'export const fixed = true')
+  f.emit('turn/end')
+  await expect.poll(() => restarted.requests('a').length).toBe(1)
+  request = restarted.requests('a')[0]
+  restarted.submit('a', request.id, f.bytes, null)
+  await expect.poll(() => restarted.read('a').models[0]?.status).toBe('needs_repair')
+  expect(restarted.read('a').models[0].report.checks).toContainEqual(expect.objectContaining({ code: 'required_movement_removed' }))
+  expect(restarted.presentation('a', 'models/car/model.js')).toBeNull()
+})
+
+it('fails closed when durable validation state is corrupt', async () => {
+  const f = await fixture()
+  f.emit('turn/end')
+  const request = await f.ready()
+  f.validation.submit('a', request.id, f.bytes, null)
+  await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('needs_repair')
+  const [key] = await readdir(join(f.root, 'validation-state'))
+  await writeFile(join(f.root, 'validation-state', key!, 'state.json'), '{')
+  const restarted = await f.restart()
+  await restarted.restore('a', f.root, 'models/car/model.js')
+  expect(restarted.read('a').models[0]?.status).toBe('unavailable')
+  expect(restarted.presentation('a', 'models/car/model.js')).toBeNull()
+})
+
+
+it('does not promote a nominal pass without complete assembly verification', async () => {
+  const run = vi.fn(async () => ({ ...report, status: 'passed', checks: [], intent: { assembly: { connections: [] }, motionKeys: [], motionRanges: [] } }))
+  const f = await fixture(run)
+  f.emit('turn/end')
+  const request = await f.ready()
+  f.validation.submit('a', request.id, f.bytes, null)
+  await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('needs_repair')
+  expect(f.validation.read('a').models[0]!.report.checks).toContainEqual(expect.objectContaining({ code: 'assembly_verification_incomplete' }))
+  expect(f.validation.presentation('a', 'models/car/model.js')).toBeNull()
+})
+
+it.each(['missing', 'changed'])('does not restore accepted metadata when its saved source is %s', async (mode) => {
+  const f = await fixture(vi.fn(async () => ({ ...report, status: 'passed', checks: [] })))
+  f.emit('turn/end')
+  const request = await f.ready()
+  f.validation.submit('a', request.id, f.bytes, null)
+  await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('passed')
+  const [key] = await readdir(join(f.root, 'validation-state'))
+  const directory = join(f.root, 'validation-state', key!)
+  const snapshot = (await readdir(directory)).find(name => name !== 'state.json')!
+  if (mode === 'missing') await rm(join(directory, snapshot), { recursive: true })
+  else await writeFile(join(directory, snapshot, 'model.js'), 'export const changed = true')
+  const restarted = await f.restart()
+  await restarted.restore('a', f.root, 'models/car/model.js')
+  expect(restarted.read('a').models[0]?.status).toBe('unavailable')
+  expect(restarted.presentation('a', 'models/car/model.js')).toBeNull()
+})
+
+
+it('preserves canonical control limits and connection travel across saved poses and restart', async () => {
+  const f = await fixture()
+  const state = validationState(join(f.root, 'required'), f.root, 'models/car/model.js')
+  const intent = (range: number[], origin?: number) => ({ motionKeys: ['door'], motionRanges: [{ key: 'door', range, origin }],
+    assembly: { connections: [{ id: 'hinge', kind: 'revolute', range }] } })
+  const initial = preserveMovement({ movements: [] }, intent([0, 100], 0))
+  await state.write(initial.required, null)
+  const restarted = validationState(join(f.root, 'required'), f.root, 'models/car/model.js')
+  const saved = await restarted.read()
+  const changedPose = preserveMovement(saved.required, intent([-30, 70], 30))
+  expect(changedPose.checks).toEqual([])
+  expect(changedPose.required.movements).toContainEqual({ type: 'control', id: 'door', range: [0, 100], absolute: true })
+  const reduced = preserveMovement(changedPose.required, intent([-30, 40], 30))
+  expect(reduced.checks).toHaveLength(2)
+  expect(preserveMovement(changedPose.required, intent([100, 200], 0)).checks).toHaveLength(1)
+  expect(preserveMovement(changedPose.required, intent([-30, 70])).checks).toHaveLength(1)
+  expect(preserveMovement(changedPose.required, { motionKeys: [], motionRanges: [], assembly: null }).checks).toHaveLength(2)
+})
+
+it('publishes static warnings only with complete passing mechanics', async () => {
+  const run = vi.fn(async () => ({ ...report, status: 'review', checks: [{ code: 'overhangs', severity: 'warning', count: 2 }],
+    mechanics: { status: 'passed', assemblyVerified: true, coverage: { complete: true } } }))
+  const f = await fixture(run)
+  f.emit('turn/end')
+  let request = await f.ready()
+  f.validation.submit('a', request.id, f.bytes, null)
+  await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('review')
+  const accepted = f.validation.presentation('a', 'models/car/model.js')
+  expect(accepted).not.toBeNull()
+  run.mockImplementation(async () => ({ ...report, status: 'review', checks: [{ code: 'unverified', severity: 'warning', count: 1 }],
+    mechanics: { status: 'review', assemblyVerified: false, coverage: { complete: false } } }))
+  f.emit('turn/start')
+  await writeFile(join(f.root, 'models/car/model.js'), 'export const changed = true')
+  f.emit('turn/end')
+  request = await f.ready()
+  f.validation.submit('a', request.id, f.bytes, null)
+  await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('review')
+  expect(f.validation.presentation('a', 'models/car/model.js').url).toBe(accepted.url)
+})
+
+it('retains an imported STL accepted placement when a later placement fails', async () => {
+  const f = await fixture()
+  await rm(join(f.root, 'models'), { recursive: true })
+  const listeners = new Map<string, Function>()
+  const owner = new Context()
+  cleanup.push(() => owner.fiber.dispose())
+  const transform = normalizePlacement()
+  let current = transform
+  const run = vi.fn(async () => ({ ...report, status: 'passed', checks: [] }))
+  const validation = createValidation({
+    effect: owner.effect.bind(owner), on: (name: string, listener: Function) => listeners.set(name, listener),
+  },
+  { validationRepairAttempts: 0, validationStateDirectory: join(f.root, 'validation-state') },
+  { run, notify: () => {}, createUserMessage, view: () => ({
+    selectedModel: null, volume: null, meshes: [{ path: 'stl:one', bytes: f.bytes, transform: current }],
+  }) })
+  cleanup.push(() => validation.dispose())
+  const end = () => listeners.get('session/event')!(
+    { id: 'a', header: { cwd: f.root } }, { type: 'turn/end', data: { reason: { kind: 'completed' } } },
+  )
+  expect(validation.meshPlacement('a', 'stl:one')).toBeNull()
+  end()
+  await expect.poll(() => validation.meshPlacement('a', 'stl:one')).toEqual(transform)
+  current = normalizePlacement({ scale: 2 })
+  run.mockImplementation(async () => report)
+  end()
+  await expect.poll(() => validation.read('a').models[0]?.status).toBe('needs_repair')
+  expect(validation.meshPlacement('a', 'stl:one')).toEqual(transform)
+})
+
+it('checks an existing project on open once without waiting for an agent turn', async () => {
+  const f = await fixture()
+  await f.validation.restore('a', f.root, 'models/car/model.js')
+  const job = await f.ready()
+  await f.validation.restore('a', f.root, 'models/car/model.js')
+  expect(f.validation.requests('a')[0].id).toBe(job.id)
+  f.validation.submit('a', job.id, f.bytes, null)
+  await expect.poll(() => f.run.mock.calls.length).toBe(1)
+})
+
+it('defers opening checks until an active edit turn ends', async () => {
+  const f = await fixture()
+  f.emit('turn/start')
+  await f.validation.restore('a', f.root, 'models/car/model.js')
+  expect(f.validation.requests('a')).toEqual([])
+  f.emit('turn/end')
+  await f.ready()
 })

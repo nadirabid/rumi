@@ -5,15 +5,21 @@ import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { blenderStatus } from './host.js'
+import { validateGlb } from '../viewer/glb.js'
+import { mechanismMetadata } from '../viewer/mechanics.js'
+import { runBullet } from '../bullet/runner.js'
 
 /**
- * Run the bundled Toolbox with explicit thresholds; failures never yield a passing report.
+ * Run bundled Blender geometry checks and Bullet assembly probes with explicit policy.
+ * Infrastructure failures never yield a passing report.
  * @param {object} config Resolved plugin configuration.
  * @param {object} input Immutable bytes, format, placement, and volume.
  * @param {AbortSignal} signal Owner cancellation; completion awaits process close.
  * @returns {Promise<object>} Validated structured findings.
  */
 export async function runValidation(config, input, signal) {
+  const metadata = input.format === 'glb' ? mechanismMetadata(validateGlb(input.bytes)) : { declared: true, assembly: { version: 1, root: 'model', parts: [{ id: 'model', mesh: 'model' }],
+    connections: [], sequences: [], manufacturing: { mode: 'print-in-place' } }, motionKeys: [], motionRanges: [], checks: [] }
   const blender = await blenderStatus(config.blenderExecutable, config.blenderHome)
   if (blender.status !== 'ready') throw new Error(blender.message)
   const directory = await mkdtemp(join(tmpdir(), 'rumi-validation-'))
@@ -21,8 +27,11 @@ export async function runValidation(config, input, signal) {
     const path = join(directory, `model.${input.format}`), output = join(directory, 'result.json')
     await writeFile(path, input.bytes, { flag: 'wx', mode: 0o600 })
     const request = join(directory, 'request.json')
+    const mechanicsOutput = join(directory, 'mechanics.json')
     await writeFile(request, JSON.stringify({ input: path, output, transform: input.transform, volume: input.volume,
-      settings: config.validation }), { flag: 'wx', mode: 0o600 })
+      settings: config.validation,
+      ...(metadata.assembly && !metadata.checks.length ? { mechanicsOutput, assembly: metadata.assembly } : {}),
+    }), { flag: 'wx', mode: 0o600 })
     const script = fileURLToPath(new URL('./validate.py', import.meta.url)).replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`)
     signal.throwIfAborted()
     await new Promise((resolve, reject) => {
@@ -48,6 +57,24 @@ export async function runValidation(config, input, signal) {
       || report.printReady !== false || !Array.isArray(report.checks) || report.checks.length > 32
       || !report.checks.every(c => typeof c.code === 'string' && Number.isSafeInteger(c.count) && c.count >= 0 && ['warning', 'error'].includes(c.severity))
       || !['x', 'y', 'z'].every(a => Number.isFinite(report.dimensions?.[a]) && report.dimensions[a] >= 0)) throw new Error('Invalid Blender validation report')
+    report.intent = { assembly: metadata.assembly, motionKeys: metadata.motionKeys, motionRanges: metadata.motionRanges }
+    if (metadata.declared || metadata.checks.length) {
+      let mechanics
+      if (metadata.checks.length) mechanics = { version: 2, engine: 'bullet', status: 'needs_repair', assemblyVerified: false,
+        checks: metadata.checks, connections: [], printReady: false }
+      else if (report.status === 'needs_repair') mechanics = { status: 'blocked_by_geometry', assemblyVerified: false,
+        checks: [], connections: [], printReady: false }
+      else if (!metadata.assembly) mechanics = { status: 'needs_repair', assemblyVerified: false,
+        checks: [{ code: 'assembly_description_required', severity: 'error', count: 1 }], connections: [], printReady: false }
+      else {
+        const geometry = JSON.parse(await readFile(mechanicsOutput, 'utf8'))
+        mechanics = await runBullet(config, geometry, signal)
+      }
+      report.mechanics = mechanics
+      report.checks.push(...mechanics.checks)
+      report.status = report.checks.some(check => check.count && check.severity === 'error') ? 'needs_repair'
+        : report.checks.some(check => check.count) || !mechanics.assemblyVerified ? 'review' : 'passed'
+    }
     return report
   } finally { await rm(directory, { recursive: true, force: true }) }
 }

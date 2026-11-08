@@ -10,8 +10,9 @@ const state = vi.hoisted(() => ({
   root: '',
   target: 'mac-arm64' as 'mac-arm64' | 'mac-x64' | 'win-x64',
   pnpm: '11.7.0' as string | undefined,
-  failure: undefined as 'electron' | 'primary' | 'cli' | undefined,
+  failure: undefined as 'electron' | 'primary' | 'bullet' | 'cli' | undefined,
   preparePrimary: vi.fn(),
+  prepareBullet: vi.fn(),
   commandLink: vi.fn(),
 }))
 vi.mock('../scripts/desktop-build-paths.mjs', async importOriginal => ({
@@ -43,6 +44,8 @@ vi.mock('node:fs', async (importOriginal) => {
 vi.mock('../scripts/prepare-primary-runtime.ts', () => ({
   preparePrimaryRuntime: state.preparePrimary,
 }))
+vi.mock('../scripts/prepare-blender-runtime.ts', () => ({ prepareBlenderRuntime: vi.fn() }))
+vi.mock('../scripts/prepare-bullet-runtime.ts', () => ({ prepareBulletRuntime: state.prepareBullet }))
 
 const originalArgv = process.argv
 beforeEach(() => {
@@ -54,6 +57,10 @@ beforeEach(() => {
   state.failure = undefined
   process.argv = [process.execPath, 'prepare-runtime.ts']
   vi.stubEnv('DSH_DESKTOP_PACKAGING_RUN_DIR', undefined)
+  state.prepareBullet.mockImplementation(async () => {
+    if (state.failure === 'bullet') throw new Error('Bullet preparation failed')
+    mkdirSync(join(state.root, 'runtime', 'bullet'), { recursive: true })
+  })
   state.preparePrimary.mockImplementation(async () => {
     if (state.failure === 'primary') throw new Error('primary preparation failed')
     const root = join(state.root, 'runtime', 'primary-runtime')
@@ -91,6 +98,7 @@ it.each(['mac-arm64', 'mac-x64', 'win-x64'] as const)('prepares %s with one pnpm
     schemaVersion: 1, node: '24.18.1', pnpm: '11.7.0',
   })
   expect(state.preparePrimary).toHaveBeenCalledWith({ deferSmoke: windows })
+  expect(state.prepareBullet).toHaveBeenCalledWith(target, runtime, join(state.root, 'downloads'), windows ? undefined : '12.0')
   if (windows) expect(state.commandLink).not.toHaveBeenCalled()
   else expect(state.commandLink).toHaveBeenCalledWith(join(runtime, 'cli'), target === 'mac-arm64' ? 'arm64' : 'x64', '12.0')
 })
@@ -98,6 +106,7 @@ it.each(['mac-arm64', 'mac-x64', 'win-x64'] as const)('prepares %s with one pnpm
 it.each([
   ['electron', 'Electron extraction failed'],
   ['primary', 'primary preparation failed'],
+  ['bullet', 'Bullet preparation failed'],
   ['cli', 'command manager copy failed'],
 ] as const)('does not publish versions when %s preparation fails', async (failure, error) => {
   state.failure = failure

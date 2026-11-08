@@ -1,9 +1,10 @@
 import { createShapeDeformer } from '../analog/gpu.js'
 import { createParameterPreview } from '../analog/parameters.js'
-import { parameterValues } from '../analog/control-spec.js'
 import { readMotion } from '../motion.js'
 import { controlValues } from '../analog/control-spec.js'
-import { loadGlbModel } from './glb.js'
+import { parseGlbModel } from './glb.js'
+import { createModelArtifacts } from '../generation/artifacts.js'
+import { generateStl } from '../generation/export.js'
 /**
  * Three.js viewport: owns rendering, model replacement, and GPU resources.
  *
@@ -14,7 +15,7 @@ import { loadGlbModel } from './glb.js'
 import * as THREE from 'three'
 import { createHover } from './hover.js'
 import { createHighlight } from './highlight.js'
-import { buildModel, disposeModel } from './model.js'
+import { disposeModel } from './model.js'
 import { placeMesh } from '../transform.js'
 import { analyzeMesh } from '../checks.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
@@ -37,12 +38,20 @@ function token(element, name, fallback) {
  * @param {HTMLElement} element - Container the canvas fills; its size is observed.
  * @param {() => void} onFailure - Called once when the WebGL context is lost.
  * @param {Function} [onCursorMode] Receives cursor selection scope changes.
+ * @param {object} [sharedArtifacts] Client-owned saved GLBs shared with validation.
  * @returns {object} The owned viewport. `apply(view)` reconciles STL objects;
  * `applyDesign(spec, volume)` loads a source revision and resolves to measured
  * geometry. Stale loads resolve to null; build failures reject and retain the
  * previous design. `dispose()` releases the viewport and invalidates imports.
  */
-export function createViewport(element, onFailure, onCursorMode = () => {}) {
+export function createViewport(element, onFailure, onCursorMode = () => {}, sharedArtifacts) {
+  const artifacts = sharedArtifacts ?? createModelArtifacts(), tasks = new Set()
+  function track(work) {
+    tasks.add(work)
+    void work.finally(() => tasks.delete(work)).catch(() => {})
+    return work
+  }
+  function disposeDesign(model) { disposeModel(model.root); model.release?.() }
   const scene = new THREE.Scene()
   const geometries = new Map()
   const objects = new Map()
@@ -56,14 +65,15 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
   function showMotion() {
     if (!motion || !design || shapeDeformer) return
     if (Object.entries(motion.values).every(([key, value]) => design.parameters[key] === value)) { clearMotion(); return }
-    if (!motionPreview) motionPreview = createParameterPreview(designRoot, design, motion)
+    clearHighlight()
+    if (!motionPreview) motionPreview = design.createMotionPreview(designRoot)
     motionPreview.update(motion.values)
   }
   const shapeMetrics = { frames: 0, maxInputToDrawMs: 0, lastDrawMs: 0 }
-  function clearShape() { if (shapeFrame !== null) cancelAnimationFrame(shapeFrame); shapeFrame = null; shapeDeformer?.dispose(); shapeDeformer = null; shapeId = null; shapeOperation = null }
+  function clearShape() { if (shapeFrame !== null) cancelAnimationFrame(shapeFrame); shapeFrame = null; if (shapeDeformer) track(Promise.resolve(shapeDeformer.dispose())); shapeDeformer = null; shapeId = null; shapeOperation = null }
   let highlightOverlay = null, highlightId = null, highlightVisible = true
   let design = null, designUrl = null, requestedUrl = null, generation = 0, cameraCommand = null
-  let sceneRevision = 0
+  let sceneRevision = 0, sceneGeneration = 0
   let designSpec = null, designVolume = null, designPending = null
   let measurement = null
   const cursorAnchors = new Map()
@@ -179,6 +189,10 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
       designRoot.matrix.fromArray(placed.matrix)
       designRoot.updateMatrixWorld(true)
       measurement = { design, key, report: analyzeMesh(placed.positions, { volume: designVolume }) }
+      if (design.motionIssue) {
+        measurement.report.checks.push({ code: 'assembly_motion_unavailable', severity: 'warning', message: design.motionIssue })
+        if (measurement.report.status === 'ok') measurement.report.status = 'review'
+      }
     }
     if (!framed) { framed = true; frame() }
     if (designSpec.camera && cameraCommand !== designSpec.camera.id) {
@@ -213,12 +227,12 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
       const next = controlValues(motion, values), previous = motion.values
       motion.values = next
       try { showMotion() } catch (error) { motion.values = previous; throw error }
-      poses.delete(designSpec.path); poses.set(designSpec.path, { ...next })
+      poses.delete(designSpec.path); poses.set(designSpec.path, { values: { ...next }, identity: design.poseIdentity ?? null })
       if (poses.size > 32) poses.delete(poses.keys().next().value)
       hover.clear(); cursorAnchors.clear(); clearHighlight(); render()
       return true
     },
-    applyShape(spec) {
+    async applyShape(spec) {
       if (!spec) { clearShape(); showMotion(); syncHighlight(); render(); return null }
       clearMotion()
       if (!design) throw new Error('Load the model before its shape controls')
@@ -229,13 +243,20 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
         shapeMetrics.frames = 0; shapeMetrics.maxInputToDrawMs = 0; shapeMetrics.lastDrawMs = 0
       }
       shapeDeformer.setGuideVisible?.(!spec.frozen && highlightVisible)
-      shapeDeformer.update(spec.values); render()
+      const owner = shapeDeformer
+      const updated = await track(Promise.resolve(owner.update(spec.values)))
+      if (closed || owner !== shapeDeformer || updated === false) return null
+      render()
       return document.hidden ? null : shapeId
     },
     updateShape(values) {
       if (!shapeDeformer) return
       if (shapeOperation === 'parameters') {
-        shapeDeformer.update(values); render(); return
+        const owner = shapeDeformer
+        return track(owner.update(values).then(updated => {
+          if (closed || owner !== shapeDeformer || !updated) return false
+          render(); return true
+        }))
       }
       shapeValues = values; inputTime = performance.now()
       if (shapeFrame !== null) return
@@ -266,7 +287,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
       } : null
       let object = hit.object, objectId = null, path = []
       while (object && object !== designRoot && object !== scene) {
-        path.unshift(object.name || `child[${object.parent ? object.parent.children.indexOf(object) : 0}]`)
+        if (!object.userData.rumiCoordinateFrame) path.unshift(object.name || `child[${object.parent ? object.parent.children.indexOf(object) : 0}]`)
         for (const [id, entry] of objects) if (entry.mesh === object) objectId = id
         object = object.parent
       }
@@ -358,7 +379,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
       if (!spec) {
         generation++
         clearShape(); clearMotion(); clearHighlight()
-        if (design) { designRoot.remove(design.root); clearShape(); disposeModel(design.root) }
+        if (design) { designRoot.remove(design.root); clearShape(); disposeDesign(design) }
         measurement = null; design = null; motion = null; designUrl = null; requestedUrl = null
         render()
         return null
@@ -369,24 +390,23 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
       render()
       requestedUrl = spec.url
       const request = ++generation
-      designPending = (async () => {
+      designPending = track((async () => {
         try {
+          const artifact = await artifacts.resolve(spec)
+          if (closed || request !== generation) return null
+          const release = artifact.retain()
           let next
-          if (spec.format === 'glb') next = await loadGlbModel(spec.url)
-          else {
-            const module = await import(/* @vite-ignore */ spec.url)
-            if (closed || request !== generation) return null
-            const defaults = parameterValues(module.parameters ?? {}), saved = parameterValues(spec.parameters ?? {})
-            if (Object.keys(saved).some(key => !Object.hasOwn(defaults, key))) throw new Error('Saved parameters must exist in the model')
-            const parameters = { ...defaults, ...saved }
-            const movement = readMotion(module.motionControls, parameters, poses.get(spec.path))
-            next = { ...buildModel(module.build, parameters), build: module.build, parameters, motion: movement }
-          }
-          if (closed || request !== generation) { disposeModel(next.root); return null }
+          try {
+            next = await parseGlbModel(artifact.bytes)
+            next = { ...next, parameters: { ...artifact.parameters, ...next.parameters }, generate: artifact.generate, release }
+            const retained = poses.get(spec.path)
+            next.motion = readMotion(next.motionDefinitions, next.parameters, retained?.identity === next.poseIdentity ? retained?.values ?? {} : {})
+            placeMesh(next.positions, spec.transform)
+          } catch (error) { if (next) disposeModel(next.root); release(); throw error }
+          if (closed || request !== generation) { disposeDesign(next); return null }
           // Validate placement before replacing the last successful design.
-          placeMesh(next.positions, designSpec.transform)
           clearShape(); clearMotion(); clearHighlight()
-          if (design) { designRoot.remove(design.root); clearShape(); disposeModel(design.root) }
+          if (design) { designRoot.remove(design.root); clearShape(); disposeDesign(design) }
           design = next
           motion = next.motion ?? null
           designUrl = spec.url
@@ -396,86 +416,86 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
           if (closed || request !== generation) return null
           throw error
         }
-      })()
+      })())
       return designPending
     },
     apply(view) {
-      if (closed) return
-      if (sceneRevision !== view.revision) { hover.clear(); cursorAnchors.clear() }
-      sceneRevision = view.revision
-      const live = new Set()
-      for (const spec of view.objects) {
-        live.add(spec.id)
-        let geometry = geometries.get(spec.datablockId)
-        if (geometry === undefined) {
-          geometry = new THREE.BufferGeometry()
-          geometry.setAttribute('position', new THREE.BufferAttribute(spec.positions, 3))
-          geometry.computeVertexNormals()
-          geometries.set(spec.datablockId, geometry)
-        }
-        const material = spec.blocked ? blockedMaterial : solidMaterial
-        let entry = objects.get(spec.id)
-        if (entry === undefined) {
-          const mesh = new THREE.Mesh(geometry, material)
-          mesh.matrixAutoUpdate = false
-          scene.add(mesh)
-          entry = { mesh, datablockId: spec.datablockId }
-          objects.set(spec.id, entry)
-        }
-        const rebuildOverlay = !entry.overlay || entry.sourceMaterial !== material || entry.datablockId !== spec.datablockId
-        if (rebuildOverlay) {
-          if (entry.overlay) entry.overlay.dispose()
-          entry.mesh.material = material
-          entry.sourceMaterial = material
-        }
-        if (entry.datablockId !== spec.datablockId) {
-          entry.mesh.geometry = geometry
-          entry.datablockId = spec.datablockId
-        }
-        entry.mesh.matrix.fromArray(spec.matrix)
-        entry.mesh.updateMatrixWorld(true)
-        if (rebuildOverlay) entry.overlay = createHighlight(entry.mesh, { blobs: [] }, hover)
-      }
-      for (const [id, entry] of objects) {
-        if (live.has(id)) continue
-        entry.overlay.dispose()
-        scene.remove(entry.mesh)
-        objects.delete(id)
-      }
-      const liveDatablocks = new Set([...objects.values()].map(entry => entry.datablockId))
-      for (const [id, geometry] of geometries) {
-        if (liveDatablocks.has(id)) continue
-        geometry.dispose()
-        geometries.delete(id)
-      }
-      const key = view.volume === null ? 'none' : `${view.volume.x},${view.volume.y},${view.volume.z}`
-      if (key !== volumeKey) {
-        clearVolume()
-        if (view.volume !== null) buildVolume(view.volume)
-        volumeKey = key
-      }
-      if (!framed && (objects.size > 0 || design !== null) && renderer.domElement.width > 0) {
-        framed = true
-        frame()
-      }
-      render()
+      const request = ++sceneGeneration
+      return track((async () => {
+        if (closed) return
+        const loaded = new Map()
+        try {
+          for (const spec of view.objects) {
+            if (geometries.has(spec.datablockId) || loaded.has(spec.datablockId)) continue
+            const model = await parseGlbModel(await generateStl(spec.positions))
+            loaded.set(spec.datablockId, model)
+            if (closed || request !== sceneGeneration) return
+          }
+          if (closed || request !== sceneGeneration) return
+          for (const [id, model] of loaded) geometries.set(id, model)
+          loaded.clear()
+          if (sceneRevision !== view.revision) { hover.clear(); cursorAnchors.clear() }
+          sceneRevision = view.revision
+          const live = new Set()
+          for (const spec of view.objects) {
+            live.add(spec.id)
+            const model = geometries.get(spec.datablockId)
+            const material = spec.blocked ? blockedMaterial : solidMaterial
+            let entry = objects.get(spec.id)
+            if (!entry) {
+              const mesh = new THREE.Group()
+              mesh.matrixAutoUpdate = false; scene.add(mesh)
+              entry = { mesh, datablockId: null }; objects.set(spec.id, entry)
+            }
+            const replace = entry.datablockId !== spec.datablockId
+            const rebuildOverlay = !entry.overlay || entry.sourceMaterial !== material || replace
+            if (rebuildOverlay) entry.overlay?.dispose()
+            if (replace) {
+              entry.mesh.clear(); entry.mesh.add(model.root.clone(true)); entry.datablockId = spec.datablockId
+            }
+            if (rebuildOverlay) {
+              entry.mesh.traverse(node => { if (node.isMesh) node.material = material })
+              entry.sourceMaterial = material
+            }
+            entry.mesh.matrix.fromArray(spec.matrix); entry.mesh.updateMatrixWorld(true)
+            if (rebuildOverlay) entry.overlay = createHighlight(entry.mesh, { blobs: [] }, hover)
+          }
+          for (const [id, entry] of objects) {
+            if (live.has(id)) continue
+            entry.overlay.dispose(); scene.remove(entry.mesh); objects.delete(id)
+          }
+          const liveDatablocks = new Set([...objects.values()].map(entry => entry.datablockId))
+          for (const [id, model] of geometries) {
+            if (liveDatablocks.has(id)) continue
+            disposeModel(model.root); geometries.delete(id)
+          }
+          const key = view.volume === null ? 'none' : `${view.volume.x},${view.volume.y},${view.volume.z}`
+          if (key !== volumeKey) {
+            clearVolume()
+            if (view.volume !== null) buildVolume(view.volume)
+            volumeKey = key
+          }
+          if (!framed && (objects.size > 0 || design !== null) && renderer.domElement.width > 0) { framed = true; frame() }
+          render()
+        } finally { for (const model of loaded.values()) disposeModel(model.root) }
+      })())
     },
     dispose() {
       clearShape(); clearMotion(); poses.clear()
-      if (closed) return
+      if (closed) return Promise.allSettled([...tasks])
       closed = true
       generation++
       hover.dispose()
       cursorAnchors.clear()
       clearHighlight()
-      if (design) { clearShape(); disposeModel(design.root) }
+      if (design) { clearShape(); disposeDesign(design) }
       design = null
       measurement = null
       observer.disconnect()
       controls.dispose()
       renderer.domElement.removeEventListener('webglcontextlost', lost)
       for (const entry of objects.values()) entry.overlay.dispose()
-      for (const geometry of geometries.values()) geometry.dispose()
+      for (const model of geometries.values()) disposeModel(model.root)
       geometries.clear()
       objects.clear()
       clearVolume()
@@ -484,6 +504,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}) {
       renderer.dispose()
       renderer.forceContextLoss()
       renderer.domElement.remove()
+      return Promise.allSettled([...tasks, ...(!sharedArtifacts ? [artifacts.dispose()] : [])])
     },
   }
 }

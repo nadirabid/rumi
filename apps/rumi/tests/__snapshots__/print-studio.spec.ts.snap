@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`automatically queues one repair turn with durable findings and stops on unchanged geometry 1`] = `
+exports[`automatically queues one repair turn with durable 'geometry' findings and stops on unchanged geometry 1`] = `
 [
   "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
 
@@ -11,14 +11,27 @@ exports[`automatically queues one repair turn with durable findings and stops on
 ]
 `;
 
+exports[`automatically queues one repair turn with durable 'mechanics' findings and stops on unchanged geometry > physical movement instructions 1`] = `"For multi-part or movable prints, read blender-modeling and publish a complete assembly with every physical mesh, root fixture, connection, axis, pivot and full movement range. Include pins, caps and axles. JavaScript models export assembly and bind every motionControls axis to its connection; controls use degrees or millimetres. Blender publish preserves assembly metadata. Preserve requested features, connectors, controls and ranges during repairs. Changed candidates are checked automatically after turns: Blender checks geometry and bundled Bullet tests the whole assembly with only the root held, without ideal joints. Read the matching meshState.validation report before claiming acceptance. Missing descriptions, disconnected pieces and blocked movement require repair. Unavailable, unsupported or incomplete checks remain unverified. A passing rigid-contact test does not certify assembly accessibility, deformation, material strength or slicer readiness."`;
+
+exports[`automatically queues one repair turn with durable 'mechanics' findings and stops on unchanged geometry 1`] = `
+[
+  "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+
+{"validation":null}",
+  "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+
+{"validation":{"status":"changed","report":null,"previousReport":{"version":1,"status":"needs_repair","checks":[{"code":"unretained_part","count":1,"severity":"error","mechanism":"door"}],"printReady":false,"mechanics":{"version":1,"engine":"bullet","status":"needs_repair","printReady":false,"checks":[{"code":"unretained_part","count":1,"severity":"error","mechanism":"door"}]}}}}",
+]
+`;
+
 exports[`collects every model before sending one repair and does not repair unavailable checks 1`] = `
-"Automatic print validation found blocking geometry errors. Repair the affected saved models now, preserving the requested design and moving parts. Inspect the findings and source; do not hide errors by removing requested features. Do not print or send to a printer. A fresh Blender check runs automatically after your turn. Passing geometry checks does not certify joint clearance, assembly, or slicer readiness. If you cannot safely resolve the errors, say so briefly. Findings:
+"Automatic print validation found blocking geometry or unverified mechanism findings. Repair the affected saved models now, preserving the requested design and moving parts. Inspect the findings and source; do not hide errors by removing requested features or movement declarations. Do not print or send to a printer. Fresh Blender and whole-assembly Bullet checks run automatically after your turn. These checks do not certify assembly, material strength, or slicer readiness. If you cannot safely resolve the errors, say so briefly. Findings:
 [{"path":"models/car/model.js","fingerprint":"<revision>","report":{"version":1,"status":"needs_repair","checks":[{"code":"intersecting_faces","count":2,"severity":"error"}],"printReady":false}},{"path":"models/second/model.js","fingerprint":"<revision>","report":{"version":1,"status":"needs_repair","checks":[{"code":"intersecting_faces","count":2,"severity":"error"}],"printReady":false}}]"
 `;
 
 exports[`documents creating multiple models and bringing a named entry into view 1`] = `
 {
-  "analog": "Open temporary edit sliders, pads, or curves bound to real model values. For persistent doors, wheels, and other movable parts, export motionControls from the JavaScript model instead; read interactive-controls. Movement controls stay at the bottom-right and do not use this edit lifecycle. Read interactive-controls first. Supply controls with labels, axis keys, ranges, steps and reset values, plus initial values. operation parameters binds exported parameters of a JavaScript model build(THREE, parameters); one key can drive multiple features such as both eyes. Other operations bind GLB deformation values; read analog-shaping for their geometry. If a requested parameter is not exposed, prepare a faithful parametric model before opening controls; never claim a cosmetic label is a working binding. Open controls before making a requested user adjustment. Only rendered confirms visibility. Freeze captures the latest visible values. For final parameter models, save persists frozen values and closes the edit. For a temporary parameter preview of an edit to an existing model, set finish to blender, provide the preserved original and semantic edit recipe, then freeze and apply the values to the original in Blender, check printability, publish and load the result. For GLB deformations, apply the frozen recipe through Blender and load the saved revision. Close cancels and restores the saved preview. Preserve unrelated features and the original model.",
+  "analog": "Open temporary edit sliders, pads, or curves bound to real model values. For persistent doors, wheels, and other movable parts, use the GLB assembly joints or export motionControls from the JavaScript model instead; read interactive-controls. Movement controls stay at the bottom-right and do not use this edit lifecycle. Read interactive-controls first. Supply controls with labels, axis keys, ranges, steps and reset values, plus initial values. operation parameters binds exported parameters of a JavaScript model build(THREE, parameters); one key can drive multiple features such as both eyes. Other operations bind GLB deformation values; read analog-shaping for their geometry. If a requested parameter is not exposed, prepare a faithful parametric model before opening controls; never claim a cosmetic label is a working binding. Open controls before making a requested user adjustment. Only rendered confirms visibility. Freeze captures the latest visible values. For final parameter models, save persists frozen values and closes the edit. For a temporary parameter preview of an edit to an existing model, set finish to blender, provide the preserved original and semantic edit recipe, then freeze and apply the values to the original in Blender, check printability, publish and load the result. For GLB deformations, apply the frozen recipe through Blender and load the saved revision. Close cancels and restores the saved preview. Preserve unrelated features and the original model.",
   "blender": "---
 name: blender-modeling
 description: Create, import, or edit Rumi meshes using background Blender Python scripts, then inspect and iterate in the Three.js viewer. Use for model creation and geometry edits.
@@ -34,8 +47,32 @@ Call \`blender_status\` for the executable and helper paths. Run Blender through
 2. Write a reproducible Python script under \`source/\`. Run \`"<executable>" --background --factory-startup --python-exit-code 1 --python "<script>"\`. This runs a full Blender process without a window; ordinary system Python cannot import \`bpy\`.
 3. Work in **metres, Z up** in Blender. Rumi's viewer, measurements and Gaussian regions use **millimetres, Z up**. Divide model-local cursor/highlight coordinates and radii by 1,000 before using them in Blender; account for object transforms when selecting vertices. Standard GLB export/import handles Y-up conversion. Do not apply viewer placement to an editing selection twice.
 4. Use Blender's modifiers and mesh operations. For symmetric objects construct one half and mirror it about an explicit plane; measure symmetry after evaluated modifiers. Keep planar faces planar, bevel widths consistent, sharp boundaries deliberate, and smooth normals confined to intended smooth surfaces. More subdivisions or smooth shading alone do not correct a lumpy silhouette. Inspect front, side and three-quarter views. Distinguish topology checks from visual/reference fidelity.
-5. Load the helper returned by \`blender_status\` with \`helper = runpy.run_path(helper_path)\`, then call \`helper["publish"]("models/<name>")\`. Use \`runpy\` so importing the helper does not write bytecode into the installed application. It saves an immutable \`.blend\` and GLB revision, prints the paths, and atomically updates \`model.glb\`. Keep named parts and modifiers in the editable original. Preview limits are 200,000 triangles and 64 MiB; preserve detailed assets separately if a lighter preview is required. Do not silently simplify the print deliverable.
-6. Call \`viewer_load\` on \`models/<name>/model.glb\`; read the current \`meshState\` context after the viewer measures it. Subsequent completed exports reload automatically. Use \`viewer_camera\`, \`viewer_cursor_snapshot\`, and \`viewer_highlight\` for iteration. A failed script/export/load is not a completed edit. Retain the previous revision, report the failure, and fix it.
+5. Load the helper returned by \`blender_status\` with \`helper = runpy.run_path(helper_path)\`, then call \`helper["publish"]("models/<name>")\`. Use \`runpy\` so importing the helper does not write bytecode into the installed application. It saves an immutable \`.blend\` and GLB revision, prints the paths, and atomically updates \`model.glb\`. Keep named parts, modifiers, and movement declarations in the editable original. Preview limits are 200,000 triangles and 64 MiB; preserve detailed assets separately if a lighter preview is required. Do not silently simplify the print deliverable.
+6. Call \`viewer_load\` on \`models/<name>/model.glb\`. Saved models display independently of validation. Use \`meshState.validation\` to inspect findings; a visible model is not a printability pass. Use \`viewer_camera\`, \`viewer_cursor_snapshot\`, and \`viewer_highlight\` for iteration.
+
+## Declare physical movement
+
+Every multi-part or movable model requires a complete assembly description. Give each physical piece a unique mesh name and include retaining pins, caps and axles. Disconnected solids cannot become one rigid piece by grouping or joining their mesh objects. Preserve requested features, connectors, names, controls and movement ranges through repairs and conversions.
+
+Pass \`assembly\` to the export helper:
+
+\`\`\`python
+helper["publish"]("models/<name>", assembly={
+    "version": 1, "root": "frame",
+    "parts": [{"id": "frame", "mesh": "Frame"}, {"id": "door", "mesh": "Door"}],
+    "connections": [{
+        "id": "door-hinge", "parent": "frame", "child": "door", "kind": "revolute",
+        "axis": [0, 0, 1], "pivot": [0, 0, 12], "range": [0, 90],
+    }],
+    "manufacturing": {"mode": "print-in-place"},
+})
+\`\`\`
+
+This example requires actual captive connector geometry on Frame and Door. Add every separate pin or cap to \`parts\` and connect it explicitly. Each part maps to exactly one exported mesh object, and every mesh must be mapped. All parts need a connection path to \`root\`, the physical piece held by the test fixture. Assemblies support at most 128 parts and 128 connections. Each connection names its parent and child and uses \`fixed\`, \`revolute\` or \`prismatic\`. Fixed connections describe expected attachment without creating a simulated weld. Movable connections require a nonzero \`axis\`, \`pivot\` and \`range\`. Axis and pivot describe the saved world pose before viewer placement; pivot and sliding ranges use millimetres, Z up, even though Blender geometry uses metres. Rotational ranges use degrees. Ranges contain the saved pose at zero and stay within [-180, 180] degrees or [-1000, 1000] millimetres.
+
+The helper stores \`assembly\` in the editable \`.blend\` and GLB \`asset.extras.rumiAssembly\`; omitting it on later publishes retains it. \`import_mesh\` preserves imported assembly metadata. Compose uniquely named parts and explicitly publish a combined assembly instead of discarding existing declarations. Legacy \`mechanisms\` declarations require an assembly upgrade and cannot receive a mechanical pass. Loading a project does not rewrite its files.
+
+Optional \`sequences\` contain named movement paths: \`[{"id": "fold", "waypoints": [{"door-hinge": 45}, {"door-hinge": 90}]}]\`. Values use each connection's declared units and range. These are intended configurations, not instructions to teleport the simulated pieces. Unsupported coupling or incomplete probe coverage remains unverified. Declare \`manufacturing.mode\` as \`print-in-place\` or \`separate\` according to the actual fabrication plan; choosing a mode does not establish fabrication feasibility. For JavaScript movement controls, read \`interactive-controls\` and bind each axis to an assembly connection's \`control\` field.
 
 ## Pointed regions and printing
 
@@ -45,9 +82,9 @@ Use the cursor snapshot associated with the request and visually ground named re
 
 Keep \`.blend\` files as editable originals and GLB as viewing artifacts. Export print meshes separately from the intended evaluated solids and verify units, wall thickness, manifoldness, fit, supports and slicer output using \`fdm-design\`. Blender operations and viewer checks do not certify print readiness. Whole-model placement still uses \`viewer_transform\`; it does not rewrite the Blender original.
 
-Print Studio automatically runs Blender geometry validation after each agent turn for changed discovered models. Read \`meshState.validation\` for revision-specific findings; \`previousReport\` is historical. Do not claim the current edit passed before its matching result exists. This validation does not certify joint motion, assembly, or slicing.
+Print Studio automatically runs Blender geometry validation after each agent turn for changed discovered models, then whole-assembly Bullet contact and movement probes when geometry has no blocking findings. Read \`meshState.validation\` for revision-specific findings, including \`report.mechanics\`; \`previousReport\` is historical. Do not claim the current edit passed before its matching result exists. The checker holds only the root fixture and tests actual mesh contacts while every other piece remains dynamic. It does not create ideal joints that supply missing connectors. Unsupported motion, incomplete checks, deformation, strength and slicing require separate evidence.
 
-Blocking geometry findings automatically start a repair turn with model paths and checked revisions. Preserve the requested design and moving parts while repairing; do not remove requested features merely to pass checks. Repairs are checked again after the turn, with a bounded automatic retry budget. If a repair cannot be made safely, report the remaining limitation briefly; never claim printability from geometry checks alone.
+Blocking geometry or mechanism findings automatically start a repair turn with model paths and checked revisions. Preserve the requested design, moving parts, physical connectors, and declarations while repairing; do not remove requested features or narrow movement controls merely to hide failures. Repairs are checked again after the turn, with a bounded automatic retry budget. Unverified mechanical checks also trigger bounded repair; static geometry warnings and unavailable checks remain visible in the report without starting geometry repairs. If a repair cannot be made safely, report the remaining limitation briefly; never claim printability from geometry checks alone.
 ",
   "clarification": "---
 name: clarify-mesh-changes
@@ -104,7 +141,7 @@ Use \`printer-awareness\` to obtain the selected printer, nozzle and material fa
 6. **Allow intended fits and motion.** Mating and moving parts need clearance or interference appropriate to the intended fit, material, orientation, and calibrated process. Do not assume nominally identical dimensions will fit. Use a small fit test when the result matters and calibration is unavailable.
 7. **Design for intended use.** For functional parts, choose material, section thickness, connections, and orientation for expected loads and temperature exposure. Layer-dependent strength, shrinkage, and warping matter; successful slicing does not establish strength or dimensional accuracy.
 ",
-  "highlight": "Replace temporary Gaussian wireframe regions on the editable model loaded by viewer_load. Read the current meshState context for design.path, revision and url; inspect model source to locate regions. Coordinates are model-local millimetres before viewer_transform, including part transforms. Rotation uses XYZ Euler degrees. Up to eight ellipsoids combine by maximum influence, with a fixed soft fade. All intersected surfaces, including the back, may be highlighted. Empty blobs clears. Does not edit geometry or exports. Waits for the visible viewer to acknowledge the matching highlight. Returns rendered only after acknowledgment; not_rendered or superseded is not success. Rendering is not user confirmation. Use this tool to visually ground region-specific edits and explanations of named parts. Follow the user’s requested action and clarify ambiguous intent; no special confirmation phrase is required. Use clarify-mesh-changes for guidance.",
+  "highlight": "Replace temporary Gaussian wireframe regions on the editable model loaded by viewer_load. Read displayedDesign in the current meshState context (design when validation is unavailable) for the visible path, revision and url; inspect model source to locate regions. Coordinates are model-local millimetres before viewer_transform, including part transforms. Rotation uses XYZ Euler degrees. Up to eight ellipsoids combine by maximum influence, with a fixed soft fade. All intersected surfaces, including the back, may be highlighted. Empty blobs clears. Does not edit geometry or exports. Waits for the visible viewer to acknowledge the matching highlight. Returns rendered only after acknowledgment; not_rendered or superseded is not success. Rendering is not user confirmation. Use this tool to visually ground region-specific edits and explanations of named parts. Follow the user’s requested action and clarify ambiguous intent; no special confirmation phrase is required. Use clarify-mesh-changes for guidance.",
   "instructions": "### Project type
 
 This project is for designing and creating 3d prints.
@@ -127,9 +164,15 @@ Call \`viewer_load\` with a GLB path to bring it into view; use the current \`me
 
 Existing \`model.js\`/\`model.mjs\` designs exporting synchronous \`build(THREE)\` remain supported, in millimetres and Z up. Preserve them when migrating their actual geometry into Blender. Do not modify the viewer or approximate an existing model from a screenshot.
 
+### Movable prints
+
+Build physical connectors and publish a complete assembly for multi-part or movable models, following \`blender-modeling\` and \`interactive-controls\`. Include every mesh, pin, cap, connection and movement control; preserve requested movement and full ranges during repairs. Completed turns automatically check changed candidates with Blender and whole-assembly Bullet contact probes. Blocking findings and unverified mechanical checks trigger bounded repair turns. Models remain visible while validation and repair run. Read the matching \`meshState.validation\` report before claiming acceptance. Unsupported or incomplete checks remain unverified; a probe pass does not certify material strength or print readiness.
+
 ### Model references
 
 Use the request's captured model selection as a default for an unnamed model, with explicit names and captured pointing references taking precedence. Later browsing does not redirect ongoing work. Clarify conflicting references before editing. Call \`viewer_working_model\` with a discovered entry before inspecting or editing it; update the declaration when changing targets and clear it before clarification. The green dot identifies your declared work independently of the selected model and clears when your agent stops. Read the current \`meshState\` context for both selection and working models. Use \`viewer_load\` only to change what the person sees.
+
+The viewer renders every source through GLB in Three.js. Keep editable originals; JavaScript generators and STL imports are converted automatically. Declare assembly joints for movement controls; temporary parameter edits regenerate GLB previews.
 ",
   "interactive": "---
 name: interactive-controls
@@ -144,21 +187,38 @@ Use \`viewer_controls\` with explicit \`controls\`, \`values\`, and the current 
 
 ## Persistent movement controls
 
-Doors, wheels, hinges, and other movable features use model-owned movement controls instead of a temporary \`viewer_controls\` edit. Export \`motionControls\` from the JavaScript model using the same labeled slider/pad/curve declarations below, bound to numeric entries in \`parameters\`. The viewer discovers these declarations on load and keeps them at the bottom-right as long as the loaded model declares them. Preserve the declarations and their bindings when repairing or replacing the model; remove a declaration only when its movable feature is removed. Do not infer motion from parameter names.
+Doors, wheels, hinges, and other movable features use model-owned movement controls instead of a temporary \`viewer_controls\` edit. Export \`motionControls\` from the JavaScript model using the same labeled slider/pad/curve declarations below, bound to numeric entries in \`parameters\`. The viewer converts the generated model to GLB and derives movement from its assembly joints, using these declarations for labels and parameter bindings. It discovers these declarations on load and keeps them at the bottom-right as long as the loaded model declares them. Preserve the declarations and their bindings when repairing or replacing the model; remove a declaration only when its movable feature is removed. Declare the corresponding physical mechanisms as well; do not infer motion from parameter names or treat preview transforms as working connectors.
 
 \`\`\`js
 export const parameters = { wheelSpin: 0, doorAngle: 0 }
 export const motionControls = [
-  { kind: 'slider', label: 'Wheels', axes: [
-    { key: 'wheelSpin', min: -360, max: 360, step: 1, reset: 0 },
+  { kind: 'slider', label: 'Wheel', axes: [
+    { key: 'wheelSpin', min: -180, max: 180, step: 1, reset: 0 },
   ] },
-  { kind: 'slider', label: 'Doors', axes: [
+  { kind: 'slider', label: 'Door', axes: [
     { key: 'doorAngle', min: 0, max: 100, step: 1, reset: 0 },
   ] },
 ]
+export const assembly = {
+  version: 1, root: 'frame',
+  parts: [{ id: 'frame', mesh: 'Frame' }, { id: 'wheel', mesh: 'Wheel' }, { id: 'door', mesh: 'Door' }],
+  connections: [
+    { id: 'wheel-axle', parent: 'frame', child: 'wheel', kind: 'revolute',
+      axis: [1, 0, 0], pivot: [0, 0, 12], range: [-180, 180], control: 'wheelSpin' },
+    { id: 'door-hinge', parent: 'frame', child: 'door', kind: 'revolute',
+      axis: [0, 0, 1], pivot: [10, 0, 12], range: [0, 100], control: 'doorAngle' },
+  ],
+  manufacturing: { mode: 'print-in-place' },
+}
 \`\`\`
 
-Movement changes only the local preview pose, never the saved parameters or validation input, and needs no freeze/save/close. The panel remains visible but disabled while a temporary edit owns the preview; the movement pose returns after that edit ends. Compatible pose values survive model revisions and switching between recent models while the viewer is mounted; reopening the viewer starts from saved values. A posed preview cannot supply a source-bound cursor edit: reset the movement controls to the saved pose first. \`viewer_load\` feedback exposes the discovered declarations under \`design.motion\`. GLB does not yet expose these JavaScript parameter bindings. Animation does not establish printable joint mechanics.
+The builder must return uniquely named physical meshes matching every \`assembly.parts\` entry, with real captive connectors. Add every separate axle, pin and retaining cap to the assembly rather than leaving it implicit. The export binds every mesh exactly once and checks every movement control against its connection. A shared control can bind several connections, but coupled motion needs supported sequence coverage before acceptance. Read [physical movement declarations](../blender-modeling/SKILL.md#declare-physical-movement) for the complete assembly contract.
+
+Control values represent degrees for rotation or millimetres for translation. The build may convert degrees to radians but must not apply an arbitrary gain. Connection ranges are relative to saved parameters and must cover \`[axis.min - savedValue, axis.max - savedValue]\`; for a door saved at 30° with a 0–100° control, declare \`range: [-30, 70]\`. The validation export records these bounds in \`rumiMotionRanges\`. Missing declarations and incomplete ranges block acceptance. Do not remove controls or reduce movement to conceal a failed check.
+
+Movement changes only the local preview pose, never saved parameters or validation input, and needs no freeze/save/close. Controls remain visible but disabled while a temporary edit owns the preview. Compatible pose values survive revisions and switching between recent models while the viewer is mounted; reopening starts from saved values. Reset movement before requesting source-bound cursor edits. \`viewer_load\` feedback exposes rendered declarations under \`design.motion\`; inspect this feedback before claiming controls are visible. Validation tests the saved physical assembly through Blender and Bullet. Animation and simulation do not certify material strength or print readiness.
+
+For a GLB, publish the physical \`rumiAssembly\` described in \`blender-modeling\`; the viewer generates movement sliders directly from its revolute and prismatic joints. Use each connection’s \`control\` for a short label in the person’s language, or omit it to use the child mesh name. Keep pivots and axes in saved-world millimetres, Z up. The viewer moves descendants with their parents and preserves fixed attachments. It supports trees with up to 12 independent controls; unsupported bindings remain visible as geometry with a diagnostic in the viewer report. Do not create a separate JavaScript model just to animate a GLB. These sliders preview declared motion, not verified physical feasibility.
 
 ## Declare controls
 
@@ -215,7 +275,7 @@ Keep the controls open while the person explores. Satisfaction or moving to anot
 
 Report build/save failures plainly. Failed parameter previews preserve the last successful geometry and values. Never claim an edit is saved while controls remain unresolved.
 ",
-  "load": "Select a Blender-exported GLB in the Three.js viewer. Use models/<name>/model.glb; the viewer discovers these entries and reloads completed exports automatically. GLB uses standard metres and Y up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. Self-contained static GLB only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Legacy .js/.mjs entries exporting synchronous build(THREE) remain supported in millimetres and Z up. Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.",
+  "load": "Select a Blender-exported GLB in the Three.js viewer. Use models/<name>/model.glb; the viewer discovers these entries and reloads completed exports automatically. GLB uses standard metres and Y up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. Self-contained static GLB only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Legacy .js/.mjs entries exporting synchronous build(THREE) remain supported in millimetres and Z up. Saved models display immediately; automatic validation and repair run independently of preview visibility. Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.",
   "printer": "---
 name: printer-awareness
 description: Retrieve printer identity, connectivity, live state, filament and machine-profile limits before answering printer questions or making printer-specific design and fit decisions.

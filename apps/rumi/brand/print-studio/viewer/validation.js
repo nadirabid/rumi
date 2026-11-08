@@ -1,27 +1,33 @@
 /** Turn-end validation owns immutable sources, renderer requests, and Blender subprocesses. */
 import { createHash, randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
-import { createSource } from './source.js'
+import { realpath } from 'node:fs/promises'
+import { createSource, createSourcePresentation } from './source.js'
 import { discoverModels } from './catalog.js'
 import { normalizePlacement } from './transform.js'
 import { parseStl, STL_LIMITS } from './stl.js'
+import { validateGlb, GLB_MAX_BYTES } from './glb.js'
 import { runValidation } from '../blender/validation-runner.js'
+import { validationState, preserveMovement } from './validation-state.js'
+
+// Persisted acceptance is reusable only under the same validation semantics.
+const POLICY_VERSION = 3
 
 /**
  * Automatically check changed project models on turn/end; no model tool call is required.
  * JavaScript snapshots wait for a renderer without changing its selection. Results remain
  * scoped to their source hash and placement; starting another turn invalidates presentation.
  * @param {object} ctx Plugin context with session events and source routes.
- * @param {object} config Resolved Blender configuration and thresholds.
+ * @param {object} config Resolved Blender and Bullet configuration and thresholds.
  * @param {object} options Viewer geometry/placement lookup, notification, and optional runner.
- * @returns {object} State/read, renderer submission, and quiescent disposal operations.
+ * @returns State/read, renderer submission, and quiescent disposal operations.
  */
 export function createValidation(ctx, config, { view, notify, createUserMessage, run = runValidation }) {
   const sessions = new Map(), tasks = new Set()
   let closed = false, queue = Promise.resolve()
   function sessionFor(id) {
     let value = sessions.get(id)
-    if (!value) { value = { generation: 0, models: new Map(), error: null, attempts: 0, sent: new Set(), repairAllowed: false, scanning: false }; sessions.set(id, value) }
+    if (!value) { value = { generation: 0, models: new Map(), error: null, attempts: 0, sent: new Set(), repairAllowed: false, scanning: false, opened: false, editing: false }; sessions.set(id, value) }
     return value
   }
   function repair(id) {
@@ -31,7 +37,7 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
       || session.attempts >= config.validationRepairAttempts) return
     const items = [...session.models.values()]
     if (items.some(item => ['checking', 'awaiting_viewer', 'changed'].includes(item.status))) return
-    const failures = items.filter(item => item.status === 'needs_repair'
+    const failures = items.filter(item => (item.status === 'needs_repair' || (item.status === 'review' && item.result?.mechanics?.status === 'review'))
       && item.checkedFingerprint === item.fingerprint && !session.sent.has(`${item.path}:${item.fingerprint}`))
     if (!failures.length) return
     const findings = failures.map(item => ({ path: item.path, fingerprint: item.fingerprint, report: item.result }))
@@ -39,7 +45,7 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
     for (const item of failures) session.sent.add(`${item.path}:${item.fingerprint}`)
     try {
       agent.followup(createUserMessage({ source: { kind: 'print-validation', form: 'notice', summary: 'Repairing print geometry' }, content: [{ type: 'text', text:
-        'Automatic print validation found blocking geometry errors. Repair the affected saved models now, preserving the requested design and moving parts. Inspect the findings and source; do not hide errors by removing requested features. Do not print or send to a printer. A fresh Blender check runs automatically after your turn. Passing geometry checks does not certify joint clearance, assembly, or slicer readiness. If you cannot safely resolve the errors, say so briefly. Findings:\n' + JSON.stringify(findings),
+        'Automatic print validation found blocking geometry or unverified mechanism findings. Repair the affected saved models now, preserving the requested design and moving parts. Inspect the findings and source; do not hide errors by removing requested features or movement declarations. Do not print or send to a printer. Fresh Blender and whole-assembly Bullet checks run automatically after your turn. These checks do not certify assembly, material strength, or slicer readiness. If you cannot safely resolve the errors, say so briefly. Findings:\n' + JSON.stringify(findings),
       }] }))
     } catch (error) {
       session.error = `Could not start geometry repair: ${String(error.message ?? error)}`
@@ -52,11 +58,25 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
     return work
   }
   function fingerprint(state, transform, volume) {
-    return createHash('sha256').update(JSON.stringify([state.contentHash, transform, volume, config.validation])).digest('hex')
+    return createHash('sha256').update(JSON.stringify([POLICY_VERSION, state.contentHash, transform, volume, config.validation, config.mechanics])).digest('hex')
+  }
+  function publishable(report) {
+    if (!['passed', 'review'].includes(report.status) || report.checks.some(check => check.count && check.severity === 'error')) return false
+    if (report.mechanics) return report.mechanics.status === 'passed' && report.mechanics.assemblyVerified === true && report.mechanics.coverage?.complete === true
+    return report.status === 'passed' && !report.intent?.assembly
+  }
+  function displayedSource(id, path, source) {
+    const accepted = sessions.get(id)?.models.get(path)?.accepted?.presentation
+    if (!accepted) return null
+    const current = source?.state(), state = accepted.state()
+    if (current && !current.error && current.contentHash === state.contentHash
+      && JSON.stringify(current.transform) === JSON.stringify(state.transform)) return source
+    return accepted
   }
   function start(id) {
     const session = sessionFor(id)
     session.repairAllowed = false
+    session.editing = true
     session.generation++
     for (const item of session.models.values()) {
       item.controller?.abort()
@@ -64,6 +84,32 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
       item.status = 'changed'
     }
     notify(id)
+  }
+  function prepare(id, session, item, cwd) {
+    if (item.storage) return Promise.resolve()
+    if (item.preparing) return item.preparing
+    const valid = () => !closed && sessions.get(id) === session && session.models.get(item.path) === item
+    item.preparing = (async () => {
+      const storage = validationState(config.validationStateDirectory, cwd, item.path)
+      const saved = await storage.read()
+      if (!valid()) return
+      if (saved.accepted && fingerprint({ contentHash: saved.accepted.sourceHash }, saved.accepted.transform, saved.accepted.volume) === saved.accepted.fingerprint) {
+        const originalPath = resolve(await realpath(cwd), item.path)
+        if (!valid()) return
+        const source = await createSource(ctx, saved.accepted.path, saved.accepted.workspace)
+        if (!valid()) { await source.dispose(); return }
+        if (source.state().contentHash !== saved.accepted.sourceHash) {
+          await source.dispose()
+          throw new Error('Accepted source bytes do not match their validated revision')
+        }
+        source.transform(saved.accepted.transform)
+        item.accepted = { fingerprint: saved.accepted.fingerprint, presentation: createSourcePresentation({ ...source.state(),
+          path: originalPath }), release: source.dispose }
+      }
+      item.storage = storage
+      item.required = saved.required
+    })().finally(() => { item.preparing = null })
+    return item.preparing
   }
   function enqueue(id, session, item, input, generation) {
     const valid = () => !closed && sessions.get(id) === session && session.generation === generation && session.models.get(item.path) === item
@@ -83,6 +129,35 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
           }
         }
         if (!valid() || controller.signal.aborted) return
+        if (item.storage) {
+          const durable = await item.storage.read()
+          if (!valid() || controller.signal.aborted) return
+          const preserved = preserveMovement(durable.required, report.intent)
+          report.checks.push(...preserved.checks)
+          if (preserved.checks.length) report.status = 'needs_repair'
+          if (report.status === 'passed' && report.intent?.assembly && !publishable(report)) {
+            report.checks.push({ code: 'assembly_verification_incomplete', severity: 'error', count: 1,
+              message: 'Complete whole-assembly verification before publishing this revision.' })
+            report.status = 'needs_repair'
+          }
+          const accepted = publishable(report)
+          const state = item.source.state()
+          state.transform = input.transform
+          let release = accepted ? item.source.retainSnapshot() : null
+          try {
+            await item.storage.write(preserved.required, accepted ? { fingerprint: item.fingerprint, state, volume: input.volume, source: item.source.snapshot() } : null)
+            item.required = preserved.required
+            if (!valid() || controller.signal.aborted) return
+            if (accepted) {
+              const previous = item.accepted
+              item.accepted = { fingerprint: item.fingerprint, presentation: createSourcePresentation({ ...state, highlight: null, analog: null }), release }
+              release = null
+              await previous?.release()
+            }
+          } finally { await release?.() }
+        }
+        if (!valid() || controller.signal.aborted) return
+        if (!item.storage && publishable(report)) item.accepted = { fingerprint: item.fingerprint, transform: structuredClone(input.transform) }
         item.result = report; item.checkedFingerprint = item.fingerprint; item.status = report.status; item.error = null
       } catch (error) {
         if (valid() && !controller.signal.aborted) { item.status = 'unavailable'; item.error = String(error.message ?? error) }
@@ -107,6 +182,8 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
         let item = session.models.get(model.path)
         if (!item) { item = { path: model.path, status: 'changed' }; session.models.set(model.path, item) }
         try {
+          await prepare(id, session, item, cwd)
+          if (!valid()) return
           if (!item.source) {
             const source = await createSource(ctx, resolve(cwd, model.path), cwd)
             if (!valid()) { await source.dispose(); return }
@@ -126,7 +203,7 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
           if (state.format === 'glb') enqueue(id, session, item, { ...input, bytes: item.source.snapshotBytes() }, generation)
           else {
             item.status = 'awaiting_viewer'
-            item.request = { id: randomUUID(), path: model.path, url: state.url, parameters: state.parameters, fingerprint: hash }
+            item.request = { id: randomUUID(), path: model.path, url: state.url, contentHash: state.contentHash, parameters: state.parameters, fingerprint: hash }
             item.input = input; item.generation = generation
           }
         } catch (error) {
@@ -136,7 +213,7 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
       if (!valid()) return
       for (const mesh of current.meshes) {
         seen.add(mesh.path)
-        const hash = createHash('sha256').update(mesh.bytes).update(JSON.stringify([mesh.transform, current.volume, config.validation])).digest('hex')
+        const hash = createHash('sha256').update(mesh.bytes).update(JSON.stringify([POLICY_VERSION, mesh.transform, current.volume, config.validation, config.mechanics])).digest('hex')
         let item = session.models.get(mesh.path)
         if (!item) { item = { path: mesh.path, status: 'changed' }; session.models.set(mesh.path, item) }
         item.fingerprint = hash
@@ -145,7 +222,7 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
       }
       for (const [path, item] of session.models) {
         if (seen.has(path)) continue
-        item.controller?.abort(); await item.source?.dispose(); session.models.delete(path)
+        item.controller?.abort(); await item.accepted?.release?.(); await item.source?.dispose(); session.models.delete(path)
       }
       session.error = null
     } catch (error) {
@@ -161,6 +238,8 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
     if (event.type === 'turn/start') start(session.id)
     if (event.type === 'turn/end') {
       const state = sessionFor(session.id)
+      state.editing = false
+      state.opened = true
       state.repairAllowed = event.data?.reason.kind === 'completed'
       const cwd = session.header.cwd
       if (!cwd) return
@@ -176,7 +255,7 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
     const admitted = [...tasks]
     track((async () => {
       await Promise.allSettled(admitted)
-      await Promise.all([...value.models.values()].map(item => item.source?.dispose()))
+      await Promise.all([...value.models.values()].map(async item => { await item.accepted?.release?.(); await item.source?.dispose() }))
     })())
   })
   return {
@@ -191,21 +270,47 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
         const matches = item.checkedFingerprint === item.fingerprint && ['passed', 'review', 'needs_repair'].includes(status)
         return { path: item.path, status, fingerprint: item.fingerprint ?? null, sourceHash: item.sourceHash ?? null,
           report: matches ? item.result : null, previousReport: matches ? null : item.result ?? null,
-          error: item.error ?? null }
+          error: item.error ?? null, acceptedFingerprint: item.accepted?.fingerprint ?? null, requiredMovement: item.required ?? { movements: [] } }
       }) }
 
     },
+    /** Restore accepted source and check existing models once when an idle project opens. */
+    restore(id, cwd, path) {
+      if (closed || !path) return Promise.resolve()
+      const session = sessionFor(id)
+      let item = session.models.get(path)
+      if (!item) { item = { path, status: 'changed' }; session.models.set(path, item) }
+      return track(prepare(id, session, item, cwd).then(() => {
+        if (closed || sessions.get(id) !== session || session.opened || session.editing
+          || (ctx.agents?.get(id) && ctx.agents.get(id).status !== 'idle')) return
+        session.opened = true
+        session.repairAllowed = true
+        return scan(id, cwd, session.generation)
+      }).catch(error => {
+        if (!closed && sessions.get(id) === session && session.models.get(path) === item) {
+          item.status = 'unavailable'; item.error = String(error.message ?? error)
+        }
+      }))
+    },
+    /** Select a verified revision; pending or rejected edits retain the preceding accepted source. */
+    presentation(id, path, source) { return displayedSource(id, path, source)?.state() ?? null },
+    /** Route presentation-only operations to the source identity currently displayed. */
+    displaySource: displayedSource,
+    /** Return the last accepted placement of an immutable imported STL object. */
+    meshPlacement(id, path) { return sessions.get(id)?.models.get(path)?.accepted?.transform ?? null },
     /** Renderer jobs use immutable module URLs and never change viewer selection. */
     requests(id) { return [...(sessions.get(id)?.models.values() ?? [])].flatMap(item => item.request ? [item.request] : []) },
-    /** Accept bounded binary STL only for the still-pending request. */
+    /** Accept bounded STL or named GLB only for the still-pending request. */
     submit(id, requestId, bytes, error) {
       const session = sessions.get(id)
       const item = [...(session?.models.values() ?? [])].find(item => item.request?.id === requestId)
       if (!item || closed) return false
       if (error !== null) { item.status = 'unavailable'; item.error = error.slice(0, 2000); item.request = null; notify(id); repair(id); return true }
-      if (bytes.byteLength > STL_LIMITS.maxBytes) throw new Error('Validation mesh exceeds 20 MiB')
-      parseStl(bytes)
-      enqueue(id, session, item, { ...item.input, bytes }, item.generation)
+      const glb = bytes.byteLength >= 4 && new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true) === 0x46546c67
+      if (bytes.byteLength > (glb ? GLB_MAX_BYTES : STL_LIMITS.maxBytes)) throw new Error('Validation mesh exceeds its format limit')
+      if (glb) validateGlb(bytes)
+      else parseStl(bytes)
+      enqueue(id, session, item, { ...item.input, format: glb ? 'glb' : 'stl', bytes }, item.generation)
       return true
     },
     /** Stop admission, kill children, await scans and jobs, then release snapshots. */
@@ -213,7 +318,7 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
       closed = true
       for (const session of sessions.values()) for (const item of session.models.values()) item.controller?.abort()
       await Promise.allSettled([...tasks])
-      await Promise.all([...sessions.values()].flatMap(session => [...session.models.values()].map(item => item.source?.dispose())))
+      await Promise.all([...sessions.values()].flatMap(session => [...session.models.values()].map(async item => { await item.accepted?.release?.(); await item.source?.dispose() })))
       sessions.clear()
     },
   }

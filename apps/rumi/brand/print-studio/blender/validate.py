@@ -7,7 +7,7 @@ import sys
 
 import bpy
 import bmesh
-from mathutils import Euler, Vector
+from mathutils import Euler, Matrix, Vector
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).parent))
@@ -29,6 +29,41 @@ def validate(request):
     meshes = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH' and not obj.hide_render]
     if not meshes:
         raise ValueError('No mesh geometry to validate')
+    mechanics_meshes = []
+    if 'mechanicsOutput' in request:
+        if len(meshes) > 128:
+            raise ValueError('Mechanical validation supports at most 128 mesh bodies')
+        assembly = request['assembly']
+        names = {part['mesh']: part['id'] for part in assembly['parts']}
+        if len(names) != len(assembly['parts']) or set(names) != {part.name for part in meshes}:
+            raise ValueError('Assembly part mappings must match every imported mesh exactly')
+        graph = bpy.context.evaluated_depsgraph_get()
+        total_triangles = 0
+        for part in meshes:
+            evaluated = part.evaluated_get(graph)
+            mesh = evaluated.to_mesh()
+            bm = bmesh.new()
+            try:
+                mesh.calc_loop_triangles()
+                total_triangles += len(mesh.loop_triangles)
+                if total_triangles > 200000:
+                    raise ValueError('Mechanical validation supports at most 200,000 triangles')
+                bm.from_mesh(mesh)
+                bm.transform(evaluated.matrix_world)
+                if evaluated.matrix_world.determinant() < 0:
+                    bmesh.ops.reverse_faces(bm, faces=list(bm.faces))
+                for vertex in bm.verts:
+                    vertex.co *= factor
+                bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=0.001)
+                bmesh.ops.triangulate(bm, faces=list(bm.faces))
+                bm.verts.ensure_lookup_table()
+                bm.verts.index_update()
+                mechanics_meshes.append(dict(id=names[part.name],
+                    vertices=[list(vertex.co) for vertex in bm.verts],
+                    triangles=[[vertex.index for vertex in face.verts] for face in bm.faces]))
+            finally:
+                bm.free()
+                evaluated.to_mesh_clear()
     bpy.ops.object.select_all(action='DESELECT')
     for obj in meshes:
         obj.select_set(True)
@@ -36,7 +71,13 @@ def validate(request):
     bpy.ops.object.convert(target='MESH')
     bpy.ops.object.join()
     obj = bpy.context.object
-    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    # Bake the full hierarchy, including shear, without decomposing it into local TRS.
+    matrix = obj.matrix_world.copy()
+    obj.data.transform(matrix)
+    if matrix.determinant() < 0:
+        obj.data.flip_normals()
+    obj.parent = None
+    obj.matrix_world = Matrix.Identity(4)
     for vertex in obj.data.vertices:
         vertex.co *= factor
     transform = request['transform']
@@ -53,6 +94,28 @@ def validate(request):
     offset = Vector(tuple(transform['position'][axis] for axis in 'xyz')) - Vector(((low.x+high.x)/2, (low.y+high.y)/2, low.z))
     for vertex in obj.data.vertices:
         vertex.co += offset
+    if 'mechanicsOutput' in request:
+        def placed(point):
+            return list(rotation @ ((Vector(point) - centre) * transform['scale']) + offset)
+        for body in mechanics_meshes:
+            body['vertices'] = [placed(vertex) for vertex in body['vertices']]
+        assembly = json.loads(json.dumps(request['assembly']))
+        for connection in assembly['connections']:
+            if connection['kind'] == 'fixed':
+                continue
+            connection['pivot'] = placed(connection['pivot'])
+            connection['axis'] = list(rotation @ Vector(connection['axis']))
+            if connection['kind'] == 'prismatic':
+                connection['range'] = [value * transform['scale'] for value in connection['range']]
+        sliders = {item['id'] for item in assembly['connections'] if item['kind'] == 'prismatic'}
+        for sequence in assembly.get('sequences', []):
+            for waypoint in sequence['waypoints']:
+                for connection_id in waypoint:
+                    if connection_id in sliders:
+                        waypoint[connection_id] *= transform['scale']
+        for step in assembly['manufacturing'].get('steps', []):
+            step['path'] = [list(rotation @ (Vector(point) * transform['scale'])) for point in step['path']]
+        Path(request['mechanicsOutput']).write_text(json.dumps(dict(bodies=mechanics_meshes, assembly=assembly), allow_nan=False)+'\n')
     # GLB splits vertices at material/normal seams; topology uses positional welding.
     bm = bmesh.new()
     try:

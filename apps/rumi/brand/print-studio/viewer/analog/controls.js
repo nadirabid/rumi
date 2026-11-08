@@ -10,16 +10,33 @@ export function createAnalogPanel(React) {
   return function AnalogPanel({ spec, t, onChange, onRelease }) {
     const [values, setValues] = React.useState(spec.values)
     const current = React.useRef(spec.values), dragging = React.useRef(false)
+    const committed = React.useRef(spec.values), sequence = React.useRef(0), pending = React.useRef(Promise.resolve())
     const locked = spec.frozen || spec.freezeRequested
     const definitions = spec.controls ?? legacyControls(spec.operation).map(control => ({ ...control, label: t(control.label) }))
-    React.useEffect(() => { current.current = spec.values; setValues(spec.values) }, [spec.id])
+    React.useEffect(() => {
+      sequence.current++; committed.current = spec.values; current.current = spec.values; setValues(spec.values)
+      return () => { sequence.current++ }
+    }, [spec.id])
     function update(patch) {
       if (locked) return
       const next = { ...current.current, ...patch }
-      if (onChange(next) === false) return
+      const request = ++sequence.current, outcome = onChange(next)
+      if (outcome === false) return
       current.current = next; setValues(next)
+      if (outcome && typeof outcome.then === 'function') {
+        pending.current = Promise.resolve(outcome).then(accepted => {
+          if (accepted !== false) committed.current = next
+          else if (request === sequence.current) { current.current = committed.current; setValues(committed.current) }
+        }, () => {
+          if (request === sequence.current) { current.current = committed.current; setValues(committed.current) }
+        })
+      } else committed.current = next
     }
-    function release() { dragging.current = false; if (!locked) onRelease(current.current) }
+    function release() {
+      dragging.current = false
+      const request = sequence.current
+      void pending.current.then(() => { if (!locked && request === sequence.current) onRelease(current.current) })
+    }
     function reset(control) {
       return h('button', {
         type: 'button', className: 'av-reset', disabled: locked,

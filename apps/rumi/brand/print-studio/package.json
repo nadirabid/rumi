@@ -29,7 +29,9 @@
     "lib/client.js",
     "lib/THREE-LICENSE.txt",
     "viewer",
-    "blender"
+    "blender",
+    "bullet/runner.js",
+    "bullet/workflow.js"
   ],
   "main": "index.js",
   "icon": "./icon.svg",

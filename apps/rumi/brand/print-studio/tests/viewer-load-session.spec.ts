@@ -10,8 +10,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { applyViewer } from '../viewer/host.js'
+import { assemblyGlb } from './fixtures/assembly-glb.js'
+import { parseGlbModel } from '../viewer/viewport/glb.js'
+import { disposeModel } from '../viewer/viewport/model.js'
+import { generateModule } from '../viewer/generation/export.js'
+import { readMotion } from '../viewer/motion.js'
+import { analyzeMesh } from '../viewer/checks.js'
 
 class LoadReplay extends LlmAdapter {
+  path = 'models/box/model.js'
   requests: GenerateOptions[] = []
   override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     return Promise.resolve({ provider, id: model, name: model })
@@ -20,7 +27,7 @@ class LoadReplay extends LlmAdapter {
     this.requests.push(options)
     if (this.requests.length === 1) {
       const id = ToolCallId('fixture-load')
-      const args = JSON.stringify({ path: 'models/box/model.js' })
+      const args = JSON.stringify({ path: this.path })
       yield { type: 'block-start', index: 0, blockType: 'tool-call' }
       yield { type: 'tool-call-delta', index: 0, id, name: 'viewer_load', argumentsDelta: args }
       yield { type: 'block-end', index: 0, block: { type: 'tool-call', id, name: 'viewer_load', arguments: args } }
@@ -34,16 +41,18 @@ class LoadReplay extends LlmAdapter {
   }
 }
 
-it('delivers rendered load measurements to the next model request in a keyless session', async () => {
+it.each(['javascript', 'glb'])('delivers %s load measurements and movement to the next model request in a keyless session', async (format) => {
   const temporary = await mkdtemp(join(tmpdir(), 'rumi-load-session-'))
   const ctx = new Context(), controller = new AbortController()
   try {
     const root = await realpath(temporary)
     await mkdir(join(root, 'models', 'box'), { recursive: true })
     await writeFile(join(root, 'models', 'box', 'model.js'), 'export const parameters={width:12,angle:0}; export const motionControls=[{kind: "slider",label: "Door",axes:[{key: "angle",min:0,max:90,step:1,reset:0}]}]; export function build(T,p){const m=new T.Mesh(new T.BoxGeometry(p.width,12,2),new T.MeshStandardMaterial());m.rotation.z=p.angle*Math.PI/180;return m}\n')
+    if (format === 'glb') await writeFile(join(root, 'models', 'box', 'model.glb'), assemblyGlb())
     await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
     const harness = await mountAgentLoopTestHarness(ctx)
     const adapter = new LoadReplay()
+    if (format === 'glb') adapter.path = 'models/box/model.glb'
     ctx.effect(() => ctx.llm.registerAdapter(['fixture'], adapter))
     const routes = new Map<string, (request: Request) => Promise<Response>>()
     applyViewer({
@@ -70,11 +79,22 @@ it('delivers rendered load measurements to the next model request in a keyless s
     const renderer = (async () => {
       await request('events')
       const { scene } = await request('state')
+      const source = await routes.get(scene.design.url)!(new Request(`http://fixture${scene.design.url}`))
+      const generated = format === 'javascript'
+        ? await generateModule(await import(/* @vite-ignore */ 'data:text/javascript,' + encodeURIComponent(await source.text())), {})
+        : { bytes: await source.arrayBuffer(), parameters: {} }
+      const model = await parseGlbModel(generated.bytes)
+      let glbFeedback
+      try {
+        glbFeedback = { parameters: { ...generated.parameters, ...model.parameters },
+          motion: readMotion(model.motionDefinitions, model.parameters), report: analyzeMesh(model.positions) }
+      } finally { disposeModel(model.root) }
       await request('feedback', {
         revision: scene.design.revision, url: scene.design.url, transform: scene.design.transform,
         volume: scene.volume, loadStatus: 'ready', parameters: { width: 12, angle: 0 },
         motion: { values: { angle: 0 }, controls: [{ kind: 'slider', label: 'Door', axes: [{ key: 'angle', min: 0, max: 90, step: 1, reset: 0 }] }] },
         report: { status: 'ok', dimensions: { x: 12, y: 12, z: 2 }, checks: [] },
+        ...glbFeedback,
       })
     })()
     agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Show the example box and its measured size.' }] }))
@@ -86,13 +106,17 @@ it('delivers rendered load measurements to the next model request in a keyless s
     if (output?.type !== 'text') throw new Error('The next model request lacks the viewer_load result')
     const normalized = output.text.replaceAll(root, '<project>').replace(/\/api\/print-studio\/viewer\/source\/[^/]+/g, '/api/print-studio/viewer/source/<revision>')
     const result = JSON.parse(normalized)
-    expect(result).toMatchObject({ load: { status: 'ready' }, design: {
-      parameters: { width: 12, angle: 0 }, motion: { values: { angle: 0 } }, report: { dimensions: { x: 12, y: 12, z: 2 } },
+    if (format === 'javascript') expect(result).toMatchObject({ load: { status: 'ready' }, design: {
+      parameters: { width: 12, angle: 0 }, report: { dimensions: { x: 12, y: 12, z: 2 } },
     } })
+    if (format === 'javascript') expect(result.design).not.toHaveProperty('motion')
     const events = agent.session.snapshotEvents()
     expect(events.filter(event => event.type === 'tool/call').map(event => event.data.name)).toEqual(['viewer_load'])
     expect(events.filter(event => event.type === 'turn/end').map(event => event.data.reason)).toEqual([{ kind: 'completed' }])
-    expect(result).toMatchInlineSnapshot(`
+    if (format === 'glb') {
+      expect({ load: result.load.status, format: result.design.format,
+        motion: result.design.motion, parameters: result.design.parameters }).toMatchSnapshot()
+    } else expect(result).toMatchInlineSnapshot(`
       {
         "design": {
           "analog": null,
@@ -101,39 +125,43 @@ it('delivers rendered load measurements to the next model request in a keyless s
           "error": null,
           "format": "javascript",
           "highlight": null,
-          "motion": {
-            "controls": [
-              {
-                "axes": [
-                  {
-                    "key": "angle",
-                    "max": 90,
-                    "min": 0,
-                    "reset": 0,
-                    "step": 1,
-                  },
-                ],
-                "kind": "slider",
-                "label": "Door",
-              },
-            ],
-            "values": {
-              "angle": 0,
-            },
-          },
           "parameters": {
             "angle": 0,
             "width": 12,
           },
           "path": "<project>/models/box/model.js",
           "report": {
-            "checks": [],
+            "bounds": {
+              "max": {
+                "x": 6,
+                "y": 6,
+                "z": 1,
+              },
+              "min": {
+                "x": -6,
+                "y": -6,
+                "z": -1,
+              },
+            },
+            "checks": [
+              {
+                "code": "blender_validation",
+                "data": {},
+                "severity": "pending",
+              },
+            ],
             "dimensions": {
               "x": 12,
               "y": 12,
               "z": 2,
             },
-            "status": "ok",
+            "status": "review",
+            "suggested": {
+              "rotate": false,
+              "scale": null,
+            },
+            "triangleCount": 12,
+            "volume": null,
           },
           "revision": 1,
           "transform": {
@@ -184,7 +212,7 @@ it('delivers rendered load measurements to the next model request in a keyless s
         "objectCount": 0,
         "objects": [],
         "selectedModel": "models/box/model.js",
-        "status": "ok",
+        "status": "review",
         "volume": null,
         "warnings": 0,
       }

@@ -129,3 +129,16 @@ it('binds temporary regions to a source instance and invalidates them after edit
   const current = f.source.state()
   expect(f.source.highlight({ ...request, ...current, label: '', blobs: [] }).status).toBe('cleared')
 })
+
+
+it('pins an accepted snapshot across cache eviction and releases its routes after the last retain', async () => {
+  const f = await fixture(), initial = f.source.state()
+  const release = f.source.retainSnapshot()
+  for (let index = 0; index < 10; index++) {
+    await writeFile(join(f.directory, 'part.js'), `export const size = ${index}`)
+    await f.source.poll(); await f.source.poll()
+  }
+  expect(f.routes.has(initial.url)).toBe(true)
+  await release(); await release()
+  expect(f.routes.has(initial.url)).toBe(false)
+})

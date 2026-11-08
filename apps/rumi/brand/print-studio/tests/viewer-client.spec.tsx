@@ -375,6 +375,10 @@ it('shows only a discreet error dot, retaining unresolved findings until a fresh
   view.setScene({ ...base, validation: { error: null, models: [{ status: 'unavailable' }] } })
   await settle(2000)
   expect(screen.getByLabelText(en.validationUnavailable)).toBeTruthy()
+  view.setScene({ ...base, validation: { error: null, models: [{ status: 'review', report: { status: 'review', mechanics: { status: 'review' } } }] } })
+  await settle(2000)
+  expect(screen.getByLabelText(en.validationMechanicsReview).className).toBe('pv-validation-dot')
+  expect(screen.queryByText(en.validationMechanicsReview)).toBeNull()
 })
 
 it('keeps movement controls in their own area across model reloads without opening an edit', async () => {

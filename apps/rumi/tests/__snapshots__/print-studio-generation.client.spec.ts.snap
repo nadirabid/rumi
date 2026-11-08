@@ -1,0 +1,46 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`delivers glb load measurements and movement to the next model request in a keyless session 1`] = `
+{
+  "format": "glb",
+  "load": "ready",
+  "motion": {
+    "controls": [
+      {
+        "axes": [
+          {
+            "key": "joint0",
+            "max": 90,
+            "min": -90,
+            "reset": 0,
+            "step": 1,
+          },
+        ],
+        "kind": "slider",
+        "label": "Right door",
+      },
+      {
+        "axes": [
+          {
+            "key": "joint1",
+            "max": 10,
+            "min": 0,
+            "reset": 0,
+            "step": 0.1,
+          },
+        ],
+        "kind": "slider",
+        "label": "Slide",
+      },
+    ],
+    "values": {
+      "joint0": 0,
+      "joint1": 0,
+    },
+  },
+  "parameters": {
+    "joint0": 0,
+    "joint1": 0,
+  },
+}
+`;

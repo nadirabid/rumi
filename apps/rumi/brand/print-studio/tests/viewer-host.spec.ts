@@ -1,4 +1,7 @@
 /** A session's scene is edited by commands; geometry is read once and never rewritten by placement. */
+import { createHash } from 'node:crypto'
+import { createSource } from '../viewer/source.js'
+import { validationState } from '../viewer/validation-state.js'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm, symlink } from 'node:fs/promises'
@@ -65,7 +68,7 @@ it('exposes Blender preview fields on the controls tool', () => {
   expect(tool.parameters.properties).toMatchObject({ finish: { enum: ['parameters', 'blender'] }, original: { type: 'string' }, edit: { type: 'string' } })
 })
 
-function fixture(source: Uint8Array = stl(box()), cwd = '/workspace', loadTimeoutMs = 1) {
+function fixture(source: Uint8Array = stl(box()), cwd = '/workspace', loadTimeoutMs = 1, validationConfig?: { validationStateDirectory: string }) {
   const routes = new Map<string, (request: Request) => Promise<Response>>()
   const contexts = new Map<string, { text(context: object): string }>()
   const tools = new Map<string, any>() // The fixture captures dynamically registered JavaScript tool definitions.
@@ -87,7 +90,7 @@ function fixture(source: Uint8Array = stl(box()), cwd = '/workspace', loadTimeou
   }
   const diagnosticsDirectory = mkdtempSync(join(tmpdir(), 'rumi-viewer-diagnostics-'))
   diagnosticRoots.push(diagnosticsDirectory)
-  applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs)
+  applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs, validationConfig)
   owner.provide('systemPrompt', {
     getContextOrder: () => 210, getSectionOrder: () => 2600,
     section: () => () => {},
@@ -111,6 +114,11 @@ function fixture(source: Uint8Array = stl(box()), cwd = '/workspace', loadTimeou
     state: async (sessionId = 'session-a') => (await (await routes.get('/api/print-studio/viewer/state')!(
       new Request(`http://rumi/api/print-studio/viewer/state?sessionId=${sessionId}`),
     )).json()).scene,
+    shapeFeedback: (id: string, url: string, body: object) => routes.get('/api/print-studio/viewer/shape-feedback')!(new Request(
+      'http://rumi/api/print-studio/viewer/shape-feedback?sessionId=session-a', {
+        method: 'POST', body: JSON.stringify({ id, url, ...body }),
+      },
+    )),
     dispose: () => owner.fiber.dispose(),
   }
 }
@@ -543,11 +551,7 @@ it.each(['viewer_hidden', 'render_failed'])('reports control %s immediately and 
     })
     let id: string
     await vi.waitFor(async () => { id = (await f.state()).design.analog?.id; expect(id).toBeTruthy() })
-    const feedback = (body: object) => f.routes.get('/api/print-studio/viewer/shape-feedback')!(new Request(
-      'http://rumi/api/print-studio/viewer/shape-feedback?sessionId=session-a', {
-        method: 'POST', body: JSON.stringify({ id, url: design.url, ...body }),
-      },
-    ))
+    const feedback = f.shapeFeedback.bind(null, id!, design.url)
     expect((await feedback({ status, error: status === 'render_failed' ? 'Undeclared parameter' : undefined })).status).toBe(200)
     expect(await pending).toMatchObject({ status: 'not_rendered', reason: status, error: { kind: status } })
     expect((await f.state()).design.analog.rendered).toBe(false)
@@ -575,11 +579,7 @@ it('rejects freezing a Blender preview when its preserved original changed', asy
     })
     let id: string
     await vi.waitFor(async () => { id = (await f.state()).design.analog?.id; expect(id).toBeTruthy() })
-    const feedback = (body: object) => f.routes.get('/api/print-studio/viewer/shape-feedback')!(new Request(
-      'http://rumi/api/print-studio/viewer/shape-feedback?sessionId=session-a', {
-        method: 'POST', body: JSON.stringify({ id, url: design.url, ...body }),
-      },
-    ))
+    const feedback = f.shapeFeedback.bind(null, id!, design.url)
     await feedback({ status: 'rendered' }); expect(await pending).toMatchObject({ status: 'rendered' })
     await writeFile(original, 'changed')
     const freezing = f.run('viewer_controls', { action: 'freeze', id })
@@ -717,5 +717,83 @@ it('ignores stale feedback and supersedes a load when its source changes', async
     expect(result.load.status).toBe('superseded')
     expect(result.load.requested.url).toBe(scene.design.url)
     expect(result.design.report).toBeNull()
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+
+it('shows unvalidated models without requiring a passing report', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-candidate-'))
+  const f = fixture(undefined, root, 1000, { validationStateDirectory: join(root, 'validation-state') })
+  try {
+    await mkdir(join(root, 'models/car'), { recursive: true })
+    await writeFile(join(root, 'models/car/model.js'), 'export function build(T) { return new T.Group() }')
+    const loaded = await f.run('viewer_load', { path: 'models/car/model.js' })
+    expect(loaded.load.status).toBe('timeout')
+    expect((await f.state()).design.path).toContain('models/car/model.js')
+    const context = await f.meshState()
+    expect(context.design.path).toContain('models/car/model.js')
+    expect(context.displayedDesign.path).toContain('models/car/model.js')
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+
+it('routes pointing, highlights and feedback to current edits regardless of validation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-accepted-pointing-'))
+  const directory = join(root, 'validation-state')
+  const f = fixture(undefined, root, 1000, { validationStateDirectory: directory })
+  try {
+    const path = join(root, 'models/car/model.js')
+    await mkdir(join(root, 'models/car'), { recursive: true })
+    await writeFile(path, 'export const revision = "accepted"')
+    const source = await createSource(f.ctx, path, root)
+    source.transform({ position: { x: 10, y: 0, z: 0 } })
+    const initial = source.state()
+    const fingerprint = createHash('sha256').update(JSON.stringify([3, initial.contentHash, initial.transform, null, undefined, undefined])).digest('hex')
+    const storage = validationState(directory, root, 'models/car/model.js')
+    await storage.write({ movements: [] }, { fingerprint, state: initial, volume: null, source: source.snapshot() })
+    await source.dispose()
+    expect((await f.state()).design.contentHash).toBe(initial.contentHash)
+    expect((await f.run('viewer_load', { path: 'models/car/model.js' })).load.status).toBe('timeout')
+    await writeFile(path, 'export const revision = "candidate"')
+    await f.state()
+    const displayed = (await f.state()).design
+    expect(displayed.contentHash).not.toBe(initial.contentHash)
+    expect((await f.meshState()).design.contentHash).not.toBe(initial.contentHash)
+    const pending = f.run('viewer_cursor_snapshot')
+    let response: any // Runtime route responses are JSON shared with the JavaScript client.
+    await expect.poll(async () => {
+      response = await (await f.request('/api/print-studio/viewer/state?sessionId=session-a')).json()
+      return response.cursorRequest?.id
+    }).toBeTruthy()
+    const identity = { sceneRevision: response.scene.revision, design: {
+      path: displayed.path, revision: displayed.revision, url: displayed.url, transform: displayed.transform,
+    } }
+    const blob = { center: [0, 0, 0], radii: [2, 2, 2], rotationDegrees: [0, 0, 0] }
+    const snapshot = { status: 'captured', capturedAt: '2026-11-03T20:00:00.000Z', identity,
+      region: { objectId: null, partPath: ['body'], faceIndex: 0, worldPoint: [0, 0, 0], worldRadius: 2, modelLocalBlob: blob },
+      camera: { position: [0, -20, 20], target: [0, 0, 0], up: [0, 0, 1], fov: 40, aspect: 1 }, image: 'data:image/png;base64,cG5n' }
+    const send = (route: string, value: object) => f.routes.get(`/api/print-studio/viewer/${route}`)!(new Request(`http://rumi/api/print-studio/viewer/${route}?sessionId=session-a`, { method: 'POST', body: JSON.stringify(value) }))
+    expect((await send('cursor', { requestId: response.cursorRequest.id, snapshot })).status).toBe(200)
+    expect((await pending).status).toBe('captured')
+    const highlighting = f.run('viewer_highlight', { path: displayed.path, revision: displayed.revision, url: displayed.url, label: 'Body', blobs: [blob] })
+    let highlighted: any // Viewer route is an untyped JSON boundary in this fixture.
+    await expect.poll(async () => { highlighted = (await f.state()).design; return highlighted.highlight?.id }).toBeTruthy()
+    const report = { status: 'ok', dimensions: { x: 2, y: 2, z: 2 }, checks: [] }
+    expect((await send('feedback', { revision: displayed.revision, url: displayed.url, transform: displayed.transform, report, highlightId: highlighted.highlight.id })).status).toBe(200)
+    expect((await highlighting).status).toBe('rendered')
+    expect((await f.state()).design.report).toEqual(report)
+    expect((await f.meshState()).design.report).toEqual(report)
+    await f.run('viewer_camera', { azimuth: 20, elevation: 30 })
+    expect((await f.state()).design.camera).toMatchObject({ azimuth: 20, elevation: 30 })
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it('shows imported STL objects before validation completes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-stl-candidate-'))
+  const f = fixture(undefined, root, 1000, { validationStateDirectory: join(root, 'validation-state') })
+  try {
+    await f.run('mesh_open', { path: 'box.stl' })
+    expect((await f.state()).objects).toHaveLength(1)
+    expect((await f.meshState()).objects).toHaveLength(1)
   } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
 })

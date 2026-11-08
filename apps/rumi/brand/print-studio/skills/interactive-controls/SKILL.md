@@ -11,21 +11,38 @@ Use `viewer_controls` with explicit `controls`, `values`, and the current design
 
 ## Persistent movement controls
 
-Doors, wheels, hinges, and other movable features use model-owned movement controls instead of a temporary `viewer_controls` edit. Export `motionControls` from the JavaScript model using the same labeled slider/pad/curve declarations below, bound to numeric entries in `parameters`. The viewer discovers these declarations on load and keeps them at the bottom-right as long as the loaded model declares them. Preserve the declarations and their bindings when repairing or replacing the model; remove a declaration only when its movable feature is removed. Do not infer motion from parameter names.
+Doors, wheels, hinges, and other movable features use model-owned movement controls instead of a temporary `viewer_controls` edit. Export `motionControls` from the JavaScript model using the same labeled slider/pad/curve declarations below, bound to numeric entries in `parameters`. The viewer converts the generated model to GLB and derives movement from its assembly joints, using these declarations for labels and parameter bindings. It discovers these declarations on load and keeps them at the bottom-right as long as the loaded model declares them. Preserve the declarations and their bindings when repairing or replacing the model; remove a declaration only when its movable feature is removed. Declare the corresponding physical mechanisms as well; do not infer motion from parameter names or treat preview transforms as working connectors.
 
 ```js
 export const parameters = { wheelSpin: 0, doorAngle: 0 }
 export const motionControls = [
-  { kind: 'slider', label: 'Wheels', axes: [
-    { key: 'wheelSpin', min: -360, max: 360, step: 1, reset: 0 },
+  { kind: 'slider', label: 'Wheel', axes: [
+    { key: 'wheelSpin', min: -180, max: 180, step: 1, reset: 0 },
   ] },
-  { kind: 'slider', label: 'Doors', axes: [
+  { kind: 'slider', label: 'Door', axes: [
     { key: 'doorAngle', min: 0, max: 100, step: 1, reset: 0 },
   ] },
 ]
+export const assembly = {
+  version: 1, root: 'frame',
+  parts: [{ id: 'frame', mesh: 'Frame' }, { id: 'wheel', mesh: 'Wheel' }, { id: 'door', mesh: 'Door' }],
+  connections: [
+    { id: 'wheel-axle', parent: 'frame', child: 'wheel', kind: 'revolute',
+      axis: [1, 0, 0], pivot: [0, 0, 12], range: [-180, 180], control: 'wheelSpin' },
+    { id: 'door-hinge', parent: 'frame', child: 'door', kind: 'revolute',
+      axis: [0, 0, 1], pivot: [10, 0, 12], range: [0, 100], control: 'doorAngle' },
+  ],
+  manufacturing: { mode: 'print-in-place' },
+}
 ```
 
-Movement changes only the local preview pose, never the saved parameters or validation input, and needs no freeze/save/close. The panel remains visible but disabled while a temporary edit owns the preview; the movement pose returns after that edit ends. Compatible pose values survive model revisions and switching between recent models while the viewer is mounted; reopening the viewer starts from saved values. A posed preview cannot supply a source-bound cursor edit: reset the movement controls to the saved pose first. `viewer_load` feedback exposes the discovered declarations under `design.motion`. GLB does not yet expose these JavaScript parameter bindings. Animation does not establish printable joint mechanics.
+The builder must return uniquely named physical meshes matching every `assembly.parts` entry, with real captive connectors. Add every separate axle, pin and retaining cap to the assembly rather than leaving it implicit. The export binds every mesh exactly once and checks every movement control against its connection. A shared control can bind several connections, but coupled motion needs supported sequence coverage before acceptance. Read [physical movement declarations](../blender-modeling/SKILL.md#declare-physical-movement) for the complete assembly contract.
+
+Control values represent degrees for rotation or millimetres for translation. The build may convert degrees to radians but must not apply an arbitrary gain. Connection ranges are relative to saved parameters and must cover `[axis.min - savedValue, axis.max - savedValue]`; for a door saved at 30° with a 0–100° control, declare `range: [-30, 70]`. The validation export records these bounds in `rumiMotionRanges`. Missing declarations and incomplete ranges block acceptance. Do not remove controls or reduce movement to conceal a failed check.
+
+Movement changes only the local preview pose, never saved parameters or validation input, and needs no freeze/save/close. Controls remain visible but disabled while a temporary edit owns the preview. Compatible pose values survive revisions and switching between recent models while the viewer is mounted; reopening starts from saved values. Reset movement before requesting source-bound cursor edits. `viewer_load` feedback exposes rendered declarations under `design.motion`; inspect this feedback before claiming controls are visible. Validation tests the saved physical assembly through Blender and Bullet. Animation and simulation do not certify material strength or print readiness.
+
+For a GLB, publish the physical `rumiAssembly` described in `blender-modeling`; the viewer generates movement sliders directly from its revolute and prismatic joints. Use each connection’s `control` for a short label in the person’s language, or omit it to use the child mesh name. Keep pivots and axes in saved-world millimetres, Z up. The viewer moves descendants with their parents and preserves fixed attachments. It supports trees with up to 12 independent controls; unsupported bindings remain visible as geometry with a diagnostic in the viewer report. Do not create a separate JavaScript model just to animate a GLB. These sliders preview declared motion, not verified physical feasibility.
 
 ## Declare controls
 

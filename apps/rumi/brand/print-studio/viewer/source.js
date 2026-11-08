@@ -19,6 +19,55 @@ function inside(root, path) {
 }
 
 /**
+ * Own feedback and highlights for a fixed accepted source identity without editing its files.
+ * @param {object} initial Source state whose immutable routes are retained by the caller.
+ * @returns {object} Presentation-only state, feedback, highlight, and camera operations.
+ */
+export function createSourcePresentation(initial) {
+  const state = structuredClone(initial)
+  return {
+    state: () => ({ ...state }),
+    highlight(value) {
+      if (value.path !== state.path || value.revision !== state.revision || value.url !== state.url || state.error) {
+        return { status: 'stale_model', message: 'Read displayedDesign in the current meshState context before highlighting again.' }
+      }
+      return applyHighlight(state, value)
+    },
+    feedback: value => applyFeedback(state, value),
+    camera(value) { state.camera = { ...value, id: randomUUID() } },
+  }
+}
+
+function applyHighlight(state, value) {
+  const next = normalizeHighlight(value)
+  state.highlight = next.blobs.length ? { ...next, id: randomUUID() } : null
+  return { status: state.highlight ? 'queued' : 'cleared', highlight: state.highlight,
+    message: 'Presentation state updated; viewer display and user confirmation are not acknowledged.' }
+}
+
+function applyFeedback(state, value) {
+  if (value.revision !== state.revision || value.url !== state.url
+    || JSON.stringify(value.transform) !== JSON.stringify(state.transform)) return false
+  if (value.report) {
+    const report = value.report
+    if (!['ok', 'review', 'blocked'].includes(report.status)
+      || !report.dimensions || !['x', 'y', 'z'].every(axis => Number.isFinite(report.dimensions[axis]) && report.dimensions[axis] >= 0)
+      || !Array.isArray(report.checks) || report.checks.length > 100
+      || !report.checks.every(check => check && typeof check.code === 'string' && ['ok', 'warning', 'error', 'pending'].includes(check.severity))) {
+      throw new Error('Invalid model measurement report')
+    }
+  }
+  const parameters = value.parameters === undefined ? state.parameters : parameterValues(value.parameters)
+  const motion = value.motion ? readMotion(value.motion.controls, parameters, parameterValues(value.motion.values)) : null
+  if (motion) state.motion = motion
+  else delete state.motion
+  state.report = value.report ?? null
+  if (value.report) state.parameters = parameters
+  state.error = value.error ? { kind: 'build', message: String(value.error).slice(0, 2000) } : null
+  return true
+}
+
+/**
  * Own source snapshots and their routes for one conversation.
  * @param {object} ctx - Host context providing connection routes.
  * @param {string} path - Absolute entry file.
@@ -33,6 +82,15 @@ export async function createSource(ctx, path, workspace) {
   let sourceError = null
   let buildError = null
   const snapshots = []
+  let currentSnapshot
+
+  async function pruneSnapshots() {
+    const unretained = snapshots.filter(snapshot => snapshot.references === 0)
+    for (const snapshot of unretained.slice(0, Math.max(0, unretained.length - 8))) {
+      snapshots.splice(snapshots.indexOf(snapshot), 1)
+      await snapshot.dispose()
+    }
+  }
   const state = { path, format, revision: 0, url: null, transform: normalizePlacement(), report: null, camera: null, highlight: null, analog: null, contentHash: null, parameters: {} }
 
   async function scan() {
@@ -102,7 +160,8 @@ export async function createSource(ctx, path, workspace) {
           })
         }
       }, 'print viewer: source snapshot')
-      snapshots.push(disposeSnapshot)
+      currentSnapshot = { url: `${prefix}/${entryName.split('/').map(encodeURIComponent).join('/')}`, dispose: disposeSnapshot, references: 0 }
+      snapshots.push(currentSnapshot)
       candidate = null
       hash = next.hash
       snapshotFiles = next.files
@@ -116,7 +175,7 @@ export async function createSource(ctx, path, workspace) {
       sourceError = null
       buildError = null
       state.report = null
-      while (snapshots.length > 8) await snapshots.shift()()
+      await pruneSnapshots()
     } catch (error) {
       if (closed) return
       sourceError = { kind: 'source', message: error instanceof Error ? error.message : String(error) }
@@ -128,7 +187,7 @@ export async function createSource(ctx, path, workspace) {
     yield async () => {
       closed = true
       await pending
-      await Promise.all(snapshots.splice(0).map(release => release()))
+      await Promise.all(snapshots.splice(0).map(snapshot => snapshot.dispose()))
     }
     const project = await realpath(workspace)
     const entry = await realpath(path)
@@ -143,6 +202,21 @@ export async function createSource(ctx, path, workspace) {
   await dispose
   return {
     state: () => ({ ...state, error: sourceError ?? buildError }),
+    /** Retain the current immutable routes until the returned release operation settles. */
+    retainSnapshot() {
+      if (closed || !currentSnapshot) throw new Error('Model source is closed')
+      const snapshot = currentSnapshot
+      snapshot.references++
+      let released = false
+      return async () => {
+        if (released) return
+        released = true
+        snapshot.references--
+        if (!closed) await pruneSnapshots()
+      }
+    },
+    /** Copy the current immutable files for validation-owned recovery storage. */
+    snapshot: () => ({ entry: entryName, format, files: [...snapshotFiles].map(([name, bytes]) => [name, bytes.slice()]) }),
     snapshotBytes: () => format === 'glb' ? snapshotFiles.get(entryName).slice() : null,
     poll() {
       if (closed) return Promise.resolve()
@@ -159,10 +233,7 @@ export async function createSource(ctx, path, workspace) {
         return { status: 'stale_model', message: 'Read the current meshState context and resolve model errors before highlighting again.' }
       }
       if (state.analog?.operation === 'cut') return { status: 'active_cut', message: 'The cut owns its continuous plane guide. Finish or discard this edit before adding a different region highlight.' }
-      const next = normalizeHighlight(value)
-      state.highlight = next.blobs.length ? { ...next, id: randomUUID() } : null
-      return { status: state.highlight ? 'queued' : 'cleared', highlight: state.highlight,
-        message: 'Presentation state updated; viewer display and user confirmation are not acknowledged.' }
+      return applyHighlight(state, value)
     },
     shape(value) {
       if (value.path !== state.path || value.revision !== state.revision || value.url !== state.url || sourceError || buildError || candidate) throw new Error('Model changed; read the current meshState context again')
@@ -214,24 +285,7 @@ export async function createSource(ctx, path, workspace) {
     },
     camera(value) { state.camera = { ...value, id: randomUUID() } },
     feedback(value) {
-      if (value.revision !== state.revision || value.url !== state.url
-        || JSON.stringify(value.transform) !== JSON.stringify(state.transform)) return
-      if (value.report) {
-        const report = value.report
-        if (!['ok', 'review', 'blocked'].includes(report.status)
-          || !report.dimensions || !['x', 'y', 'z'].every(axis => Number.isFinite(report.dimensions[axis]) && report.dimensions[axis] >= 0)
-          || !Array.isArray(report.checks) || report.checks.length > 100
-          || !report.checks.every(check => check && typeof check.code === 'string' && ['ok', 'warning', 'error', 'pending'].includes(check.severity))) {
-          throw new Error('Invalid model measurement report')
-        }
-      }
-      const parameters = value.parameters === undefined ? state.parameters : parameterValues(value.parameters)
-      const motion = value.motion ? readMotion(value.motion.controls, parameters, parameterValues(value.motion.values)) : null
-      if (motion) state.motion = motion
-      else delete state.motion
-      state.report = value.report ?? null
-      if (value.report) state.parameters = parameters
-      buildError = value.error ? { kind: 'build', message: String(value.error).slice(0, 2000) } : null
+      if (applyFeedback(state, value)) buildError = state.error
     },
     dispose,
   }

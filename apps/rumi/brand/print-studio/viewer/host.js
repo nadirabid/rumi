@@ -14,6 +14,7 @@ import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
 import { analyzeMesh } from './checks.js'
 import { createHistory } from './document.js'
 import { STL_LIMITS, encodeStl, parseStl } from './stl.js'
+import { GLB_MAX_BYTES } from './glb.js'
 import { placeMesh } from './transform.js'
 
 import { createViewerDiagnostics } from './diagnostics.js'
@@ -209,6 +210,8 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         })) }
     },
   }) : null
+  const displaySource = record => record.source
+  const displayIdentity = record => cursorIdentity({ ...record, source: displaySource(record) })
   const cursors = createCursorRequests(sessionId => events.notify(sessionId))
   const captureJobs = new Set()
   ctx.inject(['systemPrompt'], scoped => {
@@ -218,7 +221,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         if (!agent) return ''
         const record = sessions.get(agent.session.id)
         return JSON.stringify({ meshState: record
-          ? { ...sceneReport(record), validation: validation?.read(agent.session.id), workingModels: focus.paths(agent.session.id) }
+          ? { ...sceneReport(record), ...(validation ? { displayedDesign: record.source?.state() ?? null } : {}), validation: validation?.read(agent.session.id), workingModels: focus.paths(agent.session.id) }
           : { status: 'unavailable', reason: 'viewer_not_initialized', validation: validation?.read(agent.session.id) } })
       },
     }), 'print viewer: live mesh context')
@@ -334,6 +337,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       if (path) await loadSource(record, cwd, path, saved?.volume)
     }
     await record.source?.poll()
+    await validation?.restore(sessionId, cwd, record.selectedModel)
     loads.update(sessionId, loadIdentity(record), record.source?.state().error?.kind === 'source'
       ? { status: 'source_failed', error: record.source.state().error } : undefined)
     record.catalogError = null
@@ -357,10 +361,11 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       try { await discover(sessionId, record) }
       catch (error) { record.catalogError = String(error) }
     })
-    if (receipts.has(sessionId)) diagnostics.record(sessionId, 'viewer.state_delivered', { highlightId: record.source?.state().highlight?.id ?? null })
+    if (receipts.has(sessionId)) diagnostics.record(sessionId, 'viewer.state_delivered', { highlightId: displaySource(record)?.state().highlight?.id ?? null })
+    const displayed = sceneState(record)
     return json({ validationRequests: validation?.requests(sessionId) ?? [], cursorRequest: cursors.read(sessionId), scene: {
       validation: validation?.read(sessionId),
-      ...sceneState(record), design: record.source?.state() ?? null,
+      ...displayed, design: record.source?.state() ?? null,
       models: record.models ?? [], selectedModel: record.selectedModel ?? null,
       workingModels: focus.paths(sessionId),
       catalogFailed: Boolean(record.catalogError),
@@ -397,7 +402,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       if (!id || !job || !validation) return json({ error: 'validation_not_found' }, 404)
       try {
         const bytes = new Uint8Array(await request.arrayBuffer())
-        if (bytes.byteLength > STL_LIMITS.maxBytes) return json({ error: 'mesh_too_large' }, 413)
+        if (bytes.byteLength > GLB_MAX_BYTES) return json({ error: 'mesh_too_large' }, 413)
         const error = request.headers.get('content-type') === 'text/plain' ? new TextDecoder().decode(bytes) : null
         return validation.submit(id, job, bytes, error) ? json({ ok: true }) : json({ error: 'stale_validation' }, 409)
       } catch (_error) { return json({ error: 'invalid_validation_mesh' }, 400) }
@@ -437,7 +442,8 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
     path: `${ROUTE}/feedback`, methods: ['POST'], requestBody: 'buffered',
     fetch: async (request) => {
       const sessionId = new URL(request.url).searchParams.get('sessionId')
-      const source = sessions.get(sessionId)?.source
+      const displayedRecord = sessions.get(sessionId)
+      const source = displayedRecord && displaySource(displayedRecord)
       if (!source) return json({ error: 'preview_not_found' }, 404)
       const body = await request.text()
       if (body.length > 32_000) return json({ error: 'feedback_too_large' }, 413)
@@ -496,8 +502,8 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       return serialize(record, async () => {
         await record.source?.poll()
         try {
-          const snapshot = record.source?.state().error ? { status: 'stale_view' } : value.snapshot
-          const accepted = cursors.deliver(sessionId, value.requestId, snapshot, cursorIdentity(record))
+          const snapshot = displaySource(record)?.state().error ? { status: 'stale_view' } : value.snapshot
+          const accepted = cursors.deliver(sessionId, value.requestId, snapshot, displayIdentity(record))
           return json({ accepted }, accepted ? 200 : 409)
         } catch (_error) { return json({ error: 'invalid_snapshot' }, 400) }
       })
@@ -525,7 +531,8 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       captureRequest: async ({ sessionId, requestedAt, signal }) => {
         if (!sessions.has(sessionId)) return []
         const record = sessions.get(sessionId)
-        const selectionAtSpeech = { path: record.selectedModel ?? null, revision: record.source?.state().revision ?? null }
+        const displayed = displaySource(record)?.state()
+        const selectionAtSpeech = { path: record.selectedModel ?? null, revision: displayed?.revision ?? null }
         const { image, ...snapshot } = JSON.parse(await captureReference(sessionId, signal))
         return [{ type: 'text', text: JSON.stringify({
           reference: 'cursor-at-start-of-spoken-request', requestedAt, selectionAtSpeech, snapshot,
@@ -540,8 +547,8 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
     const capture = (async () => {
         const record = sessions.get(sessionId)
         if (!record) return JSON.stringify({ status: 'viewer_unavailable' })
-        const identity = await serialize(record, async () => { await record.source?.poll(); return cursorIdentity(record) })
-        if (record.source?.state().error) return JSON.stringify({ status: 'stale_view' })
+        const identity = await serialize(record, async () => { await record.source?.poll(); return displayIdentity(record) })
+        if (displaySource(record)?.state().error) return JSON.stringify({ status: 'stale_view' })
         const snapshot = await cursors.request(sessionId, identity, signal, refinement)
         signal.throwIfAborted()
         if (snapshot.status !== 'captured') return JSON.stringify(snapshot)
@@ -608,6 +615,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       + 'Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. '
       + 'Self-contained static GLB only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. '
       + 'Legacy .js/.mjs entries exporting synchronous build(THREE) remain supported in millimetres and Z up. '
+      + 'Saved models display immediately; automatic validation and repair run independently of preview visibility. '
       + 'Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.',
     parameters: {
       path: { type: 'string', required: true, description: 'Model entry to bring into view, for example models/helmet/model.glb.' },
@@ -674,7 +682,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_highlight',
-    description: 'Replace temporary Gaussian wireframe regions on the editable model loaded by viewer_load. Read the current meshState context for design.path, revision and url; inspect model source to locate regions. Coordinates are model-local millimetres before viewer_transform, including part transforms. Rotation uses XYZ Euler degrees. Up to eight ellipsoids combine by maximum influence, with a fixed soft fade. All intersected surfaces, including the back, may be highlighted. Empty blobs clears. Does not edit geometry or exports. Waits for the visible viewer to acknowledge the matching highlight. Returns rendered only after acknowledgment; not_rendered or superseded is not success. Rendering is not user confirmation. Use this tool to visually ground region-specific edits and explanations of named parts. Follow the user’s requested action and clarify ambiguous intent; no special confirmation phrase is required. Use clarify-mesh-changes for guidance.',
+    description: 'Replace temporary Gaussian wireframe regions on the editable model loaded by viewer_load. Read displayedDesign in the current meshState context (design when validation is unavailable) for the visible path, revision and url; inspect model source to locate regions. Coordinates are model-local millimetres before viewer_transform, including part transforms. Rotation uses XYZ Euler degrees. Up to eight ellipsoids combine by maximum influence, with a fixed soft fade. All intersected surfaces, including the back, may be highlighted. Empty blobs clears. Does not edit geometry or exports. Waits for the visible viewer to acknowledge the matching highlight. Returns rendered only after acknowledgment; not_rendered or superseded is not success. Rendering is not user confirmation. Use this tool to visually ground region-specific edits and explanations of named parts. Follow the user’s requested action and clarify ambiguous intent; no special confirmation phrase is required. Use clarify-mesh-changes for guidance.',
     parameters: {
       path: { type: 'string', required: true, description: 'Exact design.path from the current meshState context.' },
       revision: { type: 'integer', required: true, description: 'Exact design.revision from the current meshState context.' },
@@ -705,7 +713,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
           exec.signal.throwIfAborted()
           await record.source.poll()
           exec.signal.throwIfAborted()
-          const result = record.source.highlight(args)
+          const result = displaySource(record)?.highlight(args) ?? { status: 'awaiting_validation', message: 'No accepted model is displayed yet.' }
           let receipt = null
           if (result.status === 'queued') {
             receipt = receipts.wait(exec.agent.session.id, result.highlight.id, exec.signal)
@@ -751,7 +759,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_controls',
-    description: 'Open temporary edit sliders, pads, or curves bound to real model values. For persistent doors, wheels, and other movable parts, export motionControls from the JavaScript model instead; read interactive-controls. Movement controls stay at the bottom-right and do not use this edit lifecycle. Read interactive-controls first. Supply controls with labels, axis keys, ranges, steps and reset values, plus initial values. operation parameters binds exported parameters of a JavaScript model build(THREE, parameters); one key can drive multiple features such as both eyes. Other operations bind GLB deformation values; read analog-shaping for their geometry. If a requested parameter is not exposed, prepare a faithful parametric model before opening controls; never claim a cosmetic label is a working binding. Open controls before making a requested user adjustment. Only rendered confirms visibility. Freeze captures the latest visible values. For final parameter models, save persists frozen values and closes the edit. For a temporary parameter preview of an edit to an existing model, set finish to blender, provide the preserved original and semantic edit recipe, then freeze and apply the values to the original in Blender, check printability, publish and load the result. For GLB deformations, apply the frozen recipe through Blender and load the saved revision. Close cancels and restores the saved preview. Preserve unrelated features and the original model.',
+    description: 'Open temporary edit sliders, pads, or curves bound to real model values. For persistent doors, wheels, and other movable parts, use the GLB assembly joints or export motionControls from the JavaScript model instead; read interactive-controls. Movement controls stay at the bottom-right and do not use this edit lifecycle. Read interactive-controls first. Supply controls with labels, axis keys, ranges, steps and reset values, plus initial values. operation parameters binds exported parameters of a JavaScript model build(THREE, parameters); one key can drive multiple features such as both eyes. Other operations bind GLB deformation values; read analog-shaping for their geometry. If a requested parameter is not exposed, prepare a faithful parametric model before opening controls; never claim a cosmetic label is a working binding. Open controls before making a requested user adjustment. Only rendered confirms visibility. Freeze captures the latest visible values. For final parameter models, save persists frozen values and closes the edit. For a temporary parameter preview of an edit to an existing model, set finish to blender, provide the preserved original and semantic edit recipe, then freeze and apply the values to the original in Blender, check printability, publish and load the result. For GLB deformations, apply the frozen recipe through Blender and load the saved revision. Close cancels and restores the saved preview. Preserve unrelated features and the original model.',
     parameters: {
       action: { type: 'string', required: true, enum: ['open', 'freeze', 'save', 'close'] },
       id: { type: 'string', description: 'Current design.analog.id for freeze or close.' },
@@ -866,8 +874,9 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     isConcurrencySafe: () => false, timeoutMs: 10_000,
     async execute(args, exec) {
-      const source = sessions.get(exec.agent?.session.id)?.source
-      if (!source) throw new Error('Load a model with viewer_load first')
+      const record = sessions.get(exec.agent?.session.id)
+      const source = record && displaySource(record)
+      if (!source) throw new Error('Load a validated model with viewer_load first')
       if (!Number.isFinite(args.azimuth) || !Number.isFinite(args.elevation) || Math.abs(args.elevation) > 89) throw new Error('Camera angles must be finite; elevation must be between -89 and 89')
       source.camera(args)
       return JSON.stringify(source.state())

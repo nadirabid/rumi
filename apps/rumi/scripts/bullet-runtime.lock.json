@@ -1,0 +1,32 @@
+{
+  "protocolVersion": 2,
+  "bulletVersion": 326,
+  "version": "3.27",
+  "source": {
+    "commit": "d3afe76132fc76b0f9b2359cbaef47a3766e7fbb",
+    "url": "https://codeload.github.com/bulletphysics/bullet3/tar.gz/d3afe76132fc76b0f9b2359cbaef47a3766e7fbb",
+    "sha256": "4ca2348c70ecdb675c8aff566569fb6a50c04d7c19acc8c045950d5429afac93"
+  },
+  "json": {
+    "version": "3.12.0",
+    "header": {
+      "url": "https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp",
+      "sha256": "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63"
+    },
+    "license": {
+      "url": "https://raw.githubusercontent.com/nlohmann/json/v3.12.0/LICENSE.MIT",
+      "sha256": "46a65cffd1ea955132d95a8dd921640714a8d6b537d2e4e482d31145ae95b603"
+    }
+  },
+  "cmake": {
+    "version": "4.4.4",
+    "darwin": {
+      "url": "https://files.pythonhosted.org/packages/3f/02/86b484e16c91de4bdf90dfab37a33c3e5512bc30d3a494759976df0943b9/cmake-4.4.4-py3-none-macosx_10_10_universal2.whl",
+      "sha256": "883962a72b1b3a16ff445427f24c8caca9797dd9e563bbe208cbcd89e877f9d3"
+    },
+    "win32": {
+      "url": "https://files.pythonhosted.org/packages/87/9c/a7918eeeed09b34aa5dc1b767367fb1a2dcbb56171be00be0fd1280fe752/cmake-4.4.4-py3-none-win_amd64.whl",
+      "sha256": "ad8e0a38b5707e27882701146bdfffecacd80e7703fa0fc36c77528518d545af"
+    }
+  }
+}

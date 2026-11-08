@@ -6,12 +6,14 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { downloadArtifact } from '@electron/get'
+import electronChecksums from 'electron/checksums.json' with { type: 'json' }
 import extractZip from 'extract-zip'
 import { readPrimaryRuntime } from '../../../packages/skill/tool-workspace-dependencies/src/index.ts'
 import { desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
 import { packagingStep } from './packaging-step.mjs'
 import { preparePrimaryRuntime } from './prepare-primary-runtime.ts'
 import { prepareBlenderRuntime } from './prepare-blender-runtime.ts'
+import { prepareBulletRuntime } from './prepare-bullet-runtime.ts'
 import { prepareDesktopCli } from './prepare-cli.ts'
 import { prepareCommandLink } from './prepare-command-link.ts'
 
@@ -25,7 +27,9 @@ async function prepareElectron({ platform, arch }: DesktopTarget): Promise<strin
   const require = createRequire(import.meta.url)
   const { version } = require('electron/package.json') as { version: string }
   const archive = await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'download:electron',
-    () => downloadArtifact({ version, platform, arch, artifactName: 'electron', cacheRoot: BUILD_PATHS.downloads }))
+    () => downloadArtifact({
+      version, platform, arch, artifactName: 'electron', checksums: electronChecksums, cacheRoot: BUILD_PATHS.downloads,
+    }))
   rmSync(BUILD_PATHS.electron, { recursive: true, force: true })
   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'extract:electron', () => extractZip(archive, { dir: BUILD_PATHS.electron }))
   const executable = join(BUILD_PATHS.electron, platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
@@ -34,16 +38,19 @@ async function prepareElectron({ platform, arch }: DesktopTarget): Promise<strin
   }).trim()
 }
 
+function minimumMacOSVersion(): string {
+  return execFileSync('/usr/libexec/PlistBuddy', [
+    '-c', 'Print LSMinimumSystemVersion', join(BUILD_PATHS.electron, 'Electron.app', 'Contents', 'Info.plist'),
+  ], { encoding: 'utf8' }).trim()
+}
+
 function prepareCli({ platform, arch }: DesktopTarget): void {
   cpSync(join(import.meta.dirname, 'node-bin'), join(RUNTIME_ROOT, 'bin'), { recursive: true })
   chmodSync(join(RUNTIME_ROOT, 'bin', 'node'), 0o755)
   const cli = join(RUNTIME_ROOT, 'cli')
   prepareDesktopCli(cli, platform)
   if (platform === 'darwin') {
-    const minimumVersion = execFileSync('/usr/libexec/PlistBuddy', [
-      '-c', 'Print LSMinimumSystemVersion', join(BUILD_PATHS.electron, 'Electron.app', 'Contents', 'Info.plist'),
-    ], { encoding: 'utf8' }).trim()
-    prepareCommandLink(cli, arch, minimumVersion)
+    prepareCommandLink(cli, arch, minimumMacOSVersion())
   }
   cpSync(join(import.meta.dirname, '..', 'lib', 'command-manager-entry.js'), join(cli, 'command-manager.js'))
   cpSync(join(import.meta.dirname, 'command-path.ps1'), join(cli, 'command-path.ps1'))
@@ -59,6 +66,9 @@ async function main(): Promise<void> {
     () => preparePrimaryRuntime({ deferSmoke: values['defer-primary-runtime-smoke'] }))
   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:blender',
     () => prepareBlenderRuntime(resolveDesktopBuildTarget(), RUNTIME_ROOT, BUILD_PATHS.downloads))
+  await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:bullet',
+    () => prepareBulletRuntime(resolveDesktopBuildTarget(), RUNTIME_ROOT, BUILD_PATHS.downloads,
+      target.platform === 'darwin' ? minimumMacOSVersion() : undefined))
   const { pnpm } = await readPrimaryRuntime(join(RUNTIME_ROOT, 'primary-runtime'))
   if (pnpm === undefined) throw new Error('desktop runtime: primary-runtime manifest has no pnpm version')
   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:cli', async () => { prepareCli(target) })

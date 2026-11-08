@@ -27,16 +27,38 @@ import { applyBlender } from './blender/host.js'
 import { applyViewer } from './viewer/host.js'
 import { applyContextRetention } from './viewer/context-retention.js'
 import * as analogWorkflow from './viewer/analog/workflow.js'
+import * as mechanicalWorkflow from './bullet/workflow.js'
 
 /** The plugin row id, also the card identity. */
 export const name = 'print-studio'
 
-/** Local diagnostics for renderer acknowledgment failures. */
+/** Print Studio diagnostics, validation policy, and app-owned storage paths. */
 export const Config = z.object({
   blenderExecutable: z.string().default(''),
+  bulletExecutable: z.string().default(''),
   blenderHome: z.string().default(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi')),
+  validationStateDirectory: z.string().min(1).default(join(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi'), 'validation')),
   validationRepairAttempts: z.number().step(1).min(0).max(10).default(3),
   validationTimeoutMs: z.number().step(1).min(1000).max(300000).default(60000),
+  mechanicsTimeoutMs: z.number().step(1).min(1000).max(300000).default(120000),
+  mechanics: z.object({
+    gravityMps2: z.tuple([z.number().min(-20).max(20), z.number().min(-20).max(20), z.number().min(-20).max(20)]).default([0, 0, -9.81]),
+    friction: z.number().min(0).max(1).default(0.2),
+    movementSampleDegrees: z.number().min(1).max(90).default(15),
+    movementSampleMm: z.number().min(0.1).max(10).default(2),
+    assemblySampleMm: z.number().min(0.01).max(2).default(0.2),
+    timeStepSeconds: z.number().min(0.0001).max(0.001).default(0.00025),
+    iterations: z.number().step(1).min(10).max(100).default(40),
+    restDurationSeconds: z.number().min(0.01).max(0.1).default(0.02),
+    retentionDurationSeconds: z.number().min(0.02).max(0.2).default(0.05),
+    probeDurationSeconds: z.number().min(0.1).max(2).default(0.5),
+    densityKgM3: z.number().min(100).max(20000).default(1250),
+    forceN: z.number().min(0.001).max(10).default(1),
+    torqueNm: z.number().min(0.000001).max(1).default(0.05),
+    linearToleranceMm: z.number().min(0.01).max(2).default(0.5),
+    angularToleranceDegrees: z.number().min(0.1).max(10).default(3),
+    maxPenetrationMm: z.number().min(0.001).max(0.5).default(0.05),
+  }).default({}),
   validation: z.object({
     minimumThicknessMm: z.number().min(0.01).max(10).default(1),
     degenerateThreshold: z.number().min(0.000000001).max(0.1).default(0.000001),
@@ -217,6 +239,7 @@ const PRINT_TYPE = {
  */
 export function apply(ctx, config) {
   ctx.plugin(analogWorkflow)
+  ctx.plugin(mechanicalWorkflow)
   applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory, config.viewerLoadTimeoutMs, config, createUserMessage)
   ctx.inject(['sessionProjections'], scoped => applyContextRetention(scoped, createDeveloperMessage))
   applyBlender(ctx, defineTool, config)

@@ -78,7 +78,7 @@ it('accepts bounded reports larger than one MiB', async () => {
   const large = { ...report, connections: Array.from({ length: 8 }, (_, index) => ({
     ...connection, id: `joint-${index}`, probes: Array.from({ length: 1000 }, () => ({
       status: 'passed', kind: 'retention', maxPivotDriftMm: 0.01, maxOffAxisDegrees: 0.01,
-      maxPenetrationMm: 0.001, maxForceN: 0.01, maxTorqueNm: 0.001, durationSeconds: 0.05,
+      maxPenetrationMm: 0.001, retentionTravelMm: 2, maxForceN: 0.01, maxTorqueNm: 0.001, durationSeconds: 0.05,
     })),
   })) }
   const expected = { ...assembly, connections: large.connections }

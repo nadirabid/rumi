@@ -27,9 +27,11 @@ try {
     : { validationTimeoutMs: 60000, mechanicsTimeoutMs: 120000, ...JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')) }
   if (packagedPlugin) {
     assert.equal(defaults.validationRepairAttempts, 5)
-    assert.equal(defaults.mechanicsTimeoutMs, 300000)
+    assert.equal(defaults.mechanicsTimeoutMs, 600000)
     assert.equal(defaults.mechanics.maxTotalSteps, 2000000)
-    assert.equal(defaults.mechanics.retentionWorkers, 2)
+    assert.equal(defaults.mechanics.retentionWorkers, 4)
+    assert.equal(defaults.mechanics.retentionTravelMm, 2)
+    assert.equal(defaults.mechanics.retentionTiltDegrees, 15)
   }
   const config = { ...defaults, blenderExecutable: packagedPlugin ? '' : blenderExecutable, bulletExecutable: packagedPlugin ? '' : bulletExecutable }
   for (const [variant, format] of [['normal', 'usd'], ['broken', 'usd'], ['blocked', 'usd'], ['point-touching', 'usd'], ['wheel', 'usd'], ['static', 'usd'], ['static', 'stl']]) {

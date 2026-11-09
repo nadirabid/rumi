@@ -7,12 +7,23 @@ description: Create, import, or edit Rumi meshes using background Blender Python
 
 Call `blender_status` for the executable and helper paths. Run Blender through the ordinary shell tool, using its permissions and cancellation; do not build a separate execution service. If Blender is unavailable, report the setup action returned by the tool.
 
+## Solid construction defaults
+
+Use these defaults from the first modeling operation, including edits to existing models. They reduce mesh defects but do not establish printability.
+
+- Build each physical part from closed solid primitives or capped extrusions of simple, non-self-intersecting profiles with positive thickness. Prefer these methods over manually assembling vertices and faces; avoid zero-thickness surfaces, duplicate geometry and internal faces.
+- Use Boolean union to fuse material and difference to cut holes, with `solver = 'EXACT'`. Give solids intended for union meaningful overlap and extend through-hole cutters beyond both outer surfaces. Avoid tangent-only connections and unnecessarily coincident boundaries; inspect the result even with the Exact solver.
+- Joining Blender objects does not fuse their geometry. Union pieces intended to form one solid, while keeping separate mechanical parts and their clearances distinct.
+- Establish the main solid before bevels and other finishing operations. Keep bevel widths compatible with nearby features and wall thickness; inspect the evaluated result for collapsed features and self-intersections.
+- Reserve voxel remeshing for organic geometry where changes to topology, sharpness and detail are acceptable. Preserve the original, choose a voxel size that resolves the smallest required feature, and recheck dimensions. Do not use it as routine repair for threads, mating surfaces, thin walls or moving-part clearances, or remesh separate moving parts into one solid.
+- Inspect evaluated geometry after significant topology changes, before building further features on it. `Mesh.validate()` checks and can repair mesh data; it does not establish manifoldness. Use 3D Print Toolbox findings for geometry diagnosis. Prefer correcting the construction that caused a defect over broad automatic cleanup; inspect any cleanup result for lost features and changed dimensions. Automatic turn-end validation remains required.
+
 ## Edit and publish
 
 1. Read the current `meshState` context and the existing project files. Create another model folder only when the user explicitly requests or agrees to a separate model; clarify ambiguous intent before writing files. For edits and fixes, publish revisions in the existing model folder. Preserve existing models. For an existing Blender model, find its latest successful revision report under `models/<name>/revisions/` and open that report's `blend` path. Use the selected revision when the user asks to revert. For a USD, legacy GLB or STL import, use the helper's `import_mesh`. Legacy JavaScript previews are disabled by project isolation; migrate their actual geometry to USD using confined tools rather than approximating it from screenshots. Do not overwrite their source.
 2. Write a reproducible Python script under `source/`. Run `"<executable>" --background --factory-startup --python-exit-code 1 --python "<script>"`. This runs a full Blender process without a window; ordinary system Python cannot import `bpy`.
 3. Work in **metres, Z up** in Blender. Rumi's viewer, measurements and Gaussian regions use **millimetres, Z up**. Divide model-local cursor/highlight coordinates and radii by 1,000 before using them in Blender; account for object transforms when selecting vertices. Standard USD export/import handles the USD coordinate frame. Do not apply viewer placement to an editing selection twice.
-4. Use Blender's modifiers and mesh operations. For symmetric objects construct one half and mirror it about an explicit plane; measure symmetry after evaluated modifiers. Keep planar faces planar, bevel widths consistent, sharp boundaries deliberate, and smooth normals confined to intended smooth surfaces. More subdivisions or smooth shading alone do not correct a lumpy silhouette. Inspect front, side and three-quarter views. Distinguish topology checks from visual/reference fidelity.
+4. Follow the solid construction defaults above when choosing Blender modifiers and mesh operations. For symmetric objects construct one half and mirror it about an explicit plane; measure symmetry after evaluated modifiers. Keep planar faces planar, bevel widths consistent, sharp boundaries deliberate, and smooth normals confined to intended smooth surfaces. More subdivisions or smooth shading alone do not correct a lumpy silhouette. Inspect front, side and three-quarter views. Distinguish topology checks from visual/reference fidelity.
 5. Load the helper returned by `blender_status` with `helper = runpy.run_path(helper_path)`, then call `helper["publish"]("models/<name>")`. Use `runpy` so importing the helper does not write bytecode into the installed application. It saves an immutable `.blend` and USD revision, prints the paths, and atomically updates `model.usda`. Keep named parts, modifiers, and movement declarations in the editable original. Preview limits are 200,000 triangles and 64 MiB; preserve detailed assets separately if a lighter preview is required. Do not silently simplify the print deliverable.
 6. Call `viewer_load` on `models/<name>/model.usda`. Saved models display independently of validation. Use `meshState.validation` to inspect findings; a visible model is not a printability pass. Use `viewer_camera`, `viewer_cursor_snapshot`, and `viewer_highlight` for iteration.
 
@@ -48,6 +59,14 @@ This example assumes both mesh transforms are identity and requires actual capti
 The helper retains the native USD description in the editable `.blend`. Later `publish` calls preserve it; supply `configure_robot` when changing the robot. USD is the authoritative geometry and joint format, while `.blend` retains editable modifiers. Use one self-contained ASCII layer, metres/Z up, with no external textures, references, variants or animation. Use surface colours for the preview. Each exported physical link must be one uniquely named mesh.
 
 Rumi-specific attributes cover information the robot schema does not define: `rumi:control` on a joint labels its slider; `rumi:manufacturingMode` on the root is `print-in-place` or `separate`. Optional root strings `rumi:sequences` and `rumi:disassembly` encode JSON movement waypoints and translation-only reverse-assembly paths. Waypoints name joint prims and use degrees or millimetres; disassembly paths name link prims and use millimetre offsets. These are checking instructions, not a second body/joint description. Unsupported coupling and incomplete coverage remain unverified. Read `interactive-controls` for persistent movement controls.
+
+## Clearances and retention
+
+Keep at least 0.3 mm between separate parts everywhere in the saved pose: radial gaps in bores, end-play and door-to-frame gaps. Validation reports `insufficient_clearance` as an error below 0.2 mm and lists the pairs and gaps. Parts joined by a fixed joint may touch.
+
+Play is expected. Retention passes when the connector stops the part; the pivot may travel up to 2 mm and tilt up to 15°. Never reduce clearances to reduce drift.
+
+Repair `unretained_part` and `unstable_at_rest` by adding or enlarging the feature that captures the part: a cap, shoulder, flange or collar wider than the bore, or a pin through both knuckles. Do not tighten the fit. Repair `insufficient_clearance` by widening the listed gaps while keeping the capturing feature.
 
 ## Pointed regions and printing
 

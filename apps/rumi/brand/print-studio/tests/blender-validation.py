@@ -8,7 +8,7 @@ import bpy
 
 helper = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'blender/validate.py'))
 settings = dict(minimumThicknessMm=1, degenerateThreshold=.000001, overhangDegrees=45,
-                sharpDegrees=160, distortionDegrees=45)
+                sharpDegrees=160, distortionDegrees=45, minimumClearanceMm=.2)
 transform = dict(scale=1, rotate=dict(x=0, y=0, z=0), position=dict(x=0, y=0, z=0))
 
 with tempfile.TemporaryDirectory(prefix='rumi-toolbox-test-') as directory:
@@ -81,4 +81,36 @@ with tempfile.TemporaryDirectory(prefix='rumi-toolbox-test-') as directory:
     sheared = check('sheared', 'glb')
     assert all(abs(sheared['dimensions'][axis]-expected) < .001
                for axis, expected in zip('xyz', (10*2**.5, 20*2**.5, 30))), sheared
-print('BLENDER_VALIDATION_OK: closed/open/intersecting solids and GLB units')
+
+    def clearance(gap_mm, mode='print-in-place', connections=()):
+        """Two 10 mm cubes `gap_mm` apart along x, exported as GLB metres."""
+        bpy.ops.object.select_all(action='SELECT')
+        bpy.ops.object.delete(use_global=False)
+        bpy.ops.mesh.primitive_cube_add(size=.01, location=(0, 0, 0))
+        first = bpy.context.object.name
+        bpy.ops.mesh.primitive_cube_add(size=.01, location=((10 + gap_mm) / 1000, 0, 0))
+        second = bpy.context.object.name
+        path = str(Path(directory) / 'clearance.glb')
+        bpy.ops.export_scene.gltf(filepath=path, export_format='GLB')
+        assembly = dict(version=1, root=first, parts=[dict(id=first, mesh=first), dict(id=second, mesh=second)],
+                        connections=[dict(parent=first, child=second, kind=kind) for kind in connections],
+                        manufacturing=dict(mode=mode))
+        try:
+            report = helper['validate'](dict(input=path, settings=settings, transform=transform, volume=None,
+                mechanicsOutput=str(Path(directory) / 'clearance.json'), assembly=assembly))
+        finally:
+            helper['toolbox'].unregister()
+        return first, second, next(c for c in report['checks'] if c['code'] == 'insufficient_clearance')
+
+    first, second, tight = clearance(.1)
+    assert tight['severity'] == 'error' and tight['count'] == 1, tight
+    pair = tight['details']['pairs'][0]
+    assert {pair['a'], pair['b']} == {first, second} and abs(pair['gapMm'] - .1) < .02, tight
+    assert tight['details']['minimumClearanceMm'] == .2 and len(tight['details']['pairs']) == 1, tight
+    assert clearance(.4)[2]['count'] == 0
+    assert clearance(0, connections=['fixed'])[2]['count'] == 0
+    loose = clearance(.1, 'separate')[2]
+    assert loose['severity'] == 'error' and loose['count'] == 1, loose
+    overlapping = clearance(-1)[2]
+    assert overlapping['count'] == 1 and overlapping['details']['pairs'][0]['gapMm'] == 0, overlapping
+print('BLENDER_VALIDATION_OK: closed/open/intersecting solids, GLB units, and part clearance')

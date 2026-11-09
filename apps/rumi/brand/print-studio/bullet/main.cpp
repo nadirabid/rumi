@@ -51,7 +51,7 @@ btVector3 vector(const Json& value, double scale = 1) {
 }
 Json coordinates(const btVector3& value, double scale = 1) { return {value.x()*scale, value.y()*scale, value.z()*scale}; }
 struct Settings {
-    double dt, duration, restDuration, retentionDuration, density, force, torque, linearTolerance, angularTolerance, penetration;
+    double dt, duration, restDuration, retentionDuration, density, force, torque, linearTolerance, angularTolerance, penetration, retentionTravel, retentionTilt;
     int iterations, maxTotalSteps, retentionWorkers;
     btVector3 gravity;
     double friction,movementDegrees,movementMm,assemblyMm;
@@ -68,6 +68,8 @@ Settings settings(const Json& value) {
     s.linearTolerance = number(value,"linearToleranceMm",.001,5)*.001;
     s.angularTolerance = number(value,"angularToleranceDegrees",.1,15)*pi/180;
     s.penetration = number(value,"maxPenetrationMm",.001,1)*.001;
+    s.retentionTravel = number(value,"retentionTravelMm",.1,10)*.001;
+    s.retentionTilt = number(value,"retentionTiltDegrees",1,45)*pi/180;
     double iterations = number(value,"iterations",4,200);
     if (std::floor(iterations) != iterations) throw Invalid("iterations must be an integer");
     s.iterations = int(iterations);
@@ -255,6 +257,8 @@ Measurement measure(World& w,const Connection& c,double previousAngle) {
     return {position,angle,drift,offAxis,principal};
 }
 struct Trial {Json result;State finalState;};
+// A free body under a retention load travels retentionLoad/2 times the bound within the probe; arrest compares drift over the final arrestWindow of the probe.
+constexpr double retentionLoad=4,arrestWindow=.25,arrestFraction=.25;
 // Loads exercise contacts. The declared connections are observed, never added to Bullet as constraints.
 Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector<Connection>& connections,const Settings& s,
             const State* initial,const std::map<std::size_t,double>& targets,std::size_t loaded,btVector3 force,btVector3 torque,
@@ -267,6 +271,8 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
     double maxDrift=0,maxOffAxis=0,maxDepth=0,maxForce=force.length(),maxTorque=torque.length();
     std::string failure,failedConnection;
     std::map<std::size_t,double> integratedErrors;
+    std::vector<double> driftMark(connections.size(),0),tiltMark(connections.size(),0),driftEnd(connections.size(),0),tiltEnd(connections.size(),0);
+    const int markStep=int(std::floor(steps*(1-arrestWindow)));
     w.world.performDiscreteCollisionDetection();maxDepth=w.penetration();
     if(maxDepth>s.penetration)failure="initial_interference";
     int completed=0;
@@ -311,11 +317,17 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
         for(std::size_t i=0;i<connections.size();++i) {
             const auto& c=connections[i];auto m=measure(w,c,angles[i]);angles[i]=m.angle;
             maxDrift=std::max(maxDrift,m.drift);maxOffAxis=std::max(maxOffAxis,m.offAxis);
-            if(failure.empty() && (m.drift>s.linearTolerance || m.offAxis>s.angularTolerance)) {
+            if(step==markStep){driftMark[i]=m.drift;tiltMark[i]=m.offAxis;}
+            driftEnd[i]=m.drift;tiltEnd[i]=m.offAxis;
+            if(failure.empty() && (m.drift>s.retentionTravel || m.offAxis>s.retentionTilt)) {
                 failure=kind=="rest"?"unstable_at_rest":"unretained_part";failedConnection=c.id;
             }
         }
     }
+    // A retention load must be arrested: a part still travelling outward over the probe's final window has not stopped inside the bound.
+    if(kind=="retention" && failure.empty() && steps>0)
+        for(std::size_t i=0;i<connections.size();++i)
+            if(driftEnd[i]-driftMark[i]>arrestFraction*s.retentionTravel || tiltEnd[i]-tiltMark[i]>arrestFraction*s.retentionTilt) {failure="unretained_part";failedConnection=connections[i].id;break;}
     Json actual=Json::object();
     for(auto [index,target]:targets) {
         const auto& c=connections[index];auto m=measure(w,c,angles[index]);double value=c.kind=="revolute"?m.angle:m.position;
@@ -325,14 +337,13 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
     }
     Json result{{"kind",kind},{"status",failure.empty()?"passed":"needs_repair"},{"code",failure.empty()?"probe_passed":failure},
       {"durationSeconds",completed*s.dt},{"actual",actual},{"maxPivotDriftMm",maxDrift*1000},{"maxOffAxisDegrees",maxOffAxis*180/pi},
-      {"maxPenetrationMm",maxDepth*1000},{"maxForceN",maxForce},{"maxTorqueNm",maxTorque}};
+      {"maxPenetrationMm",maxDepth*1000},{"retentionTravelMm",s.retentionTravel*1000},{"maxForceN",maxForce},{"maxTorqueNm",maxTorque}};
     if(!failedConnection.empty())result["connection"]=failedConnection;
     return {result,w.snapshot(angles)};
 }
 struct RouteResult {std::string status,code;Json steps,details;};
 // Sampled reverse-disassembly checks preserve the order of removed physical pieces.
 RouteResult assemblyRoute(std::vector<Body>& definitions,std::size_t fixture,const Json& manufacturing,const Settings& s,int& budget) {
-    if(!manufacturing.contains("steps"))return {"review","assembly_route_unverified",Json::array(),{{"reason","missing_disassembly_steps"}}};
     const auto& steps=manufacturing.at("steps");
     if(!steps.is_array() || steps.size()!=definitions.size()-1)throw Invalid("Disassembly steps must cover every nonroot part once");
     std::map<std::string,std::size_t> names;for(std::size_t i=0;i<definitions.size();++i)names[definitions[i].id]=i;
@@ -437,16 +448,29 @@ Json evaluate(const Json& request) {
     for(const auto& b:bodies)if(!b.topology.empty())finding(b.topology,"",b.topology=="unsupported_body_topology"?"warning":"error",{{"body",b.id}});
     if(parents[fixture]!=0 || std::any_of(parents.begin(),parents.end(),[](int n){return n>1;}))finding("unsupported_coupled_motion","","warning",{{"reason","closed_loop_or_multiple_parent"}});
     bool simulate=!repair&&!review;
+    // Retention covers every connection at the rest pose, at range endpoints and at the last waypoint; elsewhere only the moved connections.
+    auto retentionSteps=[&](std::size_t index){return (connections[index].kind=="fixed"?12:10)*std::ceil(s.retentionDuration/s.dt);};
+    std::vector<std::size_t> allConnections;for(std::size_t i=0;i<connections.size();++i)allConnections.push_back(i);
     double estimated=std::ceil(s.restDuration/s.dt),retentionTotal=0;
-    for(const auto& c:connections)retentionTotal+=(c.kind=="fixed"?12:10)*std::ceil(s.retentionDuration/s.dt);
+    for(auto i:allConnections)retentionTotal+=retentionSteps(i);
     estimated+=retentionTotal;
-    for(const auto& c:connections) {
+    for(std::size_t i=0;i<connections.size();++i) {
+        const auto& c=connections[i];
         if(c.kind!="fixed")for(double endpoint:{c.low,c.high})if(endpoint!=0) {
-            double spacing=c.kind=="revolute"?s.movementDegrees*pi/180:s.movementMm*.001;
-            estimated+=(std::ceil(std::abs(endpoint)/spacing)+1)*(std::ceil(s.duration/s.dt)+retentionTotal);
+            double spacing=c.kind=="revolute"?s.movementDegrees*pi/180:s.movementMm*.001,samples=std::ceil(std::abs(endpoint)/spacing);
+            estimated+=(samples+1)*std::ceil(s.duration/s.dt)+samples*retentionSteps(i)+retentionTotal;
         }
     }
-    for(const auto& sequence:sequences)estimated+=sequence.second.size()*(std::ceil(s.duration/s.dt)+retentionTotal);
+    auto drivenAt=[&](const std::vector<std::map<std::size_t,double>>& points,std::size_t k) {
+        std::vector<std::size_t> driven;
+        for(auto [index,target]:points[k]) {auto before=k?points[k-1].find(index):points[k].end();double previous=k?(before==points[k-1].end()?0:before->second):0;if(target!=previous)driven.push_back(index);}
+        return driven;
+    };
+    for(const auto& sequence:sequences)for(std::size_t k=0;k<sequence.second.size();++k) {
+        estimated+=std::ceil(s.duration/s.dt);
+        if(k+1==sequence.second.size())estimated+=retentionTotal;
+        else for(auto i:drivenAt(sequence.second,k))estimated+=retentionSteps(i);
+    }
     bool fullBudget=estimated<=s.maxTotalSteps;
     if(!fullBudget)finding("probe_budget_exhausted","","warning",{{"estimatedSteps",estimated},{"maximumSteps",s.maxTotalSteps}});
     auto accept=[&](Trial& t,std::size_t index) {
@@ -492,7 +516,7 @@ Json evaluate(const Json& request) {
         double inverseMass=1/child.mass+(c.parent==fixture?0:1/parent.mass),mass=1/inverseMass;
         std::vector<btVector3> translations{c.transverse,c.binormal},rotations{c.transverse,c.binormal};
         if(c.kind!="prismatic")translations.push_back(c.axis);if(c.kind!="revolute")rotations.push_back(c.axis);
-        double force=8*mass*s.linearTolerance/(s.retentionDuration*s.retentionDuration);
+        double force=retentionLoad*mass*s.retentionTravel/(s.retentionDuration*s.retentionDuration);
         if(force>s.force) {finding("probe_inconclusive",c.id,"warning",{{"reason","force_cap"}});return false;}
         if(!loads(index,state,translations,force,false))return false;
         for(auto axis:rotations) {
@@ -500,7 +524,7 @@ Json evaluate(const Json& request) {
             auto childBasis=state.transforms[c.child].getBasis(),parentBasis=state.transforms[c.parent].getBasis();
             double inverse=worldAxis.dot(childBasis*btMatrix3x3(1/child.moments.x(),0,0,0,1/child.moments.y(),0,0,0,1/child.moments.z())*childBasis.transpose()*worldAxis);
             if(c.parent!=fixture)inverse+=worldAxis.dot(parentBasis*btMatrix3x3(1/parent.moments.x(),0,0,0,1/parent.moments.y(),0,0,0,1/parent.moments.z())*parentBasis.transpose()*worldAxis);
-            double torque=8/inverse*s.angularTolerance/(s.retentionDuration*s.retentionDuration);
+            double torque=retentionLoad/inverse*s.retentionTilt/(s.retentionDuration*s.retentionDuration);
             if(torque>s.torque) {finding("probe_inconclusive",c.id,"warning",{{"reason","torque_cap"}});return false;}
             if(!loads(index,state,{axis},torque,true))return false;
         }
@@ -520,10 +544,12 @@ Json evaluate(const Json& request) {
                 State state=rest.finalState;
                 int samples=int(std::ceil(std::abs(endpoint)/(c.kind=="revolute"?s.movementDegrees*pi/180:s.movementMm*.001)));
                 std::vector<double> targets;for(int n=1;n<=samples;++n)targets.push_back(endpoint*n/samples);targets.push_back(0);
-                for(double target:targets) {
+                for(std::size_t step=0;step<targets.size();++step) {const double target=targets[step];
                     auto movement=trial(bodies,fixture,connections,s,&state,{{i,target}},connections.size(),{0,0,0},{0,0,0},"movement",s.duration,budget);
                     if(!accept(movement,i)){simulate=false;break;}state=movement.finalState;
-                    for(std::size_t other=0;other<connections.size();++other)if(!retention(other,state)){simulate=false;break;}
+                    // The endpoint pose retains every connection; intermediate samples and the return retain only the moved one.
+                    const bool endpointPose=int(step)==samples-1;
+                    for(std::size_t other=0;other<connections.size();++other)if((endpointPose||other==i)&&!retention(other,state)){simulate=false;break;}
                     if(!simulate)break;
                 }
             }
@@ -533,7 +559,9 @@ Json evaluate(const Json& request) {
             for(const auto& target:points) {
                 auto t=trial(bodies,fixture,connections,s,&state,target,connections.size(),{0,0,0},{0,0,0},"sequence",s.duration,budget);t.result["sequence"]=id;
                 if(!accept(t,connections.size())){complete=false;simulate=false;break;}state=t.finalState;
-                for(std::size_t i=0;i<connections.size();++i)if(!retention(i,state)){complete=false;simulate=false;break;}
+                const bool lastWaypoint=&target==&points.back();
+                const auto driven=drivenAt(points,std::size_t(&target-&points[0]));
+                for(std::size_t i=0;i<connections.size();++i)if((lastWaypoint||std::count(driven.begin(),driven.end(),i))&&!retention(i,state)){complete=false;simulate=false;break;}
                 if(!complete)break;
             }
             if(complete)completedSequences.push_back(id);
@@ -541,7 +569,8 @@ Json evaluate(const Json& request) {
     }
     bool complete=simulate;
     Json routeSteps=Json::array();
-    if(mode=="separate" && complete) {
+    // Declared removal steps are checked; without them the probes alone decide verification.
+    if(mode=="separate" && complete && a.at("manufacturing").contains("steps")) {
         auto route=assemblyRoute(bodies,fixture,a.at("manufacturing"),s,budget);routeSteps=route.steps;
         if(route.status!="passed") {complete=false;finding(route.code,"",route.status=="needs_repair"?"error":"warning",route.details);}
     }
@@ -556,7 +585,7 @@ Json selfTest() {
         for(auto point:std::vector<btVector3>{{-1,-1,-1},{1,-1,-1},{1,1,-1},{-1,1,-1},{-1,-1,1},{1,-1,1},{1,1,1},{-1,1,1}}) vertices.push_back(coordinates(center+half*point));
         return Json{{"id",id},{"vertices",vertices},{"triangles",{{0,2,1},{0,3,2},{4,5,6},{4,6,7},{0,1,5},{0,5,4},{1,2,6},{1,6,5},{2,3,7},{2,7,6},{3,0,4},{3,4,7}}}};
     };
-    Settings s{.0005,.2,.02,.05,1250,1,.05,.0005,3*pi/180,.00005,40,2000000,1,{0,0,0},0,15,2,.2};
+    Settings s{.0005,.2,.02,.05,1250,1,.05,.0005,3*pi/180,.00005,.002,15*pi/180,40,2000000,1,{0,0,0},0,15,2,.2};
     std::size_t triangles=0,vertices=0; std::vector<Body> definitions;
     definitions.push_back(body(box("fixed",{0,-3,0},{5,1,5}),s,triangles,vertices));
     definitions.push_back(body(box("moving",{0,0,0},{1,1,1}),s,triangles,vertices));

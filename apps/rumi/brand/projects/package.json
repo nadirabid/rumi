@@ -8,14 +8,16 @@
     ".": "./index.js",
     "./client": "./client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./isolation/*": "./isolation/*.js"
   },
   "files": [
     "AGENTS_TEMPLATE.md",
     "index.js",
     "client.js",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "isolation"
   ],
   "main": "index.js",
   "dsh": {

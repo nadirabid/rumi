@@ -193,7 +193,7 @@ export function createDevelopmentProjectMetadata(projectDir: string, release: De
 /**
  * Profile policy this app owns, appended once when the profile is created so a
  * fresh install starts in the same shape as an upgraded one: no mode/model/access
- * selectors, full access for every Session, its own brand seats, and the panel
+ * selectors, project-confined access for every Session, its own brand seats, and the panel
  * launchers folded into the bottom More menu.
  *
  * Rumi's home holds only Rumi, so Session and storage roots stay at their stock
@@ -209,7 +209,7 @@ const RUMI_PROFILE_PATCH = `# Rumi profile policy, seeded by the app. Edit below
 - id: ui-permission
   disabled: true
 
-# Every Session runs with full access.
+# Every Session starts confined to its project.
 - id: permission
   config:
     presets:
@@ -218,11 +218,11 @@ const RUMI_PROFILE_PATCH = `# Rumi profile policy, seeded by the app. Edit below
         approval: ask
       workspace-write:
         sandbox: workspace-write
-        approval: ask
+        approval: never
       danger-full-access:
         sandbox: danger-full-access
         approval: never
-    defaultPreset: danger-full-access
+    defaultPreset: workspace-write
 
 # Rumi owns the sidebar brand seats.
 - id: ui-brand-official
@@ -236,6 +236,22 @@ const RUMI_PROFILE_PATCH = `# Rumi profile policy, seeded by the app. Edit below
 /** Marker proving the policy block is already in a profile patch. */
 const RUMI_POLICY_MARKER = '# Rumi profile policy, seeded by the app.'
 
+/**
+ * Update only the app-owned permission block; custom rows retain their contents.
+ * @param patch - Existing profile patch text.
+ * @returns Patch with the project-confined default, or unchanged text without the owned block.
+ */
+export function migrateProjectIsolationPolicy(patch: string): string {
+  const start = patch.indexOf(RUMI_POLICY_MARKER)
+  const end = patch.indexOf('# Rumi owns the sidebar brand seats.', start)
+  if (start < 0 || end < 0) return patch
+  const owned = patch.slice(start, end)
+    .replace('# Every Session runs with full access.', '# Every Session starts confined to its project.')
+    .replace('    defaultPreset: danger-full-access', '    defaultPreset: workspace-write')
+    .replace('sandbox: workspace-write\n        approval: ask', 'sandbox: workspace-write\n        approval: never')
+  return patch.slice(0, start) + owned + patch.slice(end)
+}
+
 /** Append the product policy to a profile patch once, leaving user rows alone. */
 function ensureProfilePolicy(projectDir: string): void {
   const path = join(projectDir, PROFILE_PATCH_FILENAME)
@@ -245,7 +261,11 @@ function ensureProfilePolicy(projectDir: string): void {
   } catch {
     return
   }
-  if (current.includes(RUMI_POLICY_MARKER)) return
+  if (current.includes(RUMI_POLICY_MARKER)) {
+    const migrated = migrateProjectIsolationPolicy(current)
+    if (migrated !== current) writeFileSync(path, migrated, { mode: 0o600 })
+    return
+  }
   // The template's lone `[]` is an empty layer; replacing it keeps the seeded rows parseable.
   const body = current.replace(/(?:^|\n)\[\]\s*$/u, '').trimEnd()
   writeFileSync(path, `${body === '' ? '' : `${body}\n\n`}${RUMI_PROFILE_PATCH}`, { mode: 0o600 })

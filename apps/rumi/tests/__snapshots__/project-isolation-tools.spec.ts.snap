@@ -1,0 +1,24 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`blocks a cross-project read in a recorded agent turn without disclosing contents 1`] = `
+[
+  {
+    "content": [
+      {
+        "text": "Error: Project isolation denied access outside this project. Import the required file into this project first.",
+        "type": "text",
+      },
+    ],
+    "isError": true,
+  },
+]
+`;
+
+exports[`logs only the owning project instructions and rejects an external instruction link 1`] = `
+[
+  {
+    "name": "rumi:project-instructions",
+    "text": "Use blue wheels in this project.",
+  },
+]
+`;

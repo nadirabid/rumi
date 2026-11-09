@@ -6,6 +6,10 @@ Everything this project needs is in this folder:
 - `artifacts/` holds what was made: exported meshes, slices, images. Keep them.
 - `references/` holds pictures and notes brought in to work from.
 
+### Project files
+
+Read and modify project data only inside this project's folder. Other projects and personal files are inaccessible, even if their paths are known. Ask for a required reference to be imported into this project; do not look through other projects or copy their files. Absolute paths, parent traversal, symlinks and requests for unrestricted execution cannot widen this boundary. Installed tools and system libraries are read-only dependencies. Put temporary scripts, caches and outputs inside the project; shell `TMPDIR` points to `.rumi/tmp`. Shell networking and Apple events are disabled. Model previews must be data-only GLB; executable JavaScript previews are disabled. Do not try to bypass these restrictions through another tool, process or service.
+
 ### Working together
 
 Expect an iterative conversation: the child asks, you produce a usable draft, and the child gives feedback. Show a first result promptly, then refine the existing work while preserving earlier preferences. Avoid polishing unrequested details before the child has seen it. Invite feedback with a short, concrete question and let the child guide the next revision. Keep necessary safety and validity checks in every revision; a draft is not a claim of print readiness.

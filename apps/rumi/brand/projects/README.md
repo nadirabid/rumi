@@ -37,6 +37,16 @@ The host half owns the filesystem and returns each project's absolute `path`; th
 
 Settings, plugins, and automation lose their sidebar home with the navigation column. They stay reachable through the app menu and their shortcuts.
 
+## Project isolation
+
+Agent file operations are limited to the directory registered for their session in `project.json`. Canonical path checks cover reads and writes, including absolute paths, parent traversal and existing symlinks. Shell and search subprocesses run under macOS Seatbelt with the same limits inherited by child processes. Saved full-access modes and escalation requests cannot widen access. Denials are recorded as tool results in the session.
+
+Installed application resources, system executables and the shared dependency runtime are read-only exceptions; they are not project storage. The `rumi-project-scope` provider accepts absolute `workspaceRoot` and `runtimeRoots` configuration. Runtime grants must contain only trusted runtime files. Project instructions come only from the owning root `AGENTS.md`, through logged runtime context; ancestor, global and nested instruction discovery is disabled. `instructionMaxBytes` defaults to 65,536 and accepts 1–1,048,576 bytes; oversized instructions fail instead of truncating. The gallery, session persistence and automatic validation remain trusted application operations outside the agent tool scope. This policy does not sandbox Codex or other applications running outside Rumi.
+
+Commands use project-local `.rumi/tmp` scratch storage and the project as `HOME`. Network access, Apple events, hard-link creation, symlink creation and directory removal or renaming are denied. These restrictions prevent subprocesses from using another service or replacing directory identities to evade host path checks. Files inside the project can still be created, edited and removed. Tools without an audited project-access implementation fail closed. This provider requires macOS; unsupported platforms fail at load.
+
+On upgrade, Rumi migrates its seeded profile policy to `workspace-write` while preserving unrelated custom profile entries. Existing project files and session logs need no migration. Import required assets into the current project's `references/` directory before asking the agent to use them; references to another project's paths are denied. Executable JavaScript model previews are disabled; export GLB using the confined modeling tools. Custom tools must be reviewed and added to the admission list before they can execute.
+
 ## Gallery appearance
 
 The gallery uses neutral board covers, a three-column grid that reduces to two or one column on narrow windows, and a circular New control. Covers show the last successfully previewed model as a fitted 480 × 320 PNG, saved as `.preview.png` in the project directory. The open 3D viewport captures after scene changes settle, reusing its loaded geometry and renderer. The gallery loads images lazily and never builds meshes or creates WebGL contexts. Projects without a saved preview show a neutral placeholder until their model is opened. Failed model builds retain the last successful cover; source changes made without opening the preview are not reflected. Colors follow the active DSH theme. The glass treatment is CSS, not native SwiftUI Liquid Glass.

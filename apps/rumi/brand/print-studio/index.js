@@ -38,10 +38,12 @@ export const Config = z.object({
   bulletExecutable: z.string().default(''),
   blenderHome: z.string().default(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi')),
   validationStateDirectory: z.string().min(1).default(join(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi'), 'validation')),
-  validationRepairAttempts: z.number().step(1).min(0).max(10).default(3),
+  validationRepairAttempts: z.number().step(1).min(0).max(10).default(5),
   validationTimeoutMs: z.number().step(1).min(1000).max(300000).default(60000),
-  mechanicsTimeoutMs: z.number().step(1).min(1000).max(300000).default(120000),
+  mechanicsTimeoutMs: z.number().step(1).min(1000).max(600000).default(300000),
   mechanics: z.object({
+    maxTotalSteps: z.number().step(1).min(1000).max(10000000).default(2000000),
+    retentionWorkers: z.number().step(1).min(1).max(4).default(2),
     gravityMps2: z.tuple([z.number().min(-20).max(20), z.number().min(-20).max(20), z.number().min(-20).max(20)]).default([0, 0, -9.81]),
     friction: z.number().min(0).max(1).default(0.2),
     movementSampleDegrees: z.number().min(1).max(90).default(15),
@@ -56,7 +58,7 @@ export const Config = z.object({
     forceN: z.number().min(0.001).max(10).default(1),
     torqueNm: z.number().min(0.000001).max(1).default(0.05),
     linearToleranceMm: z.number().min(0.01).max(2).default(0.5),
-    angularToleranceDegrees: z.number().min(0.1).max(10).default(3),
+    angularToleranceDegrees: z.number().min(0.1).max(10).default(5),
     maxPenetrationMm: z.number().min(0.001).max(0.5).default(0.05),
   }).default({}),
   validation: z.object({

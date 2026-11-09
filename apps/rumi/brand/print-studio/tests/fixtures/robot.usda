@@ -1,0 +1,78 @@
+#usda 1.0
+(
+    defaultPrim = "Model"
+    doc = "Blender v4.5.15 LTS"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "Model" (
+    prepend apiSchemas = ["IsaacRobotAPI", "PhysicsArticulationRootAPI"]
+    customData = {
+        dictionary Blender = {
+            bool generated = 1
+        }
+    }
+)
+{
+    rel isaac:physics:robotJoints = </Model/DoorHinge>
+    rel isaac:physics:robotLinks = [
+        </Model/Body>,
+        </Model/Door>,
+    ]
+    token rumi:manufacturingMode = "print-in-place"
+
+    def Mesh "Door" (
+        active = true
+        prepend apiSchemas = ["IsaacLinkAPI", "PhysicsRigidBodyAPI", "PhysicsCollisionAPI"]
+    )
+    {
+        float3[] extent = [(-0.01, -0.01, -0.01), (0.01, 0.01, 0.01)]
+        int[] faceVertexCounts = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+        int[] faceVertexIndices = [1, 2, 0, 3, 6, 2, 7, 4, 6, 5, 0, 4, 6, 0, 2, 3, 5, 7, 1, 3, 2, 3, 7, 6, 7, 5, 4, 5, 1, 0, 6, 4, 0, 3, 1, 5]
+        normal3f[] normals = [(-1, 0, 0), (-1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (1, 0, 0), (1, 0, 0), (1, 0, 0), (0, -1, 0), (0, -1, 0), (0, -1, 0), (0, 0, -1), (0, 0, -1), (0, 0, -1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (-1, 0, 0), (-1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (1, 0, 0), (1, 0, 0), (1, 0, 0), (0, -1, 0), (0, -1, 0), (0, -1, 0), (0, 0, -1), (0, 0, -1), (0, 0, -1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (
+            interpolation = "faceVarying"
+        )
+        point3f[] points = [(-0.01, -0.01, -0.01), (-0.01, -0.01, 0.01), (-0.01, 0.01, -0.01), (-0.01, 0.01, 0.01), (0.01, -0.01, -0.01), (0.01, -0.01, 0.01), (0.01, 0.01, -0.01), (0.01, 0.01, 0.01)]
+        texCoord2f[] primvars:st = [(0.625, 0), (0.375, 0.25), (0.375, 0), (0.625, 0.25), (0.375, 0.5), (0.375, 0.25), (0.625, 0.5), (0.375, 0.75), (0.375, 0.5), (0.625, 0.75), (0.375, 1), (0.375, 0.75), (0.375, 0.5), (0.125, 0.75), (0.125, 0.5), (0.875, 0.5), (0.625, 0.75), (0.625, 0.5), (0.625, 0), (0.625, 0.25), (0.375, 0.25), (0.625, 0.25), (0.625, 0.5), (0.375, 0.5), (0.625, 0.5), (0.625, 0.75), (0.375, 0.75), (0.625, 0.75), (0.625, 1), (0.375, 1), (0.375, 0.5), (0.375, 0.75), (0.125, 0.75), (0.875, 0.5), (0.875, 0.75), (0.625, 0.75)] (
+            interpolation = "faceVarying"
+        )
+        uniform token subdivisionScheme = "none"
+        float3 xformOp:rotateXYZ = (0, -0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.02500000037252903, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+    }
+
+    def Mesh "Body" (
+        active = true
+        prepend apiSchemas = ["IsaacLinkAPI", "PhysicsRigidBodyAPI", "PhysicsCollisionAPI"]
+    )
+    {
+        float3[] extent = [(-0.01, -0.01, -0.01), (0.01, 0.01, 0.01)]
+        int[] faceVertexCounts = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+        int[] faceVertexIndices = [1, 2, 0, 3, 6, 2, 7, 4, 6, 5, 0, 4, 6, 0, 2, 3, 5, 7, 1, 3, 2, 3, 7, 6, 7, 5, 4, 5, 1, 0, 6, 4, 0, 3, 1, 5]
+        normal3f[] normals = [(-1, 0, 0), (-1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (1, 0, 0), (1, 0, 0), (1, 0, 0), (0, -1, 0), (0, -1, 0), (0, -1, 0), (0, 0, -1), (0, 0, -1), (0, 0, -1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (-1, 0, 0), (-1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (1, 0, 0), (1, 0, 0), (1, 0, 0), (0, -1, 0), (0, -1, 0), (0, -1, 0), (0, 0, -1), (0, 0, -1), (0, 0, -1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (
+            interpolation = "faceVarying"
+        )
+        point3f[] points = [(-0.01, -0.01, -0.01), (-0.01, -0.01, 0.01), (-0.01, 0.01, -0.01), (-0.01, 0.01, 0.01), (0.01, -0.01, -0.01), (0.01, -0.01, 0.01), (0.01, 0.01, -0.01), (0.01, 0.01, 0.01)]
+        texCoord2f[] primvars:st = [(0.625, 0), (0.375, 0.25), (0.375, 0), (0.625, 0.25), (0.375, 0.5), (0.375, 0.25), (0.625, 0.5), (0.375, 0.75), (0.375, 0.5), (0.625, 0.75), (0.375, 1), (0.375, 0.75), (0.375, 0.5), (0.125, 0.75), (0.125, 0.5), (0.875, 0.5), (0.625, 0.75), (0.625, 0.5), (0.625, 0), (0.625, 0.25), (0.375, 0.25), (0.625, 0.25), (0.625, 0.5), (0.375, 0.5), (0.625, 0.5), (0.625, 0.75), (0.375, 0.75), (0.625, 0.75), (0.625, 1), (0.375, 1), (0.375, 0.5), (0.375, 0.75), (0.125, 0.75), (0.875, 0.5), (0.875, 0.75), (0.625, 0.75)] (
+            interpolation = "faceVarying"
+        )
+        uniform token subdivisionScheme = "none"
+    }
+
+    def PhysicsRevoluteJoint "DoorHinge" (
+        prepend apiSchemas = ["IsaacJointAPI"]
+    )
+    {
+        uniform token physics:axis = "Z"
+        rel physics:body0 = </Model/Body>
+        rel physics:body1 = </Model/Door>
+        point3f physics:localPos0 = (0.015, 0, 0)
+        point3f physics:localPos1 = (-0.01, 0, 0)
+        float physics:lowerLimit = 0
+        float physics:upperLimit = 90
+        string rumi:control = "Door"
+    }
+}

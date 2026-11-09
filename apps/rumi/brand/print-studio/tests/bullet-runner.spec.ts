@@ -66,10 +66,25 @@ it('kills and awaits an admitted child when its validation is superseded', async
 
 it.each([
   ['deadline', 'process.stdin.resume(); setInterval(() => {}, 1000);', 'timed out', 100],
-  ['output limit', "process.stdin.resume(); process.stdout.write('x'.repeat(1024 * 1024 + 1));", 'exceeded', 5000],
+  ['output limit', "process.stdin.resume(); process.stdout.write('x'.repeat(8 * 1024 * 1024 + 1));", 'exceeded', 5000],
   ['nonzero exit', "process.stdin.resume(); process.stderr.write('native failure'); process.exitCode = 3;", 'native failure', 5000],
   ['invalid JSON', "process.stdin.resume(); process.stdout.write('invalid');", 'JSON', 5000],
 ])('does not turn %s into a passing check', async (_name, source, error, timeout) => {
   const fixture = await helper(String(source), Number(timeout))
   await expect(runBullet(fixture.config, { assembly }, new AbortController().signal)).rejects.toThrow(String(error))
+})
+
+it('accepts bounded reports larger than one MiB', async () => {
+  const large = { ...report, connections: Array.from({ length: 8 }, (_, index) => ({
+    ...connection, id: `joint-${index}`, probes: Array.from({ length: 1000 }, () => ({
+      status: 'passed', kind: 'retention', maxPivotDriftMm: 0.01, maxOffAxisDegrees: 0.01,
+      maxPenetrationMm: 0.001, maxForceN: 0.01, maxTorqueNm: 0.001, durationSeconds: 0.05,
+    })),
+  })) }
+  const expected = { ...assembly, connections: large.connections }
+  large.coverage = { ...report.coverage, connections: large.connections.map(item => item.id) }
+  const serialized = JSON.stringify(large)
+  expect(Buffer.byteLength(serialized)).toBeGreaterThan(1024 * 1024)
+  const fixture = await helper(`process.stdin.resume(); process.stdin.on('end', () => process.stdout.write(${JSON.stringify(serialized)}));`)
+  expect(await runBullet(fixture.config, { assembly: expected }, new AbortController().signal)).toEqual(large)
 })

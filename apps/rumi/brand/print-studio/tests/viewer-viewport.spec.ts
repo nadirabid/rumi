@@ -2,8 +2,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import * as THREE from 'three'
 import { createViewport } from '../viewer/viewport/index.js'
-import { assemblyGlb } from './fixtures/assembly-glb.js'
-import { generateModule } from '../viewer/generation/export.js'
+import { robotUsd } from './fixtures/robot-usd.js'
+import { generateStl } from '../viewer/generation/export.js'
 
 const state = vi.hoisted(() => ({ renderer: null, controls: null, resize: null }))
 vi.mock('three', async (importOriginal) => {
@@ -63,12 +63,11 @@ function container() {
 }
 
 async function boxBytes(width: number, height: number, depth: number, name = 'design') {
-  const result = await generateModule({ build(T: typeof THREE) {
-    const mesh = new T.Mesh(new T.BoxGeometry(width, height, depth), new T.MeshStandardMaterial())
-    mesh.name = name
-    return mesh
-  } }, {})
-  return result.bytes
+  const geometry = new THREE.BoxGeometry(width, height, depth).toNonIndexed()
+  const bytes = await generateStl(geometry.getAttribute('position').array)
+  geometry.dispose()
+  const text = new TextDecoder().decode(bytes).replaceAll('Imported_mesh', name)
+  return new TextEncoder().encode(text).buffer
 }
 async function boxUrl(width: number, height: number, depth: number, name = 'design') {
   return 'data:application/octet-stream;base64,' + Buffer.from(await boxBytes(width, height, depth, name)).toString('base64')
@@ -157,7 +156,7 @@ it('releases the renderer, the controls, and every resource once', async () => {
 
 it('reloads source models without resetting the camera and keeps the last build on failure', async () => {
   const viewport = createViewport(container(), vi.fn())
-  const spec = { format: 'glb', url: await boxUrl(10, 2, 3), transform: { scale: 1, rotate: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 0 } } }
+  const spec = { format: 'usd', url: await boxUrl(10, 2, 3), transform: { scale: 1, rotate: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 0 } } }
   const report = await viewport.applyDesign(spec, null)
   expect(report.dimensions.x).toBe(10)
   const camera = state.renderer.render.mock.calls.at(-1)[1]
@@ -165,18 +164,18 @@ it('reloads source models without resetting the camera and keeps the last build 
   await viewport.applyDesign({ ...spec, url: await boxUrl(20, 2, 3) }, null)
   expect(camera.position.equals(position)).toBe(true)
   const scene = rendered()
-  expect(new THREE.Box3().setFromObject(scene.getObjectByName('design')).getSize(new THREE.Vector3()).x).toBe(20)
-  await expect(viewport.applyDesign({ ...spec, url: 'data:application/octet-stream;base64,YmFk' }, null)).rejects.toThrow('GLB')
-  expect(new THREE.Box3().setFromObject(scene.getObjectByName('design')).getSize(new THREE.Vector3()).x).toBe(20)
+  expect(new THREE.Box3().setFromObject(scene.getObjectByName('design')).getSize(new THREE.Vector3()).x).toBeCloseTo(20, 4)
+  await expect(viewport.applyDesign({ ...spec, url: 'data:application/octet-stream;base64,YmFk' }, null)).rejects.toThrow('USD')
+  expect(new THREE.Box3().setFromObject(scene.getObjectByName('design')).getSize(new THREE.Vector3()).x).toBeCloseTo(20, 4)
   viewport.dispose()
 })
 
-it('discards a GLB load that completes after the viewport is disposed', async () => {
+it('discards a USD load that completes after the viewport is disposed', async () => {
   const response = Promise.withResolvers<Response>(), entered = Promise.withResolvers<void>()
   const bytes = await boxBytes(1, 2, 3)
   vi.stubGlobal('fetch', vi.fn(() => { entered.resolve(); return response.promise }))
   const viewport = createViewport(container(), vi.fn())
-  const loading = viewport.applyDesign({ format: 'glb', url: '/late.glb', transform: {} }, null)
+  const loading = viewport.applyDesign({ format: 'usd', url: '/late.usda', transform: {} }, null)
   await entered.promise
   const disposed = viewport.dispose()
   response.resolve(new Response(bytes))
@@ -184,28 +183,28 @@ it('discards a GLB load that completes after the viewport is disposed', async ()
   await disposed
 })
 
-it('keeps the latest GLB revision when an older fetch completes later', async () => {
+it('keeps the latest USD revision when an older fetch completes later', async () => {
   const older = Promise.withResolvers<Response>(), entered = Promise.withResolvers<void>()
   const oldBytes = await boxBytes(1, 2, 3), newBytes = await boxBytes(50, 2, 3, 'newest')
   vi.stubGlobal('fetch', vi.fn((url) => {
-    if (url === '/older.glb') { entered.resolve(); return older.promise }
+    if (url === '/older.usda') { entered.resolve(); return older.promise }
     return Promise.resolve(new Response(newBytes))
   }))
   const viewport = createViewport(container(), vi.fn())
-  const first = viewport.applyDesign({ format: 'glb', url: '/older.glb', transform: {} }, null)
+  const first = viewport.applyDesign({ format: 'usd', url: '/older.usda', transform: {} }, null)
   await entered.promise
-  const report = await viewport.applyDesign({ format: 'glb', url: '/newer.glb', transform: {} }, null)
+  const report = await viewport.applyDesign({ format: 'usd', url: '/newer.usda', transform: {} }, null)
   expect(report.dimensions.x).toBe(50)
   older.resolve(new Response(oldBytes))
   expect(await first).toBeNull()
-  expect(new THREE.Box3().setFromObject(rendered().getObjectByName('newest')).getSize(new THREE.Vector3()).x).toBe(50)
+  expect(new THREE.Box3().setFromObject(rendered().getObjectByName('newest')).getSize(new THREE.Vector3()).x).toBeCloseTo(50, 4)
   await viewport.dispose()
 })
 
 it('frames the current design before applying a requested camera angle', async () => {
   const viewport = createViewport(container(), vi.fn())
   const url = await boxUrl(100, 20, 30)
-  await viewport.applyDesign({ format: 'glb', url, transform: {}, camera: { id: 'front', azimuth: 0, elevation: 0 } }, null)
+  await viewport.applyDesign({ format: 'usd', url, transform: {}, camera: { id: 'front', azimuth: 0, elevation: 0 } }, null)
   const camera = state.renderer.render.mock.calls.at(-1)[1]
   expect(camera.position.x).toBeCloseTo(0)
   expect(camera.position.y).toBeLessThan(-100)
@@ -242,7 +241,7 @@ it('captures loaded geometry at cover size and restores the viewport even when e
 it('owns a temporary overlay separately from design geometry and excludes it from covers', async () => {
   const viewport = createViewport(container(), vi.fn())
   const url = await boxUrl(10, 20, 30, 'highlight-subject')
-  const spec = { format: 'glb', url, transform: {}, highlight: { id: 'region-1', label: 'Top', blobs: [
+  const spec = { format: 'usd', url, transform: {}, highlight: { id: 'region-1', label: 'Top', blobs: [
     { center: [0, 0, 15], radii: [10, 10, 3], rotationDegrees: [0, 0, 0] },
   ] } }
   const report = await viewport.applyDesign(spec, null)
@@ -352,7 +351,7 @@ it('captures the same displayed Gaussian in model coordinates and restores scree
     await viewport.apply({ revision: 7, volume: null, objects: [] })
     const url = await boxUrl(10, 10, 10, 'faceplate')
     const transform = { scale: 2, rotate: { x: 0, y: 0, z: 30 }, position: { x: 4, y: 8, z: 0 } }
-    await viewport.applyDesign({ format: 'glb', path: '/model.glb', revision: 3, url, transform }, null)
+    await viewport.applyDesign({ format: 'usd', path: '/model.usda', revision: 3, url, transform }, null)
     state.resize()
     const camera = state.renderer.render.mock.calls.at(-1)[1]
     camera.lookAt(state.controls.target)
@@ -360,11 +359,14 @@ it('captures the same displayed Gaussian in model coordinates and restores scree
     move({ clientX: 200, clientY: 150, pointerType: 'mouse' })
     const capture = viewport.captureCursor()
     expect(capture.status).toBe('captured')
-    expect(capture.identity).toEqual({ sceneRevision: 7, design: { path: '/model.glb', revision: 3, url, transform } })
-    expect(capture.region.partPath).toEqual(['faceplate'])
+    expect(capture.identity).toEqual({ sceneRevision: 7, design: { path: '/model.usda', revision: 3, url, transform } })
+    expect(capture.region.partPath).toEqual(['Model', 'faceplate'])
     expect(capture.region.objectId).toBeNull()
     expect(capture.region.modelLocalBlob.radii[0]).toBeCloseTo(capture.region.worldRadius / 2)
-    const root = rendered().getObjectByName('faceplate').parent
+    let root = rendered().getObjectByName('faceplate')
+    while (!root.userData.rumiCoordinateFrame) root = root.parent
+    while (root.parent?.userData.rumiCoordinateFrame) root = root.parent
+    root = root.parent
     const world = new THREE.Vector3(...capture.region.modelLocalBlob.center).applyMatrix4(root.matrixWorld)
     expect(world.distanceTo(new THREE.Vector3(...capture.region.worldPoint))).toBeLessThan(1e-6)
     expect(capture.image).toBe('data:image/png;base64,cG5n')
@@ -377,7 +379,7 @@ it('captures the same displayed Gaussian in model coordinates and restores scree
     expect(refined.status).toBe('captured')
     expect(refined.region.worldPoint).toEqual(capture.region.worldPoint)
     expect(refined.region.selection.mode).toBe('surface')
-    await viewport.applyDesign({ format: 'glb', path: '/model.glb', revision: 3, url, transform: { ...transform, scale: 3 } }, null)
+    await viewport.applyDesign({ format: 'usd', path: '/model.usda', revision: 3, url, transform: { ...transform, scale: 3 } }, null)
     expect(viewport.captureCursor({ command: 'part', anchorId: refined.region.anchorId })).toEqual({ status: 'stale_view' })
   } finally { viewport.dispose() }
 })
@@ -386,7 +388,7 @@ it('reuses measured geometry and GPU resources for highlight-only changes', asyn
   const viewport = createViewport(container(), vi.fn())
   try {
     const url = await boxUrl(10, 20, 30, 'retained')
-    const spec = { format: 'glb', url, transform: {} }
+    const spec = { format: 'usd', url, transform: {} }
     const report = await viewport.applyDesign(spec, null)
     const mesh = rendered().getObjectByName('retained')
     const geometry = mesh.geometry, material = mesh.material
@@ -406,39 +408,39 @@ it('reuses measured geometry and GPU resources for highlight-only changes', asyn
   } finally { viewport.dispose() }
 })
 
-it('rejects executable previews while preserving the last loaded GLB', async () => {
+it('rejects executable previews while preserving the last loaded USD', async () => {
   const viewport = createViewport(container(), vi.fn())
   try {
-    await viewport.applyDesign({ format: 'glb', url: await boxUrl(60, 60, 60), transform: {} }, null)
+    await viewport.applyDesign({ format: 'usd', url: await boxUrl(60, 60, 60), transform: {} }, null)
     const mesh = rendered().getObjectByName('design')
-    await expect(viewport.applyDesign({ format: 'javascript', url: 'data:text/javascript,throw new Error("executed")', transform: {} }, null)).rejects.toThrow('Project isolation requires a GLB')
+    await expect(viewport.applyDesign({ format: 'javascript', url: 'data:text/javascript,throw new Error("executed")', transform: {} }, null)).rejects.toThrow('Project isolation requires a USD')
     expect(rendered().getObjectByName('design')).toBe(mesh)
   } finally { await viewport.dispose() }
 })
 
-it('shows GLB movement, retains its pose across reloads and restores saved geometry for edits', async () => {
+it('shows USD movement, retains its pose across reloads and restores saved geometry for edits', async () => {
   const viewport = createViewport(container(), vi.fn())
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(assemblyGlb())))
-  const spec = { path: 'models/car/model.glb', format: 'glb', url: 'https://example.test/model.glb', transform: {} }
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(robotUsd())))
+  const spec = { path: 'models/car/model.usda', format: 'usd', url: 'https://example.test/model.usda', transform: {} }
   try {
     const report = await viewport.applyDesign(spec, null)
     await viewport.applyShape(null)
-    expect(viewport.motionControls().controls.map(control => control.label)).toEqual(['Right door', 'Slide'])
-    expect(viewport.updateMotion({ joint0: 60, joint1: 5 })).toBe(true)
-    expect(viewport.modelParameters()).toEqual({ joint0: 0, joint1: 0 })
-    expect(() => viewport.updateMotion({ joint0: 200, joint1: 5 })).toThrow('outside range')
-    expect(viewport.motionControls().values).toEqual({ joint0: 60, joint1: 5 })
+    expect(viewport.motionControls().controls.map(control => control.label)).toEqual(['Door'])
+    expect(viewport.updateMotion({ joint0: 60 })).toBe(true)
+    expect(viewport.modelParameters()).toEqual({ joint0: 0 })
+    expect(() => viewport.updateMotion({ joint0: 200 })).toThrow('outside range')
+    expect(viewport.motionControls().values).toEqual({ joint0: 60 })
     await viewport.applyDesign({ ...spec, url: spec.url + '?revision=2' }, null)
     await viewport.applyShape(null)
-    expect(viewport.motionControls().values).toEqual({ joint0: 60, joint1: 5 })
+    expect(viewport.motionControls().values).toEqual({ joint0: 60 })
     expect(await viewport.applyDesign({ ...spec, url: spec.url + '?revision=2' }, null)).toEqual(report)
     const visible = []
-    rendered().traverseVisible((node) => { if (node.isMesh && node.name === 'Slide') visible.push(node) })
+    rendered().traverseVisible((node) => { if (node.isMesh && node.name === 'Door') visible.push(node) })
     expect(visible).toHaveLength(1)
     expect(Math.atan2(visible[0].matrix.elements[1], visible[0].matrix.elements[0])).toBeCloseTo(Math.PI / 3)
-    viewport.updateMotion({ joint0: 0, joint1: 0 })
+    viewport.updateMotion({ joint0: 0 })
     const reset = []
-    rendered().traverseVisible((node) => { if (node.isMesh && node.name === 'Slide') reset.push(node) })
+    rendered().traverseVisible((node) => { if (node.isMesh && node.name === 'Door') reset.push(node) })
     expect(reset).toHaveLength(1)
     expect(reset[0].matrix.elements[1]).toBe(0)
   } finally { viewport.dispose() }

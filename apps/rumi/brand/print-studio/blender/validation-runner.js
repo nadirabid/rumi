@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { blenderStatus } from './host.js'
-import { validateGlb } from '../viewer/glb.js'
-import { mechanismMetadata } from '../viewer/mechanics.js'
+import { validateUsd } from '../viewer/usd.js'
+import { validateRobotAssembly } from '../viewer/mechanics.js'
 import { runBullet } from '../bullet/runner.js'
 
 /**
@@ -18,19 +18,21 @@ import { runBullet } from '../bullet/runner.js'
  * @returns {Promise<object>} Validated structured findings.
  */
 export async function runValidation(config, input, signal) {
-  const metadata = input.format === 'glb' ? mechanismMetadata(validateGlb(input.bytes)) : { declared: true, assembly: { version: 1, root: 'model', parts: [{ id: 'model', mesh: 'model' }],
-    connections: [], sequences: [], manufacturing: { mode: 'print-in-place' } }, motionKeys: [], motionRanges: [], checks: [] }
+  if (!['usd', 'stl'].includes(input.format)) throw new Error('Validation requires USD or STL')
+  if (input.format === 'usd') validateUsd(input.bytes)
+  const staticMetadata = validateRobotAssembly({ nodes: [{ name: 'model', mesh: 0 }] })
+  let metadata
   const blender = await blenderStatus(config.blenderExecutable, config.blenderHome)
   if (blender.status !== 'ready') throw new Error(blender.message)
   const directory = await mkdtemp(join(tmpdir(), 'rumi-validation-'))
   try {
-    const path = join(directory, `model.${input.format}`), output = join(directory, 'result.json')
+    const path = join(directory, `model.${input.format === 'usd' ? 'usda' : input.format}`), output = join(directory, 'result.json')
     await writeFile(path, input.bytes, { flag: 'wx', mode: 0o600 })
     const request = join(directory, 'request.json')
     const mechanicsOutput = join(directory, 'mechanics.json')
     await writeFile(request, JSON.stringify({ input: path, output, transform: input.transform, volume: input.volume,
       settings: config.validation,
-      ...(metadata.assembly && !metadata.checks.length ? { mechanicsOutput, assembly: metadata.assembly } : {}),
+      mechanicsOutput, ...(input.format === 'stl' ? { assembly: staticMetadata.assembly } : {}),
     }), { flag: 'wx', mode: 0o600 })
     const script = fileURLToPath(new URL('./validate.py', import.meta.url)).replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`)
     signal.throwIfAborted()
@@ -57,6 +59,11 @@ export async function runValidation(config, input, signal) {
       || report.printReady !== false || !Array.isArray(report.checks) || report.checks.length > 32
       || !report.checks.every(c => typeof c.code === 'string' && Number.isSafeInteger(c.count) && c.count >= 0 && ['warning', 'error'].includes(c.severity))
       || !['x', 'y', 'z'].every(a => Number.isFinite(report.dimensions?.[a]) && report.dimensions[a] >= 0)) throw new Error('Invalid Blender validation report')
+    metadata = report.robotError
+      ? { declared: true, assembly: null, motionKeys: [], motionRanges: [], checks: [{ code: 'assembly_description_invalid', severity: 'error', count: 1, message: report.robotError }] }
+      : report.robot ? validateRobotAssembly(report.robot) : staticMetadata
+    delete report.robot
+    delete report.robotError
     report.intent = { assembly: metadata.assembly, motionKeys: metadata.motionKeys, motionRanges: metadata.motionRanges }
     if (metadata.declared || metadata.checks.length) {
       let mechanics

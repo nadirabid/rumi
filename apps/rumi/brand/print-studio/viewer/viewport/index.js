@@ -2,7 +2,7 @@ import { createShapeDeformer } from '../analog/gpu.js'
 import { createParameterPreview } from '../analog/parameters.js'
 import { readMotion } from '../motion.js'
 import { controlValues } from '../analog/control-spec.js'
-import { parseGlbModel } from './glb.js'
+import { parseUsdModel } from './usd.js'
 import { createModelArtifacts } from '../generation/artifacts.js'
 import { generateStl } from '../generation/export.js'
 /**
@@ -397,7 +397,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
           const release = artifact.retain()
           let next
           try {
-            next = await parseGlbModel(artifact.bytes)
+            next = await parseUsdModel(artifact.bytes)
             next = { ...next, parameters: { ...artifact.parameters, ...next.parameters }, generate: artifact.generate, release }
             const retained = poses.get(spec.path)
             next.motion = readMotion(next.motionDefinitions, next.parameters, retained?.identity === next.poseIdentity ? retained?.values ?? {} : {})
@@ -427,7 +427,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         try {
           for (const spec of view.objects) {
             if (geometries.has(spec.datablockId) || loaded.has(spec.datablockId)) continue
-            const model = await parseGlbModel(await generateStl(spec.positions))
+            const model = await parseUsdModel(await generateStl(spec.positions))
             loaded.set(spec.datablockId, model)
             if (closed || request !== sceneGeneration) return
           }

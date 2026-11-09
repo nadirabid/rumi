@@ -1,4 +1,5 @@
 /** GLB import preserves physical coordinates and never loads external resources. */
+import { robotUsd } from './fixtures/robot-usd.js'
 import { Context } from '@deepseek-ai/cordis'
 import { expect, it } from 'vitest'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
@@ -56,33 +57,34 @@ it('rejects external resources, animation and truncated containers before parsin
   expect(() => validateGlb(glb().subarray(0, 24))).toThrow('container')
 })
 
-it('publishes immutable GLBs, retains the previous version on a partial save and discovers GLB first', async () => {
+it('publishes immutable USD layers, retains the previous version on a partial save and discovers USD first', async () => {
   const root = await mkdtemp(join(tmpdir(), 'rumi-glb-'))
   const owner = new Context()
   const routes = new Map<string, () => Promise<Response>>()
   try {
     const directory = join(root, 'models', 'helmet')
     await mkdir(directory, { recursive: true })
-    const path = join(directory, 'model.glb')
-    await writeFile(path, glb())
+    const path = join(directory, 'model.usda')
+    await writeFile(path, robotUsd())
     await writeFile(join(directory, 'model.js'), 'legacy')
-    const ctx = { effect: owner.effect.bind(owner), connection: { fetch: { register(route: { path: string; fetch: () => Promise<Response> }) {
-      routes.set(route.path, route.fetch)
-      return () => { routes.delete(route.path) }
-    } } } }
+    const ctx = { effect: owner.effect.bind(owner),
+      connection: { fetch: { register(route: { path: string; fetch: () => Promise<Response> }) {
+        routes.set(route.path, route.fetch)
+        return () => { routes.delete(route.path) }
+      } } } }
     const source = await createSource(ctx, path, root)
     const before = source.state()
-    expect(before.format).toBe('glb')
-    expect(await discoverModels(root)).toEqual([{ name: 'helmet', path: 'models/helmet/model.glb' }])
-    expect((await routes.get(before.url)!()).headers.get('content-type')).toBe('model/gltf-binary')
+    expect(before.format).toBe('usd')
+    expect(await discoverModels(root)).toEqual([{ name: 'helmet', path: 'models/helmet/model.usda' }])
+    expect((await routes.get(before.url)!()).headers.get('content-type')).toBe('model/vnd.usda; charset=utf-8')
     await writeFile(path, 'partial export')
     await source.poll()
     expect(source.state()).toMatchObject({ url: before.url, error: { kind: 'source' } })
-    await writeFile(path, glb({ extras: { revision: 2 } }))
+    await writeFile(path, new Uint8Array([...robotUsd(), ...new TextEncoder().encode('\n# revision 2\n')]))
     await source.poll(); await source.poll()
     expect(source.state().url).not.toBe(before.url)
     expect(source.state().error).toBeNull()
-    expect(new Uint8Array(await (await routes.get(before.url)!()).arrayBuffer())).toEqual(glb())
+    expect(new Uint8Array(await (await routes.get(before.url)!()).arrayBuffer())).toEqual(robotUsd())
     await source.dispose()
     expect(routes.size).toBe(0)
   } finally { await owner.fiber.dispose(); await rm(root, { recursive: true, force: true }) }

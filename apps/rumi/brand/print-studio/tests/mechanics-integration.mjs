@@ -4,6 +4,8 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { parseUsdModel } from '../viewer/viewport/usd.js'
+import { disposeModel } from '../viewer/viewport/model.js'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const [blenderExecutable, bulletExecutable, packagedPlugin] = process.argv.slice(2)
@@ -23,13 +25,36 @@ try {
   })
   const defaults = packagedPlugin ? (await import(pathToFileURL(join(packagedPlugin, 'index.js')).href)).Config({})
     : { validationTimeoutMs: 60000, mechanicsTimeoutMs: 120000, ...JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')) }
+  if (packagedPlugin) {
+    assert.equal(defaults.validationRepairAttempts, 5)
+    assert.equal(defaults.mechanicsTimeoutMs, 300000)
+    assert.equal(defaults.mechanics.maxTotalSteps, 2000000)
+    assert.equal(defaults.mechanics.retentionWorkers, 2)
+  }
   const config = { ...defaults, blenderExecutable: packagedPlugin ? '' : blenderExecutable, bulletExecutable: packagedPlugin ? '' : bulletExecutable }
-  for (const [variant, format] of [['normal', 'glb'], ['broken', 'glb'], ['blocked', 'glb'], ['point-touching', 'glb'], ['wheel', 'glb'], ['static', 'glb'], ['static', 'stl']]) {
+  for (const [variant, format] of [['normal', 'usd'], ['broken', 'usd'], ['blocked', 'usd'], ['point-touching', 'usd'], ['wheel', 'usd'], ['static', 'usd'], ['static', 'stl']]) {
+    if (format === 'usd') {
+      const bytes = new Uint8Array(await readFile(join(directory, variant, 'model.usda')))
+      const model = await parseUsdModel(bytes.buffer)
+      try {
+        assert.equal(model.motionIssue, undefined)
+        const expected = JSON.parse(await readFile(join(directory, variant, 'robot.json'), 'utf8'))
+        assert.deepEqual(model.robot.assembly.parts, expected.parts)
+        assert.equal(model.robot.assembly.root, expected.root)
+        for (const [index, connection] of expected.connections.entries()) {
+          const actual = model.robot.assembly.connections[index]
+          for (const key of ['id', 'parent', 'child', 'kind']) assert.equal(actual[key], connection[key])
+          for (const key of ['axis', 'pivot', 'range']) if (connection[key]) {
+            connection[key].forEach((value, i) => assert(Math.abs(actual[key][i] - value) < .0001, `${variant} ${key}`))
+          }
+        }
+      } finally { disposeModel(model.root) }
+    }
     const start = performance.now()
     // Resolve frictionless hinge contacts at 0.125 ms; packaged cases use production defaults.
     const policy = !packagedPlugin && variant === 'normal'
       ? { ...config, mechanics: { ...config.mechanics, timeStepSeconds: 0.000125 } } : config
-    const report = await runValidation(policy, { bytes: await readFile(join(directory, variant, `model.${format}`)), format,
+    const report = await runValidation(policy, { bytes: await readFile(join(directory, variant, `model.${format === 'usd' ? 'usda' : format}`)), format,
       transform: { scale: 1, rotate: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 0 } }, volume: null }, new AbortController().signal)
     console.log(JSON.stringify({ variant, format, durationMs: Math.round(performance.now() - start), report }))
     const success = ['normal', 'wheel', 'static'].includes(variant)

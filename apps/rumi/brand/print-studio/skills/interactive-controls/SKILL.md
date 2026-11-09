@@ -11,19 +11,19 @@ Use `viewer_controls` with explicit `controls`, `values`, and the current design
 
 ## Persistent movement controls
 
-Doors, wheels, hinges, and other movable features use model-owned movement controls instead of a temporary `viewer_controls` edit. Preserve the GLB assembly declarations and their bindings when repairing the model. Remove a declaration only when its movable feature is removed. Include every separate axle, pin and retaining cap, with real connector geometry. Read [physical movement declarations](../blender-modeling/SKILL.md#declare-physical-movement) for the assembly contract. Executable JavaScript previews and `operation: parameters` are unavailable under project isolation.
+Doors, wheels, hinges, and other movable features use model-owned movement controls instead of a temporary `viewer_controls` edit. Preserve the USD assembly declarations and their bindings when repairing the model. Remove a declaration only when its movable feature is removed. Include every separate axle, pin and retaining cap, with real connector geometry. Read [physical movement declarations](../blender-modeling/SKILL.md#declare-physical-movement) for the assembly contract. Executable JavaScript previews and `operation: parameters` are unavailable under project isolation.
 
 Movement changes only the local preview pose, never saved parameters or validation input, and needs no freeze/save/close. Controls remain visible but disabled while a temporary edit owns the preview. Compatible pose values survive revisions and switching between recent models while the viewer is mounted; reopening starts from saved values. Reset movement before requesting source-bound cursor edits. `viewer_load` feedback exposes rendered declarations under `design.motion`; inspect this feedback before claiming controls are visible. Validation tests the saved physical assembly through Blender and Bullet. Animation and simulation do not certify material strength or print readiness.
 
-For a GLB, publish the physical `rumiAssembly` described in `blender-modeling`; the viewer generates movement sliders directly from its revolute and prismatic joints. Use each connection’s `control` for a short label in the person’s language, or omit it to use the child mesh name. Keep pivots and axes in saved-world millimetres, Z up. The viewer moves descendants with their parents and preserves fixed attachments. It supports trees with up to 12 independent controls; unsupported bindings remain visible as geometry with a diagnostic in the viewer report. Do not create a separate JavaScript model just to animate a GLB. These sliders preview declared motion, not verified physical feasibility.
+Publish USD Physics joints with the Isaac robot annotations described in `blender-modeling`; the viewer generates sliders from revolute and prismatic joints. Use the joint’s `rumi:control` string for a short label in the person’s language, or omit it to use the child mesh name. Author local joint frames in metres/Z up, with rotation limits in degrees. The viewer moves descendants with their parents and preserves fixed attachments. It supports trees with up to 12 independent controls; unsupported bindings remain visible as geometry with a diagnostic in the viewer report. Do not create a separate JavaScript model just to animate a USD. These sliders preview declared motion, not verified physical feasibility.
 
 ## Declare controls
 
 Each declaration has `kind`, `label`, and `axes`. A slider or curve has one axis; a pad has horizontal and vertical axes. Each axis has `key`, `min`, `max`, `step`, and `reset`. Keys bind entries in `values`. Labels are presentation, not behavior. A curve adjusts one bounded scalar with a curve-shaped gesture; it is not arbitrary curve geometry unless the model binds that scalar to its geometry.
 
-Use the supported GLB operations below. Before opening controls, check the lowest, reset, and highest values: the intended feature changes and unrelated features stay intact. Keep the editable Blender original. If an operation cannot represent the requested edit, explain that limitation and make the edit in Blender; do not create executable preview code.
+Use the supported USD operations below. Before opening controls, check the lowest, reset, and highest values: the intended feature changes and unrelated features stay intact. Keep the editable Blender original. If an operation cannot represent the requested edit, explain that limitation and make the edit in Blender; do not create executable preview code.
 
-## Bind existing GLB operations
+## Bind existing USD operations
 
 Read `analog-shaping` for frame, region, part selection, highlighting, and Blender save rules. These operations still execute their existing geometry math; their UI is supplied by the declarations. Their six `values` are normalized 0..1, with neutral values .5. All declared axes must use min 0 and max 1.
 
@@ -37,7 +37,7 @@ Examples:
 Keep the controls open while the person explores. Satisfaction or moving to another task resolves the latest visible edit first; no special confirmation phrase is required. Do not rebuild from the initial tool arguments: release feedback and freeze capture the user's newer values.
 
 1. Call `viewer_controls` with `action: freeze` and the current control `id`. This captures the visible values, locks the controls, and returns a source-bound recipe. A failed freeze is not permission to save stale values.
-2. Apply the frozen GLB recipe with the Blender helper described in `analog-shaping`, publish, and `viewer_load` the result. Preserve unrelated features and verify the new preview before reporting it saved.
+2. Apply the frozen USD recipe with the Blender helper described in `analog-shaping`, publish, and `viewer_load` the result. Preserve unrelated features and verify the new preview before reporting it saved.
 3. Explicit cancel/revert uses `action: close` with the current `id`. It restores the saved preview. Source changes invalidate controls; re-read state and reopen rather than reusing an old id.
 
 Report build/save failures plainly. Failed previews preserve the last successful geometry and values. Never claim an edit is saved while controls remain unresolved.

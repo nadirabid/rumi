@@ -88,7 +88,7 @@ export function smokeBlenderRuntime(resources: string, target: Target): void {
     '    report = helper["publish"](directory)',
     '    assert report["triangles"] == 12, report',
     '    assert all(abs(v - 40) < 0.001 for v in report["dimensionsMm"].values()), report',
-    '    assert pathlib.Path(report["preview"]).read_bytes()[:4] == b"glTF"',
+    '    assert pathlib.Path(report["preview"]).read_bytes()[:9] == b"#usda 1.0"',
     '    bpy.ops.wm.open_mainfile(filepath=report["blend"])',
     '    assert len([o for o in bpy.context.scene.objects if o.type == "MESH"]) == 1',
     `validator = runpy.run_path(str(pathlib.Path(${JSON.stringify(helper)}).with_name("validate.py")))`,

@@ -134,13 +134,13 @@ class NativeTests(unittest.TestCase):
         self.assertFalse(result['coverage']['complete'])
 
     def test_excessive_sequence_work_is_unverified_without_partial_pass(self):
-        value=wheel();value['assembly']['sequences']=[dict(id=str(i),waypoints=[dict(wheel=0) for _ in range(64)]) for i in range(4)]
+        value=wheel();value['settings']['maxTotalSteps']=250000;value['assembly']['sequences']=[dict(id=str(i),waypoints=[dict(wheel=0) for _ in range(64)]) for i in range(4)]
         code,result=run(value)
         self.assertEqual(code,0,result);self.assertEqual(result['status'],'review');self.assertFalse(result['coverage']['complete'])
         self.assertEqual(result['checks'][0]['code'],'probe_budget_exhausted')
 
     def test_large_work_plan_still_detects_a_loose_baseline_part(self):
-        value=loose_pin();value['assembly']['sequences']=[dict(id=str(i),waypoints=[dict(wheel=0) for _ in range(64)]) for i in range(4)]
+        value=loose_pin();value['settings']['maxTotalSteps']=250000;value['assembly']['sequences']=[dict(id=str(i),waypoints=[dict(wheel=0) for _ in range(64)]) for i in range(4)]
         code,result=run(value)
         self.assertEqual(code,0,result);self.assertEqual(result['status'],'needs_repair',result)
         self.assertFalse(result['coverage']['complete']);self.assertFalse(result['assemblyVerified'])
@@ -161,10 +161,33 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(result['checks'][0]['code'],'probe_inconclusive')
 
     def test_simulation_policy_rejects_out_of_bounds_settings(self):
-        for name,setting in [('gravityMps2',[0,0,-21]),('friction',1.01),('movementSampleMm',.01),('assemblySampleMm',3)]:
+        for name,setting in [('gravityMps2',[0,0,-21]),('friction',1.01),('movementSampleMm',.01),('assemblySampleMm',3),('maxTotalSteps',999),('maxTotalSteps',10000001),('maxTotalSteps',1000.5),('retentionWorkers',0),('retentionWorkers',5),('retentionWorkers',1.5)]:
             value=assembly([box('part',[0,0,0],[2,2,2])],'part',[]);value['settings'][name]=setting
             code,result=run(value)
             self.assertEqual(code,2,result);self.assertEqual(result['error']['code'],'invalid_request')
+
+    def test_larger_allowance_completes_the_same_motion_plan(self):
+        value=slider()
+        value['assembly']['sequences']=[dict(id='repeat',waypoints=[{value['assembly']['connections'][0]['id']: 0} for _ in range(64)])]
+        value['settings']['maxTotalSteps']=250000
+        code,limited=run(value)
+        self.assertEqual(code,0,limited)
+        self.assertFalse(limited['coverage']['complete'])
+        self.assertIn('probe_budget_exhausted',[c['code'] for c in limited['checks']])
+        value['settings']['maxTotalSteps']=2000000
+        self.assert_verified(value)
+
+    def test_parallel_probes_preserve_serial_findings_and_coverage(self):
+        for value in [slider(),slider(True),wheel(),loose_pin(),two_wheels()]:
+            outcomes=[]
+            for workers in [1,2,4]:
+                value['settings']['retentionWorkers']=workers
+                code,result=run(value)
+                self.assertEqual(code,0,result)
+                result.pop('elapsedMs');result['policy'].pop('retentionWorkers')
+                outcomes.append(result)
+            self.assertEqual(outcomes[0],outcomes[1])
+            self.assertEqual(outcomes[0],outcomes[2])
 
     def test_legacy_protocol_cannot_pass(self):
         value=request();value['version']=1

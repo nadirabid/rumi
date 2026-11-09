@@ -2,7 +2,7 @@
 import { readdir, readFile, realpath, stat, writeFile, rename, rm } from 'node:fs/promises'
 import { dirname, extname, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import { validateGlb, GLB_MAX_BYTES } from './glb.js'
+import { validateUsd, USD_MAX_BYTES } from './usd.js'
 import { readMotion } from './motion.js'
 import { normalizeHighlight } from './highlight.js'
 import { normalizePlacement } from './transform.js'
@@ -76,7 +76,7 @@ function applyFeedback(state, value) {
  */
 export async function createSource(ctx, path, workspace) {
   let root, entryName
-  const format = extname(path).toLowerCase() === '.glb' ? 'glb' : 'javascript'
+  const format = ['.usda', '.usd'].includes(extname(path).toLowerCase()) ? 'usd' : 'javascript'
   let closed = false
   let pending, hash, candidate, snapshotFiles
   let sourceError = null
@@ -112,12 +112,12 @@ export async function createSource(ctx, path, workspace) {
         files.set(relative(root, path).split(sep).join('/'), content)
       }
     }
-    if (format === 'glb') {
+    if (format === 'usd') {
       const file = resolve(root, entryName)
-      if (!inside(root, await realpath(file))) throw new Error('GLB must remain inside its model folder')
-      if ((await stat(file)).size > GLB_MAX_BYTES) throw new Error('GLB exceeds 64 MiB')
+      if (!inside(root, await realpath(file))) throw new Error('USD must remain inside its model folder')
+      if ((await stat(file)).size > USD_MAX_BYTES) throw new Error('USD exceeds 64 MiB')
       const content = await readFile(file)
-      validateGlb(content)
+      validateUsd(content)
       files.set(entryName, content)
     } else await visit(root)
     if (!files.has(entryName)) throw new Error('The model entry file is missing')
@@ -153,7 +153,7 @@ export async function createSource(ctx, path, workspace) {
             path: `${prefix}/${name.split('/').map(encodeURIComponent).join('/')}`,
             methods: ['GET'], requestBody: 'buffered',
             fetch: async () => new Response(content, { headers: {
-              'content-type': format === 'glb' ? 'model/gltf-binary' : 'text/javascript; charset=utf-8',
+              'content-type': format === 'usd' ? 'model/vnd.usda; charset=utf-8' : 'text/javascript; charset=utf-8',
               'cache-control': 'private, max-age=3600, immutable',
               'x-content-type-options': 'nosniff',
             } }),
@@ -170,7 +170,7 @@ export async function createSource(ctx, path, workspace) {
       state.highlight = null
       state.analog = null
       delete state.motion
-      state.contentHash = format === 'glb' ? createHash('sha256').update(next.files.get(entryName)).digest('hex') : next.hash
+      state.contentHash = format === 'usd' ? createHash('sha256').update(next.files.get(entryName)).digest('hex') : next.hash
       state.parameters = next.parameters
       sourceError = null
       buildError = null
@@ -191,8 +191,8 @@ export async function createSource(ctx, path, workspace) {
     }
     const project = await realpath(workspace)
     const entry = await realpath(path)
-    if (!inside(project, entry) || !['.js', '.mjs', '.glb'].includes(extname(entry).toLowerCase())) {
-      throw new Error('viewer_load requires a .glb, .js or .mjs file inside the project')
+    if (!inside(project, entry) || !['.js', '.mjs', '.usda', '.usd'].includes(extname(entry).toLowerCase())) {
+      throw new Error('viewer_load requires a .usda, .js or .mjs file inside the project')
     }
     root = dirname(entry)
     entryName = relative(root, entry).split(sep).join('/')
@@ -217,7 +217,7 @@ export async function createSource(ctx, path, workspace) {
     },
     /** Copy the current immutable files for validation-owned recovery storage. */
     snapshot: () => ({ entry: entryName, format, files: [...snapshotFiles].map(([name, bytes]) => [name, bytes.slice()]) }),
-    snapshotBytes: () => format === 'glb' ? snapshotFiles.get(entryName).slice() : null,
+    snapshotBytes: () => format === 'usd' ? snapshotFiles.get(entryName).slice() : null,
     poll() {
       if (closed) return Promise.resolve()
       if (!pending) pending = update(false).finally(() => { pending = undefined })
@@ -237,7 +237,7 @@ export async function createSource(ctx, path, workspace) {
     },
     shape(value) {
       if (value.path !== state.path || value.revision !== state.revision || value.url !== state.url || sourceError || buildError || candidate) throw new Error('Model changed; read the current meshState context again')
-      if ((value.operation === 'parameters') !== (format === 'javascript')) throw new Error('Parameter controls require a JavaScript model; deformation controls require a GLB')
+      if ((value.operation === 'parameters') !== (format === 'javascript')) throw new Error('Parameter controls require a JavaScript model; deformation controls require a USD')
       state.analog = { ...normalizeShape(value), id: randomUUID(), frozen: false, freezeRequested: false, rendered: false, editRevision: 0 }
       if (state.analog.operation === 'cut') state.highlight = null
       return state.analog

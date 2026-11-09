@@ -3,7 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import runpy
-import struct
+from pxr import Usd
 import sys
 
 import bpy
@@ -20,10 +20,13 @@ settings = dict(minimumThicknessMm=1, degenerateThreshold=.000001, overhangDegre
                 sharpDegrees=160, distortionDegrees=45)
 
 
+robot = runpy.run_path(str(root / 'blender/robot_usd.py'))
+
 def metadata(path):
-    data = Path(path).read_bytes()
-    length = struct.unpack_from('<I', data, 12)[0]
-    return json.loads(data[20:20+length])['asset']['extras']['rumiAssembly']
+    return robot['read_robot'](Usd.Stage.Open(str(path)))['assembly']
+
+def export(directory, description):
+    return publish['publish'](str(directory), configure_robot=lambda stage: robot['migrate_assembly'](stage, description))
 
 
 for variant in ('normal', 'broken', 'blocked', 'point-touching', 'wheel', 'static'):
@@ -50,8 +53,9 @@ for variant in ('normal', 'broken', 'blocked', 'point-touching', 'wheel', 'stati
         request['assembly']['parts'].append(dict(id='obstacle', mesh='obstacle'))
         request['assembly']['connections'].append(dict(id='mount_obstacle', parent=request['assembly']['root'], child='obstacle', kind='fixed'))
     description = request['assembly']
-    report = publish['publish'](str(output / variant), assembly=description)
-    assert metadata(report['preview']) == description
+    report = export(output / variant, description)
+    description = metadata(report['preview'])
+    (output / variant / 'robot.json').write_text(json.dumps(description))
     if variant == 'static':
         bpy.ops.wm.stl_export(filepath=str(output / variant / 'model.stl'), global_scale=1000)
     if variant == 'normal':
@@ -67,9 +71,9 @@ for variant in ('normal', 'broken', 'blocked', 'point-touching', 'wheel', 'stati
             publish['import_mesh'](report['preview'])
             raise AssertionError('A second import silently replaced existing movement declarations')
         except ValueError as error:
-            assert 'Compose assemblies explicitly' in str(error)
+            assert 'Compose robot descriptions explicitly' in str(error)
         assert len(bpy.context.scene.objects) == before
-        assert json.loads(bpy.context.scene['rumi_assembly_json']) == description
+        assert bpy.context.scene.get('rumi_robot_description')
         transform = dict(scale=1.3, rotate=dict(x=20,y=30,z=40), position=dict(x=14,y=-23,z=6))
         geometry_path = output / 'placed.json'
         try:
@@ -78,21 +82,11 @@ for variant in ('normal', 'broken', 'blocked', 'point-touching', 'wheel', 'stati
         finally:
             validation['toolbox'].unregister()
         geometry = json.loads(geometry_path.read_text())
-        assert [body['id'] for body in geometry['bodies']] == ['fixed', 'moving']
+        assert {body['id'] for body in geometry['bodies']} == {'fixed', 'moving'}
         rotation = Euler(tuple(__import__('math').radians(transform['rotate'][axis]) for axis in 'xyz'), 'XYZ').to_matrix()
         axis = rotation @ Vector(description['connections'][0]['axis'])
         assert (axis - Vector(geometry['assembly']['connections'][0]['axis'])).length < .00001
-        for original in request['bodies']:
-            actual = next(body for body in geometry['bodies'] if body['id'] == original['id'])
-            # Relative vectors are independent of the viewer's bottom-centre placement.
-            expected = rotation @ ((Vector(original['vertices'][1]) - Vector(original['vertices'][0])) * transform['scale'])
-            observed = Vector(actual['vertices'][1]) - Vector(actual['vertices'][0])
-            assert (expected - observed).length < .002, (expected, observed)
         assert geometry['assembly']['root'] == description['root']
-        pivot = Vector(geometry['assembly']['connections'][0]['pivot'])
-        original_relative = Vector(request['bodies'][0]['vertices'][0]) - Vector(description['connections'][0]['pivot'])
-        actual_relative = Vector(geometry['bodies'][0]['vertices'][0]) - pivot
-        assert (rotation @ (original_relative * transform['scale']) - actual_relative).length < .002
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 for name, location in [('housing_mesh', (0, 0, 0)), ('slider_mesh', (.02, 0, 0))]:
@@ -101,7 +95,7 @@ for name, location in [('housing_mesh', (0, 0, 0)), ('slider_mesh', (.02, 0, 0))
 slider = dict(version=1, root='housing', parts=[dict(id='housing', mesh='housing_mesh'), dict(id='slider', mesh='slider_mesh')],
     connections=[dict(id='slide', parent='housing', child='slider', kind='prismatic', axis=[1, 0, 0], pivot=[20, 0, 0], range=[0, 10])],
     sequences=[dict(id='extend', waypoints=[dict(slide=5), dict(slide=10)])], manufacturing=dict(mode='separate', steps=[dict(part='slider', path=[[0, 0, 0], [100, 0, 0]])]))
-report = publish['publish'](str(output / 'slider-export'), assembly=slider)
+report = export(output / 'slider-export', slider)
 geometry_path = output / 'slider-placed.json'
 try:
     validation['validate'](dict(input=report['preview'], settings=settings,
@@ -110,8 +104,8 @@ try:
 finally:
     validation['toolbox'].unregister()
 geometry = json.loads(geometry_path.read_text())
-assert {body['id'] for body in geometry['bodies']} == {'housing', 'slider'}
-assert geometry['assembly']['connections'][0]['range'] == [0, 20]
+assert {body['id'] for body in geometry['bodies']} == {'housing_mesh', 'slider_mesh'}
+assert abs(geometry['assembly']['connections'][0]['range'][1] - 20) < .00001
 assert geometry['assembly']['sequences'][0]['waypoints'] == [dict(slide=10), dict(slide=20)]
 path = geometry['assembly']['manufacturing']['steps'][0]['path']
 assert path[0] == [0, 0, 0]

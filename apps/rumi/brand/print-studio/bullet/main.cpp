@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <future>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -22,7 +23,7 @@ constexpr double pi = 3.14159265358979323846;
 constexpr std::size_t maxInputBytes = 64 * 1024 * 1024;
 constexpr std::size_t maxTriangles = 200000;
 constexpr std::size_t maxVertices = 600000;
-constexpr int maxBodies = 128, maxTotalSteps = 250000;
+constexpr int maxBodies = 128;
 
 struct Invalid : std::runtime_error { using std::runtime_error::runtime_error; };
 double number(const Json& object, const std::string& key, double low, double high) {
@@ -51,7 +52,7 @@ btVector3 vector(const Json& value, double scale = 1) {
 Json coordinates(const btVector3& value, double scale = 1) { return {value.x()*scale, value.y()*scale, value.z()*scale}; }
 struct Settings {
     double dt, duration, restDuration, retentionDuration, density, force, torque, linearTolerance, angularTolerance, penetration;
-    int iterations;
+    int iterations, maxTotalSteps, retentionWorkers;
     btVector3 gravity;
     double friction,movementDegrees,movementMm,assemblyMm;
 };
@@ -70,6 +71,11 @@ Settings settings(const Json& value) {
     double iterations = number(value,"iterations",4,200);
     if (std::floor(iterations) != iterations) throw Invalid("iterations must be an integer");
     s.iterations = int(iterations);
+    double allowance = number(value,"maxTotalSteps",1000,10000000);
+    double workers = number(value,"retentionWorkers",1,4);
+    if (std::floor(allowance) != allowance || std::floor(workers) != workers) throw Invalid("Step allowance and worker count must be integers");
+    s.maxTotalSteps = int(allowance);
+    s.retentionWorkers = int(workers);
     s.gravity=vector(value.at("gravityMps2"));
     for(int i=0;i<3;++i)if(std::abs(s.gravity[i])>20)throw Invalid("Gravity components must be within 20 m/s2");
     s.friction=number(value,"friction",0,1);
@@ -88,6 +94,26 @@ struct Body {
     std::unique_ptr<btTriangleMesh> mesh;
     std::unique_ptr<btGImpactMeshShape> shape;
 };
+// GImpact updates shape caches during collision detection; workers never share them.
+void buildShape(Body& b) {
+    b.mesh=std::make_unique<btTriangleMesh>(true,false);
+    for(auto triangle:b.triangles) {
+        btVector3 points[3]; for(int i=0;i<3;++i) points[i]=b.basis.transpose()*(b.vertices[triangle[i]]-b.com);
+        b.mesh->addTriangle(points[0],points[1],points[2],false);
+    }
+    b.shape=std::make_unique<btGImpactMeshShape>(b.mesh.get()); b.shape->setMargin(0); b.shape->updateBound();
+}
+std::vector<Body> cloneBodies(const std::vector<Body>& source) {
+    std::vector<Body> result;
+    for (const auto& b : source) {
+        Body copy;
+        copy.id=b.id; copy.vertices=b.vertices; copy.triangles=b.triangles;
+        copy.com=b.com; copy.moments=b.moments; copy.basis=b.basis; copy.inertia=b.inertia; copy.mass=b.mass;
+        buildShape(copy);
+        result.push_back(std::move(copy));
+    }
+    return result;
+}
 int root(std::vector<int>& groups, int i) {
     while (groups[i] != i) { groups[i] = groups[groups[i]]; i = groups[i]; }
     return i;
@@ -160,12 +186,7 @@ Body body(const Json& value, const Settings& s, std::size_t& totalTriangles, std
     if(!b.topology.empty()) return b;
     // The fixed root needs no inertia frame; keep its contact tree aligned with the exported geometry.
     if (fixed) b.basis.setIdentity();
-    b.mesh=std::make_unique<btTriangleMesh>(true,false);
-    for(auto triangle:b.triangles) {
-        btVector3 points[3]; for(int i=0;i<3;++i) points[i]=b.basis.transpose()*(b.vertices[triangle[i]]-b.com);
-        b.mesh->addTriangle(points[0],points[1],points[2],false);
-    }
-    b.shape=std::make_unique<btGImpactMeshShape>(b.mesh.get()); b.shape->setMargin(0); b.shape->updateBound();
+    buildShape(b);
     return b;
 }
 struct Connection {
@@ -239,7 +260,7 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
             const State* initial,const std::map<std::size_t,double>& targets,std::size_t loaded,btVector3 force,btVector3 torque,
             const std::string& kind,double duration,int& budget) {
     int steps=int(std::ceil(duration/s.dt));
-    if(budget+steps>maxTotalSteps)return {{{"kind",kind},{"status","review"},{"code","probe_budget_exhausted"}},State{}};
+    if(budget+steps>s.maxTotalSteps)return {{{"kind",kind},{"status","review"},{"code","probe_budget_exhausted"}},State{}};
     budget+=steps;
     World w(definitions,fixture,s,initial);
     std::vector<double> angles=initial?initial->angles:std::vector<double>(connections.size(),0);
@@ -324,7 +345,7 @@ RouteResult assemblyRoute(std::vector<Body>& definitions,std::size_t fixture,con
         auto* moving=world.bodies[selected].get();auto rest=moving->getCenterOfMassTransform();
         for(std::size_t i=1;i<path.size();++i) {
             auto target=vector(path[i],.001);double length=(target-previous).length();int samples=int(std::ceil(length/(s.assemblyMm*.001)));samples=std::max(1,samples);
-            if(samples>maxTotalSteps-budget)return {"review","probe_budget_exhausted",complete,{{"part",id},{"phase","assembly_route"}}};
+            if(samples>s.maxTotalSteps-budget)return {"review","probe_budget_exhausted",complete,{{"part",id},{"phase","assembly_route"}}};
             budget+=samples;
             for(int n=0;n<=samples;++n) {
                 auto pose=rest;pose.setOrigin(rest.getOrigin()+previous+(target-previous)*double(n)/samples);moving->setCenterOfMassTransform(pose);world.world.updateSingleAabb(moving);
@@ -426,13 +447,43 @@ Json evaluate(const Json& request) {
         }
     }
     for(const auto& sequence:sequences)estimated+=sequence.second.size()*(std::ceil(s.duration/s.dt)+retentionTotal);
-    bool fullBudget=estimated<=maxTotalSteps;
-    if(!fullBudget)finding("probe_budget_exhausted","","warning",{{"estimatedSteps",estimated},{"maximumSteps",maxTotalSteps}});
+    bool fullBudget=estimated<=s.maxTotalSteps;
+    if(!fullBudget)finding("probe_budget_exhausted","","warning",{{"estimatedSteps",estimated},{"maximumSteps",s.maxTotalSteps}});
     auto accept=[&](Trial& t,std::size_t index) {
         if(index<results.size())results[index]["probes"].push_back(t.result);
         else for(auto& result:results)result["probes"].push_back(t.result);
         if(t.result.at("status")!="passed") {
             finding(t.result.at("code"),t.result.value("connection",index<connections.size()?connections[index].id:""),t.result.at("status")=="review"?"warning":"error",t.result);return false;
+        }
+        return true;
+    };
+    std::vector<std::vector<Body>> workerBodies;
+    bool parallelRetention=false;
+    auto loads=[&](std::size_t index,const State& state,const std::vector<btVector3>& axes,double amount,bool rotation) {
+        const int workers=parallelRetention?s.retentionWorkers:1;
+        if(workers>1 && workerBodies.empty())
+            for(int i=0;i<workers;++i)workerBodies.push_back(cloneBodies(bodies));
+        const int steps=int(std::ceil(s.retentionDuration/s.dt));
+        for(std::size_t start=0;start<axes.size()*2;start+=workers) {
+            const int count=std::min(workers,int(axes.size()*2-start));
+            auto probe=[&](int offset,std::vector<Body>& geometry) {
+                const auto load=axes[(start+offset)/2]*((start+offset)%2?amount:-amount);
+                int reserved=budget+offset*steps;
+                return trial(geometry,fixture,connections,s,&state,{},index,
+                    rotation?btVector3(0,0,0):load,rotation?load:btVector3(0,0,0),"retention",s.retentionDuration,reserved);
+            };
+            std::vector<Trial> trials;
+            if(workers==1)trials.push_back(probe(0,bodies));
+            else {
+                std::vector<std::future<Trial>> pending;
+                for(int i=0;i<count;++i)pending.push_back(std::async(std::launch::async,[&,i] {return probe(i,workerBodies[i]);}));
+                for(auto& future:pending)trials.push_back(future.get());
+            }
+            // Publish in serial order, including budget failures, independent of worker scheduling.
+            for(auto& t:trials) {
+                if(budget+steps<=s.maxTotalSteps)budget+=steps;
+                if(!accept(t,index))return false;
+            }
         }
         return true;
     };
@@ -443,7 +494,7 @@ Json evaluate(const Json& request) {
         if(c.kind!="prismatic")translations.push_back(c.axis);if(c.kind!="revolute")rotations.push_back(c.axis);
         double force=8*mass*s.linearTolerance/(s.retentionDuration*s.retentionDuration);
         if(force>s.force) {finding("probe_inconclusive",c.id,"warning",{{"reason","force_cap"}});return false;}
-        for(auto axis:translations)for(int sign:{-1,1}) {auto t=trial(bodies,fixture,connections,s,&state,{},index,axis*(sign*force),{0,0,0},"retention",s.retentionDuration,budget);if(!accept(t,index))return false;}
+        if(!loads(index,state,translations,force,false))return false;
         for(auto axis:rotations) {
             auto worldAxis=state.transforms[c.parent].getBasis()*axis;
             auto childBasis=state.transforms[c.child].getBasis(),parentBasis=state.transforms[c.parent].getBasis();
@@ -451,7 +502,7 @@ Json evaluate(const Json& request) {
             if(c.parent!=fixture)inverse+=worldAxis.dot(parentBasis*btMatrix3x3(1/parent.moments.x(),0,0,0,1/parent.moments.y(),0,0,0,1/parent.moments.z())*parentBasis.transpose()*worldAxis);
             double torque=8/inverse*s.angularTolerance/(s.retentionDuration*s.retentionDuration);
             if(torque>s.torque) {finding("probe_inconclusive",c.id,"warning",{{"reason","torque_cap"}});return false;}
-            for(int sign:{-1,1}) {auto t=trial(bodies,fixture,connections,s,&state,{},index,{0,0,0},axis*(sign*torque),"retention",s.retentionDuration,budget);if(!accept(t,index))return false;}
+            if(!loads(index,state,{axis},torque,true))return false;
         }
         return true;
     };
@@ -460,6 +511,7 @@ Json evaluate(const Json& request) {
         simulate=accept(rest,connections.size());
         for(std::size_t i=0;i<connections.size()&&simulate;++i)simulate=retention(i,rest.finalState);
         if(!fullBudget)simulate=false;
+        parallelRetention=true;
         for(std::size_t i=0;i<connections.size()&&simulate;++i) {
             const auto& c=connections[i];if(c.kind=="fixed")continue;
             for(double endpoint:{c.low,c.high})if(endpoint!=0&&simulate) {
@@ -504,7 +556,7 @@ Json selfTest() {
         for(auto point:std::vector<btVector3>{{-1,-1,-1},{1,-1,-1},{1,1,-1},{-1,1,-1},{-1,-1,1},{1,-1,1},{1,1,1},{-1,1,1}}) vertices.push_back(coordinates(center+half*point));
         return Json{{"id",id},{"vertices",vertices},{"triangles",{{0,2,1},{0,3,2},{4,5,6},{4,6,7},{0,1,5},{0,5,4},{1,2,6},{1,6,5},{2,3,7},{2,7,6},{3,0,4},{3,4,7}}}};
     };
-    Settings s{.0005,.2,.02,.05,1250,1,.05,.0005,3*pi/180,.00005,40,{0,0,0},0,15,2,.2};
+    Settings s{.0005,.2,.02,.05,1250,1,.05,.0005,3*pi/180,.00005,40,2000000,1,{0,0,0},0,15,2,.2};
     std::size_t triangles=0,vertices=0; std::vector<Body> definitions;
     definitions.push_back(body(box("fixed",{0,-3,0},{5,1,5}),s,triangles,vertices));
     definitions.push_back(body(box("moving",{0,0,0},{1,1,1}),s,triangles,vertices));

@@ -475,16 +475,14 @@ it('refines a spoken selection through the original cursor anchor and retains th
 it('opens analog controls and freezes a fresh viewer capture without rewriting the model', async () => {
   const root = await mkdtemp(join(tmpdir(), 'rumi-analog-host-')), f = fixture(undefined, root)
   try {
-    const text = JSON.stringify({ asset: { version: '2.0' }, scene: 0, scenes: [{ nodes: [] }], nodes: [] })
-    const content = Buffer.from(text + ' '.repeat((4 - text.length % 4) % 4)), bytes = Buffer.alloc(20 + content.length)
-    ;[0x46546c67, 2, bytes.length, content.length, 0x4e4f534a].forEach((n, i) => bytes.writeUInt32LE(n, i * 4)); content.copy(bytes, 20)
+    const bytes = Buffer.from('#usda 1.0\n# preview\n')
     await vi.waitFor(() => expect(f.contexts.has('rumi:active-shape')).toBe(true))
     const editContext = f.contexts.get('rumi:active-shape')
-    const path = join(root, 'model.glb'); await writeFile(path, bytes)
+    const path = join(root, 'model.usda'); await writeFile(path, bytes)
     await f.run('viewer_load', { path })
     const design = (await f.state()).design
     const values = { amount: .65, spread: .5, peakX: .5, peakY: .5, falloff: .5, angle: .5 }
-    const opened = f.run('viewer_controls', { action: 'open', path: 'model.glb', url: design.url, revision: design.revision, operation: 'bulge', label: 'Back', center: [0, 0, 0], radii: [30, 30, 30], direction: [0, 1, 0], limit: 10, parts: [], values, controls: legacyControls('bulge') })
+    const opened = f.run('viewer_controls', { action: 'open', path: 'model.usda', url: design.url, revision: design.revision, operation: 'bulge', label: 'Back', center: [0, 0, 0], radii: [30, 30, 30], direction: [0, 1, 0], limit: 10, parts: [], values, controls: legacyControls('bulge') })
     let controls: { id: string }
     await vi.waitFor(async () => { controls = (await f.state()).design.analog; expect(controls).toBeTruthy() })
     const feedback = (body: object) => f.routes.get('/api/print-studio/viewer/shape-feedback')!(new Request('http://rumi/api/print-studio/viewer/shape-feedback?sessionId=session-a', { method: 'POST', body: JSON.stringify({ id: controls.id, url: design.url, ...body }) }))

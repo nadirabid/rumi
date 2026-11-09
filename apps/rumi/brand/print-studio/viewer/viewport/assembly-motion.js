@@ -14,7 +14,19 @@ import { normalizeControls } from '../analog/control-spec.js'
 export function assemblyMotion(manifest, root, nodeIndices) {
   if (!manifest.asset.extras?.rumiAssembly) return manifest.asset.extras?.rumiMotionKeys?.length
     ? { motionIssue: 'Declare the physical assembly and bind each movement to a joint before previewing movement.' } : {}
-  const metadata = mechanismMetadata(manifest), assembly = metadata.assembly
+  return robotMotion(mechanismMetadata(manifest), manifest.nodes, root, nodeIndices, manifest.asset.extras.rumiMotionLabels)
+}
+
+/** Bind validated physical links to preview transforms.
+ * @param {object} metadata Validated assembly and movement requirements.
+ * @param {object[]} nodes Physical mesh identities.
+ * @param {THREE.Object3D} root Loaded model in millimetres, Z up.
+ * @param {Map<THREE.Object3D, number>} nodeIndices Loaded objects mapped to mesh identities.
+ * @param {object} [labels] Optional legacy control labels.
+ * @returns {object} Preview factory and controls, or a motion diagnostic.
+ */
+export function robotMotion(metadata, nodes, root, nodeIndices, labels) {
+  const assembly = metadata.assembly
   const unavailable = message => ({ motionIssue: message })
   if (!assembly) return unavailable(metadata.checks.map(check => check.message).join(' '))
   if (!assembly.connections.some(connection => connection.kind !== 'fixed')) return {}
@@ -50,7 +62,6 @@ export function assemblyMotion(manifest, root, nodeIndices) {
     if (min >= max) return unavailable('Shared movement controls require overlapping joint ranges.')
     const origin = declared?.origin ?? 0
     parameters[key] = origin
-    const labels = manifest.asset.extras.rumiMotionLabels
     const named = Array.isArray(labels) ? labels.find(item => item?.key === first.control)?.label : undefined
     const label = typeof named === 'string' && named.trim() ? named : first.control ?? assembly.parts.find(part => part.id === first.child).mesh
     controls.push({ kind: 'slider', label: label.trim().slice(0, 80), axes: [{ key, min: min + origin, max: max + origin,
@@ -59,7 +70,7 @@ export function assemblyMotion(manifest, root, nodeIndices) {
   }
   try { normalizeControls(controls, parameters) }
   catch (error) { return unavailable(error.message) }
-  const partsByNode = new Map(assembly.parts.map(part => [manifest.nodes.findIndex(node => node.name === part.mesh), part.id]))
+  const partsByNode = new Map(assembly.parts.map(part => [nodes.findIndex(node => node.name === part.mesh), part.id]))
   const meshes = []
   root.updateMatrixWorld(true)
   root.traverseVisible(node => {

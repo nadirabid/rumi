@@ -42,14 +42,34 @@ export async function generateModule(module, saved) {
   return { bytes, parameters }
 }
 
-/** Convert imported STL triangles into the same display artifact as other models. @param {Float32Array} positions Canonical millimetre/Z-up triangles. @returns {Promise<ArrayBuffer>} Static GLB preserving every triangle. */
+/** Convert imported STL triangles into the same display artifact as other models. @param {Float32Array} positions Canonical millimetre/Z-up triangles. @returns {Promise<ArrayBuffer>} Static ASCII USD preserving every triangle. */
 export function generateStl(positions) {
-  const model = buildModel(() => {
-    const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions.slice(), 3)); geometry.computeVertexNormals()
-    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial())
-    mesh.name = 'Imported mesh'
-    return mesh
-  })
-  return exportModel(model, {})
+  if (!positions.length || positions.length % 9 || positions.some(value => !Number.isFinite(value))) throw new Error('STL requires finite triangles')
+  const points = []
+  for (let i = 0; i < positions.length; i += 3) points.push(`(${positions[i] / 1000}, ${positions[i + 1] / 1000}, ${positions[i + 2] / 1000})`)
+  const text = `#usda 1.0
+(
+    defaultPrim = "Model"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "Model" (
+    prepend apiSchemas = ["IsaacRobotAPI", "PhysicsArticulationRootAPI"]
+)
+{
+    rel isaac:physics:robotLinks = </Model/Imported_mesh>
+    rel isaac:physics:robotJoints = None
+    token rumi:manufacturingMode = "print-in-place"
+    def Mesh "Imported_mesh" (
+        prepend apiSchemas = ["IsaacLinkAPI", "PhysicsRigidBodyAPI", "PhysicsCollisionAPI"]
+    )
+    {
+        point3f[] points = [${points.join(', ')}]
+        int[] faceVertexCounts = [${Array(positions.length / 9).fill(3).join(', ')}]
+        int[] faceVertexIndices = [${Array.from({ length: positions.length / 3 }, (_, i) => i).join(', ')}]
+        uniform token subdivisionScheme = "none"
+    }
+}
+`
+  return Promise.resolve(new TextEncoder().encode(text).buffer)
 }

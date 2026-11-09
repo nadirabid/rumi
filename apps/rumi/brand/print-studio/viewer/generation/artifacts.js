@@ -1,5 +1,5 @@
-/** Client-owned GLB generation cache shared by display and validation. */
-import { validateGlb, GLB_MAX_BYTES } from '../glb.js'
+/** Client-owned USD generation cache shared by display and validation. */
+import { validateUsd, USD_MAX_BYTES } from '../usd.js'
 
 /**
  * Own immutable saved artifacts; displayed entries stay pinned until released.
@@ -18,7 +18,7 @@ export function createModelArtifacts() {
   function prune() {
     let bytes = [...entries.values()].reduce((sum, entry) => sum + (entry.artifact?.bytes.byteLength ?? 0), 0)
     for (const [key, entry] of entries) {
-      if (bytes <= GLB_MAX_BYTES && entries.size <= 32) break
+      if (bytes <= USD_MAX_BYTES && entries.size <= 32) break
       if (!entry.artifact || entry.references) continue
       entries.delete(key); bytes -= entry.artifact.bytes.byteLength
     }
@@ -28,7 +28,7 @@ export function createModelArtifacts() {
       if (closed) throw new Error('Model generation is closed')
       prune()
       const format = request.format
-      if (format !== 'glb') throw new Error('Project isolation requires a GLB preview. Export this model to models/<name>/model.glb.')
+      if (format !== 'usd') throw new Error('Project isolation requires a USD preview. Export this model to models/<name>/model.usda.')
       const key = JSON.stringify([format, request.contentHash ?? request.url,
         request.contentHash ? null : request.parameters ?? {}])
       let entry = entries.get(key)
@@ -38,9 +38,9 @@ export function createModelArtifacts() {
         const current = entry
         current.work = track((async () => {
           const response = await fetch(request.url, { signal: controller.signal })
-          if (!response.ok) throw new Error(`GLB load failed (${response.status})`)
+          if (!response.ok) throw new Error(`USD load failed (${response.status})`)
           const bytes = await response.arrayBuffer()
-          validateGlb(new Uint8Array(bytes))
+          validateUsd(new Uint8Array(bytes))
           const result = { bytes, parameters: {} }
           if (closed) throw new Error('Model generation is closed')
           current.artifact = { ...result, retain() {

@@ -14,7 +14,7 @@ import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
 import { analyzeMesh } from './checks.js'
 import { createHistory } from './document.js'
 import { STL_LIMITS, encodeStl, parseStl } from './stl.js'
-import { GLB_MAX_BYTES } from './glb.js'
+import { USD_MAX_BYTES } from './usd.js'
 import { placeMesh } from './transform.js'
 
 import { createViewerDiagnostics } from './diagnostics.js'
@@ -25,6 +25,7 @@ import { createCursorRequests, cursorIdentity } from './cursor.js'
 import { cursorCommand } from './cursor-commands.js'
 import { createModelFocus } from './model-focus.js'
 import { createValidation } from './validation.js'
+import { summarizeValidationState } from './validation-summary.js'
 import { createSource } from './source.js'
 import { discoverModels, readSelection, saveSelection } from './catalog.js'
 
@@ -221,8 +222,8 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         if (!agent) return ''
         const record = sessions.get(agent.session.id)
         return JSON.stringify({ meshState: record
-          ? { ...sceneReport(record), ...(validation ? { displayedDesign: record.source?.state() ?? null } : {}), validation: validation?.read(agent.session.id), workingModels: focus.paths(agent.session.id) }
-          : { status: 'unavailable', reason: 'viewer_not_initialized', validation: validation?.read(agent.session.id) } })
+          ? { ...sceneReport(record), ...(validation ? { displayedDesign: record.source?.state() ?? null } : {}), validation: summarizeValidationState(validation?.read(agent.session.id)), workingModels: focus.paths(agent.session.id) }
+          : { status: 'unavailable', reason: 'viewer_not_initialized', validation: summarizeValidationState(validation?.read(agent.session.id)) } })
       },
     }), 'print viewer: live mesh context')
     scoped.effect(() => scoped.systemPrompt.context({
@@ -402,7 +403,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       if (!id || !job || !validation) return json({ error: 'validation_not_found' }, 404)
       try {
         const bytes = new Uint8Array(await request.arrayBuffer())
-        if (bytes.byteLength > GLB_MAX_BYTES) return json({ error: 'mesh_too_large' }, 413)
+        if (bytes.byteLength > USD_MAX_BYTES) return json({ error: 'mesh_too_large' }, 413)
         const error = request.headers.get('content-type') === 'text/plain' ? new TextDecoder().decode(bytes) : null
         return validation.submit(id, job, bytes, error) ? json({ ok: true }) : json({ error: 'stale_validation' }, 409)
       } catch (_error) { return json({ error: 'invalid_validation_mesh' }, 400) }
@@ -610,15 +611,15 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_load',
-    description: 'Select a Blender-exported GLB in the Three.js viewer. Use models/<name>/model.glb; the viewer discovers these entries and reloads completed exports automatically. '
-      + 'GLB uses standard metres and Y up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. '
+    description: 'Select a Blender-exported USD in the Three.js viewer. Use models/<name>/model.usda; the viewer discovers these entries and reloads completed exports automatically. '
+      + 'USD uses metres and Z up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. '
       + 'Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. '
-      + 'Self-contained static GLB only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. '
-      + 'Executable .js/.mjs previews are disabled by project isolation; export GLB instead. '
+      + 'Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. '
+      + 'Executable .js/.mjs previews are disabled by project isolation; export USD instead. '
       + 'Saved models display immediately; automatic validation and repair run independently of preview visibility. '
       + 'Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.',
     parameters: {
-      path: { type: 'string', required: true, description: 'Model entry to bring into view, for example models/helmet/model.glb.' },
+      path: { type: 'string', required: true, description: 'Model entry to bring into view, for example models/helmet/model.usda.' },
       buildVolume: {
         type: 'object', additionalProperties: false,
         description: 'Printable volume in millimetres. Omit to retain the scene’s current print context.',
@@ -759,7 +760,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_controls',
-    description: 'Open temporary edit sliders, pads, or curves for supported GLB deformation operations. For persistent doors and wheels, use GLB assembly joints; read interactive-controls. Movement controls remain at the bottom-right independently of edits. Supply labeled controls and initial values for the selected operation. Read analog-shaping for geometry and Blender save rules. Executable JavaScript parameter previews are disabled by project isolation. Keep controls open while the person explores; freeze the latest values before applying and publishing the edit in Blender.',
+    description: 'Open temporary edit sliders, pads, or curves for supported USD deformation operations. For persistent doors and wheels, use USD assembly joints; read interactive-controls. Movement controls remain at the bottom-right independently of edits. Supply labeled controls and initial values for the selected operation. Read analog-shaping for geometry and Blender save rules. Executable JavaScript parameter previews are disabled by project isolation. Keep controls open while the person explores; freeze the latest values before applying and publishing the edit in Blender.',
     parameters: {
       action: { type: 'string', required: true, enum: ['open', 'freeze', 'save', 'close'] },
       id: { type: 'string', description: 'Current design.analog.id for freeze or close.' },
@@ -767,7 +768,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       revision: { type: 'integer', description: 'Exact design.revision for open.' },
       url: { type: 'string', description: 'Exact design.url for open.' },
       label: { type: 'string', description: 'Short plain-language region label.' },
-      operation: { type: 'string', enum: ['parameters', 'bulge', 'bend', 'twist', 'taper', 'cut'], description: 'parameters binds JavaScript model parameters; other adapters deform a GLB.' },
+      operation: { type: 'string', enum: ['parameters', 'bulge', 'bend', 'twist', 'taper', 'cut'], description: 'parameters binds JavaScript model parameters; other adapters deform a USD.' },
       finish: { type: 'string', enum: ['parameters', 'blender'], description: 'For parameter controls: parameters saves a final JavaScript model; blender finishes a temporary preview on a preserved original.' },
       original: { type: 'string', description: 'Preserved source path for a Blender-finished preview.' },
       edit: { type: 'string', description: 'Semantic Blender edit recipe, including how parameter values affect the original and what must be preserved.' },
@@ -776,7 +777,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       direction: { type: 'array', items: { type: 'number' }, description: 'Three numbers: outward axis. Back of helmet is often [0,1,0]; inspect source.' },
       limit: { type: 'number', description: 'Maximum bulge displacement or cut-height travel either side of center, mm, no larger than the smallest radius.' },
       parts: { type: 'array', items: { type: 'string' }, description: 'Exact mesh names to deform; [] includes all meshes in the soft region.' },
-      values: { type: 'object', additionalProperties: true, description: 'Numeric initial values keyed by model parameter name. GLB adapters use amount, spread, peakX, peakY, falloff, angle in 0..1.' },
+      values: { type: 'object', additionalProperties: true, description: 'Numeric initial values keyed by model parameter name. USD adapters use amount, spread, peakX, peakY, falloff, angle in 0..1.' },
       controls: { type: 'array', description: 'Labeled controls. Supply for open. Each axis key binds a value; pad axes are horizontal then vertical.', items: {
         type: 'object', additionalProperties: false, properties: {
           kind: { type: 'string', required: true, enum: ['slider', 'pad', 'curve'] },

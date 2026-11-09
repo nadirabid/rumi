@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveDesktopPaths } from '../src/paths.ts'
-import { DesktopProjectManager } from '../src/project-manager.ts'
+import { DesktopProjectManager, migrateProjectIsolationPolicy } from '../src/project-manager.ts'
 import { readProfilePlugins } from '@deepseek-ai/dsh-app-boot'
 import { runtimeFixture } from './runtime-fixture.ts'
 
@@ -329,4 +329,12 @@ describe('desktop link-backend projections', () => {
     expect(lstatSync(join(profile, 'node_modules', 'bridge'), { throwIfNoEntry: false })).toBeUndefined()
     expect(existsSync(join(target, 'package.json'))).toBe(true)
   })
+})
+
+
+it('migrates only the owned full-access profile default and preserves custom rows', () => {
+  const owned = '# Rumi profile policy, seeded by the app.\n# Every Session runs with full access.\n    defaultPreset: danger-full-access\n# Rumi owns the sidebar brand seats.\n'
+  const custom = '# custom\n    defaultPreset: danger-full-access\n'
+  expect(migrateProjectIsolationPolicy(owned + custom)).toBe(owned.replace('runs with full access', 'starts confined to its project').replace('defaultPreset: danger-full-access', 'defaultPreset: workspace-write') + custom)
+  expect(migrateProjectIsolationPolicy(custom)).toBe(custom)
 })

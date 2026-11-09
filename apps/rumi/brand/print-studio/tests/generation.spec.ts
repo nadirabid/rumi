@@ -29,3 +29,14 @@ it('does not publish an artifact after its owner is disposed', async () => {
     await expect(artifacts.resolve({ format: 'glb', url: '/late' })).rejects.toThrow('closed')
   } finally { await artifacts.dispose(); fetcher.mockRestore() }
 })
+
+it('rejects executable model sources before importing or fetching them', async () => {
+  const fetcher = vi.spyOn(globalThis, 'fetch')
+  const artifacts = createModelArtifacts()
+  try {
+    for (const format of ['javascript', undefined]) {
+      await expect(artifacts.resolve({ format, url: 'data:text/javascript,throw new Error("project code executed")' })).rejects.toThrow('Project isolation requires a GLB preview')
+    }
+    expect(fetcher).not.toHaveBeenCalled()
+  } finally { await artifacts.dispose(); fetcher.mockRestore() }
+})

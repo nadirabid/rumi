@@ -14,6 +14,7 @@ import { mkdir, readFile, readdir, writeFile, stat, rename, unlink } from 'node:
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { canonical, checkedPath } from './isolation/paths.js'
 
 /** The plugin row id. */
 export const name = 'rumi-projects'
@@ -38,7 +39,7 @@ export async function projectInstructionsFor(store, sessionId) {
   for (const project of await store.list()) {
     if (!Array.isArray(project.sessionIds) || !project.sessionIds.includes(sessionId)) continue
     try {
-      return await readFile(join(project.path, INSTRUCTIONS_FILE), 'utf8')
+      return await readFile(checkedPath(canonical(project.path), INSTRUCTIONS_FILE, false, []), 'utf8')
     } catch (error) {
       if (error.code === 'ENOENT') return ''
       throw error

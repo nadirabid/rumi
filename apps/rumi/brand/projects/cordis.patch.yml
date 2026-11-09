@@ -14,3 +14,22 @@
     - id: rumi-projects
       name: '@rumi/projects'
       config: {}
+
+# Project data confinement replaces the generic write-only sandbox providers.
+- id: sandbox-policy
+  name: '@rumi/projects/isolation/policy'
+- id: sandbox
+  name: '@rumi/projects/isolation/sandbox'
+- id: bash-sandbox
+  name: '@rumi/projects/isolation/shell'
+- id: fs-sandbox
+  name: '@rumi/projects/isolation/filesystem'
+- insert:
+    - id: rumi-project-scope
+      name: '@rumi/projects/isolation/scope'
+- id: subprocess
+  name: '@rumi/projects/isolation/subprocess'
+
+# Project instructions are supplied through the confined runtime context.
+- id: agent-instructions
+  disabled: true

@@ -1,5 +1,4 @@
 /** Client-owned GLB generation cache shared by display and validation. */
-import { generateModule } from './export.js'
 import { validateGlb, GLB_MAX_BYTES } from '../glb.js'
 
 /**
@@ -28,7 +27,8 @@ export function createModelArtifacts() {
     async resolve(request) {
       if (closed) throw new Error('Model generation is closed')
       prune()
-      const format = request.format ?? 'javascript'
+      const format = request.format
+      if (format !== 'glb') throw new Error('Project isolation requires a GLB preview. Export this model to models/<name>/model.glb.')
       const key = JSON.stringify([format, request.contentHash ?? request.url,
         request.contentHash ? null : request.parameters ?? {}])
       let entry = entries.get(key)
@@ -37,21 +37,11 @@ export function createModelArtifacts() {
         entries.set(key, entry)
         const current = entry
         current.work = track((async () => {
-          let result
-          if (format === 'glb') {
-            const response = await fetch(request.url, { signal: controller.signal })
-            if (!response.ok) throw new Error(`GLB load failed (${response.status})`)
-            const bytes = await response.arrayBuffer()
-            validateGlb(new Uint8Array(bytes)); result = { bytes, parameters: {} }
-          } else if (format === 'javascript') {
-            const module = await import(/* @vite-ignore */ request.url)
-            if (closed) throw new Error('Model generation is closed')
-            result = { ...await generateModule(module, request.parameters ?? {}),
-              generate: values => {
-                if (closed) return Promise.reject(new Error('Model generation is closed'))
-                return track(generateModule(module, values))
-              } }
-          } else throw new Error('Unsupported model source format')
+          const response = await fetch(request.url, { signal: controller.signal })
+          if (!response.ok) throw new Error(`GLB load failed (${response.status})`)
+          const bytes = await response.arrayBuffer()
+          validateGlb(new Uint8Array(bytes))
+          const result = { bytes, parameters: {} }
           if (closed) throw new Error('Model generation is closed')
           current.artifact = { ...result, retain() {
             if (closed) throw new Error('Model generation is closed')

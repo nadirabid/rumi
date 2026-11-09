@@ -11,34 +11,7 @@ Use `viewer_controls` with explicit `controls`, `values`, and the current design
 
 ## Persistent movement controls
 
-Doors, wheels, hinges, and other movable features use model-owned movement controls instead of a temporary `viewer_controls` edit. Export `motionControls` from the JavaScript model using the same labeled slider/pad/curve declarations below, bound to numeric entries in `parameters`. The viewer converts the generated model to GLB and derives movement from its assembly joints, using these declarations for labels and parameter bindings. It discovers these declarations on load and keeps them at the bottom-right as long as the loaded model declares them. Preserve the declarations and their bindings when repairing or replacing the model; remove a declaration only when its movable feature is removed. Declare the corresponding physical mechanisms as well; do not infer motion from parameter names or treat preview transforms as working connectors.
-
-```js
-export const parameters = { wheelSpin: 0, doorAngle: 0 }
-export const motionControls = [
-  { kind: 'slider', label: 'Wheel', axes: [
-    { key: 'wheelSpin', min: -180, max: 180, step: 1, reset: 0 },
-  ] },
-  { kind: 'slider', label: 'Door', axes: [
-    { key: 'doorAngle', min: 0, max: 100, step: 1, reset: 0 },
-  ] },
-]
-export const assembly = {
-  version: 1, root: 'frame',
-  parts: [{ id: 'frame', mesh: 'Frame' }, { id: 'wheel', mesh: 'Wheel' }, { id: 'door', mesh: 'Door' }],
-  connections: [
-    { id: 'wheel-axle', parent: 'frame', child: 'wheel', kind: 'revolute',
-      axis: [1, 0, 0], pivot: [0, 0, 12], range: [-180, 180], control: 'wheelSpin' },
-    { id: 'door-hinge', parent: 'frame', child: 'door', kind: 'revolute',
-      axis: [0, 0, 1], pivot: [10, 0, 12], range: [0, 100], control: 'doorAngle' },
-  ],
-  manufacturing: { mode: 'print-in-place' },
-}
-```
-
-The builder must return uniquely named physical meshes matching every `assembly.parts` entry, with real captive connectors. Add every separate axle, pin and retaining cap to the assembly rather than leaving it implicit. The export binds every mesh exactly once and checks every movement control against its connection. A shared control can bind several connections, but coupled motion needs supported sequence coverage before acceptance. Read [physical movement declarations](../blender-modeling/SKILL.md#declare-physical-movement) for the complete assembly contract.
-
-Control values represent degrees for rotation or millimetres for translation. The build may convert degrees to radians but must not apply an arbitrary gain. Connection ranges are relative to saved parameters and must cover `[axis.min - savedValue, axis.max - savedValue]`; for a door saved at 30° with a 0–100° control, declare `range: [-30, 70]`. The validation export records these bounds in `rumiMotionRanges`. Missing declarations and incomplete ranges block acceptance. Do not remove controls or reduce movement to conceal a failed check.
+Doors, wheels, hinges, and other movable features use model-owned movement controls instead of a temporary `viewer_controls` edit. Preserve the GLB assembly declarations and their bindings when repairing the model. Remove a declaration only when its movable feature is removed. Include every separate axle, pin and retaining cap, with real connector geometry. Read [physical movement declarations](../blender-modeling/SKILL.md#declare-physical-movement) for the assembly contract. Executable JavaScript previews and `operation: parameters` are unavailable under project isolation.
 
 Movement changes only the local preview pose, never saved parameters or validation input, and needs no freeze/save/close. Controls remain visible but disabled while a temporary edit owns the preview. Compatible pose values survive revisions and switching between recent models while the viewer is mounted; reopening starts from saved values. Reset movement before requesting source-bound cursor edits. `viewer_load` feedback exposes rendered declarations under `design.motion`; inspect this feedback before claiming controls are visible. Validation tests the saved physical assembly through Blender and Bullet. Animation and simulation do not certify material strength or print readiness.
 
@@ -48,33 +21,7 @@ For a GLB, publish the physical `rumiAssembly` described in `blender-modeling`; 
 
 Each declaration has `kind`, `label`, and `axes`. A slider or curve has one axis; a pad has horizontal and vertical axes. Each axis has `key`, `min`, `max`, `step`, and `reset`. Keys bind entries in `values`. Labels are presentation, not behavior. A curve adjusts one bounded scalar with a curve-shaped gesture; it is not arbitrary curve geometry unless the model binds that scalar to its geometry.
 
-A parameter slider:
-
-```json
-{
-  "action": "open",
-  "operation": "parameters",
-  "label": "Eyes",
-  "values": {"eyeTilt": 10},
-  "controls": [{"kind": "slider", "label": "Eye tilt", "axes": [
-    {"key": "eyeTilt", "min": -25, "max": 25, "step": 0.5, "reset": 10}
-  ]}]
-}
-```
-
-Add the current `path`, `revision`, and `url` to this example. One `eyeTilt` parameter can drive both eyes with mirrored signs in the model builder. Do not expose two unrelated sliders when the person asks to move both together.
-
-## Make the edit controllable
-
-Parameter controls drive a JavaScript model that exports a numeric `parameters` dictionary and a synchronous `build(THREE, parameters)` function; use `operation: parameters`. Control keys must be declared in that dictionary and used by the builder. The viewer reruns `build()` on every control change without calling you or running a shell command. `build()` has Three.js only: it can transform and generate geometry, but cannot perform 3D Boolean operations, remesh, or run Blender. Models use millimetres and Z up, return fresh meshes and materials, build quickly, and share a 2 MiB limit across the model folder's `.js` and `.mjs` files.
-
-Before editing, work out what the result should look like across the control's range and what must stay exactly as it is. Then decide what structure the model needs so `build()` can produce that result at any value, and what one-time Blender change, if any, gets the current mesh there. The value should be an input to how the affected geometry is built, not a movement applied to finished geometry. Keep a recoverable copy, and preserve unrelated parts, earlier edits, and dimensions.
-
-Tell the person the intended result in one plain sentence; if it is unclear, ask what it should look like. Before opening controls, check the lowest, reset, and highest values: the requested feature changes as described and nothing else moves, bends, or separates. If no structure achieves this, say so before editing.
-
-If JavaScript is a temporary preview of an edit to an existing model, preserve its original Blender or mesh source and prepare a semantic edit recipe that maps each parameter to the intended Blender operation and identifies features to preserve. Before opening controls, including when a preview is already loaded, write `.rumi-preview.json` beside its entry with `{"original":"models/example/original.blend","edit":"Describe how the parameters change the original and what stays fixed"}`. The original path is project-relative. Open with `finish: blender`, `original` set to the preserved source path, and `edit` set to the same recipe. The marker makes the viewer retain Blender finishing even if the tool call omits it. Do not treat the preview mesh as the final result. For a genuinely final JavaScript model, omit `finish` or use `finish: parameters`.
-
-Expose only the parameters requested, or a small useful set; keep other declared parameters and their defaults. Use a step of 1 for integer parameters.
+Use the supported GLB operations below. Before opening controls, check the lowest, reset, and highest values: the intended feature changes and unrelated features stay intact. Keep the editable Blender original. If an operation cannot represent the requested edit, explain that limitation and make the edit in Blender; do not create executable preview code.
 
 ## Bind existing GLB operations
 
@@ -84,17 +31,13 @@ Examples:
 
 - **“Let me move the bottom cut up and tilt it.”** Use `operation: cut`; declare sliders “Cut height” → `amount`, “Front-to-back tilt” → `angle`, and “Side tilt” → `spread`, each step .001 and reset .5. The automatic cut guide replaces Gaussian highlights. Do not cut first.
 - **“Let me change how round the back is.”** Highlight the region and use `operation: bulge`; declare “Roundness” → `amount`, “Area” → `spread`, a pad “Position” → `peakX`/`peakY`, and a curve “Softness” → `falloff`. Add direction tilt → `angle` only when useful. Supply all six initial values even when some are not exposed.
-- **“Let me make the table wider.”** For a parameterized table, use `operation: parameters` and a slider bound to `width`, using the model's actual millimetre range and current width. Do not select a bulge or taper merely because it has existing controls.
-- **“Move the feature left/right and up/down.”** Bind a pad to the model's two placement parameters with their real ranges. Its axes need not be normalized for parameter models.
 
 ## Finish, save, or cancel
 
 Keep the controls open while the person explores. Satisfaction or moving to another task resolves the latest visible edit first; no special confirmation phrase is required. Do not rebuild from the initial tool arguments: release feedback and freeze capture the user's newer values.
 
 1. Call `viewer_controls` with `action: freeze` and the current control `id`. This captures the visible values, locks the controls, and returns a source-bound recipe. A failed freeze is not permission to save stale values.
-2. For a final JavaScript model (`finish: parameters`), call `viewer_controls` with `action: save` and the frozen `id`. This atomically persists values in `.rumi-parameters.json` beside the model, reloads it, and closes controls. Do not edit that file or the model source while controls are open. Wait for `saved` and check the viewer.
-3. For a temporary parameter preview (`finish: blender`), read the frozen recipe and its latest values, verify the preserved original still matches `originalHash` (SHA-256), reopen the preserved original in Blender, apply the semantic edit at those values, preserve unrelated features, inspect the result against the preview, check printability, save the editable source and export, then `viewer_load` the result. If the edit cannot be reproduced or verified, report the limitation and keep the frozen recipe; do not save the preview as final.
-4. For GLB operations, apply the frozen recipe with the Blender helper described in `analog-shaping`, publish, and `viewer_load` the result.
-5. Explicit cancel/revert uses `action: close` with the current `id`. It restores the saved preview and does not write parameter values. Source changes invalidate controls; re-read state and reopen rather than reusing an old id.
+2. Apply the frozen GLB recipe with the Blender helper described in `analog-shaping`, publish, and `viewer_load` the result. Preserve unrelated features and verify the new preview before reporting it saved.
+3. Explicit cancel/revert uses `action: close` with the current `id`. It restores the saved preview. Source changes invalidate controls; re-read state and reopen rather than reusing an old id.
 
-Report build/save failures plainly. Failed parameter previews preserve the last successful geometry and values. Never claim an edit is saved while controls remain unresolved.
+Report build/save failures plainly. Failed previews preserve the last successful geometry and values. Never claim an edit is saved while controls remain unresolved.

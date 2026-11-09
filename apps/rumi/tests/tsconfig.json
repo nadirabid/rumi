@@ -1,0 +1,28 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "allowJs": true,
+    "checkJs": false,
+    "rewriteRelativeImportExtensions": false
+  },
+  "include": [
+    "project-isolation*.spec.ts",
+    "project-manager.spec.ts"
+  ],
+  "references": [
+    {
+      "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../../../vendor/include"
+    },
+    {
+      "path": "../../../vendor/loader"
+    }
+  ]
+}

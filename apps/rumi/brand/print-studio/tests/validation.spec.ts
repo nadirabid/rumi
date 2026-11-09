@@ -228,6 +228,17 @@ it('keeps inconclusive mechanical checks visible and queues repair once per revi
   expect(agent.followup).toHaveBeenCalledTimes(1)
 })
 
+it('carries clearance details to the repair request and stored report', async () => {
+  const clearance = { code: 'insufficient_clearance', severity: 'error', count: 1,
+    details: { minimumClearanceMm: 0.2, pairs: [{ a: 'Body', b: 'DoorL', gapMm: 0.1 }] } }
+  const agent = { status: 'idle', followup: vi.fn() }
+  const f = await fixture(vi.fn(async () => ({ ...report, checks: [clearance] })), agent)
+  f.emit('turn/end'); const job = await f.ready(); f.validation.submit('a', job.id, f.bytes, null)
+  await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('needs_repair')
+  expect(f.validation.read('a').models[0]!.report.checks).toContainEqual(clearance)
+  expect(JSON.stringify(agent.followup.mock.calls[0])).toContain('\\"gapMm\\":0.1')
+})
+
 it('checks USD snapshots without a renderer and detects source changes during validation', async () => {
   let finish!: (value: typeof report) => void
   const run = vi.fn(() => new Promise<typeof report>((resolve) => { finish = resolve }))

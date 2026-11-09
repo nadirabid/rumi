@@ -9,10 +9,62 @@ import sys
 import bpy
 import bmesh
 from mathutils import Euler, Matrix, Vector
+from mathutils.bvhtree import BVHTree
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).parent))
 import object_print3d_utils as toolbox
+
+
+def measure_clearances(bodies, assembly, threshold):
+    """Return part pairs closer than `threshold` millimetres as (gap, a, b), nearest first.
+
+    Bodies carry placed millimetre vertices and triangles. Pairs joined directly by a fixed
+    connection are skipped. Overlapping solids have gap 0; otherwise the gap is the smaller of
+    the two vertex-to-surface distances, so it is a screening measure that can miss a pure
+    edge-to-edge minimum. Pairs whose bounding boxes are farther apart than `threshold` are
+    rejected without a surface query.
+    """
+    fixed = {frozenset((item['parent'], item['child'])) for item in assembly['connections']
+             if item['kind'] == 'fixed'}
+    boxes = [(Vector(tuple(min(p[i] for p in body['vertices']) for i in range(3))),
+              Vector(tuple(max(p[i] for p in body['vertices']) for i in range(3)))) for body in bodies]
+    trees = {}
+
+    def tree(index):
+        if index not in trees:
+            trees[index] = BVHTree.FromPolygons(bodies[index]['vertices'], bodies[index]['triangles'])
+        return trees[index]
+
+    def reach(source, target):
+        low, high = boxes[target]
+        best = None
+        for point in bodies[source]['vertices']:
+            if any(point[i] < low[i] - threshold or point[i] > high[i] + threshold for i in range(3)):
+                continue
+            location, _, _, distance = tree(target).find_nearest(Vector(point), threshold)
+            if location is not None and (best is None or distance < best):
+                best = distance
+        return best
+
+    pairs = []
+    for i in range(len(bodies)):
+        for j in range(i + 1, len(bodies)):
+            if frozenset((bodies[i]['id'], bodies[j]['id'])) in fixed:
+                continue
+            separation = Vector(tuple(max(0, boxes[i][0][k] - boxes[j][1][k], boxes[j][0][k] - boxes[i][1][k])
+                                      for k in range(3))).length
+            if separation >= threshold:
+                continue
+            if tree(i).overlap(tree(j)):
+                gap = 0.0
+            else:
+                found = [d for d in (reach(i, j), reach(j, i)) if d is not None]
+                if not found or min(found) >= threshold:
+                    continue
+                gap = min(found)
+            pairs.append((gap, bodies[i]['id'], bodies[j]['id']))
+    return sorted(pairs)
 
 
 def validate(request):
@@ -44,6 +96,7 @@ def validate(request):
     if not meshes:
         raise ValueError('No mesh geometry to validate')
     mechanics_meshes = []
+    clearance = None
     if 'mechanicsOutput' in request:
         if len(meshes) > 128:
             raise ValueError('Mechanical validation supports at most 128 mesh bodies')
@@ -113,6 +166,9 @@ def validate(request):
             return list(rotation @ ((Vector(point) - centre) * transform['scale']) + offset)
         for body in mechanics_meshes:
             body['vertices'] = [placed(vertex) for vertex in body['vertices']]
+        threshold = request['settings'].get('minimumClearanceMm', 0)
+        if threshold > 0 and len(mechanics_meshes) >= 2:
+            clearance = (threshold, measure_clearances(mechanics_meshes, request['assembly'], threshold))
         assembly = json.loads(json.dumps(request['assembly']))
         for connection in assembly['connections']:
             if connection['kind'] == 'fixed':
@@ -156,6 +212,12 @@ def validate(request):
     checks = [dict(code=code, count=len(item[1][1]), severity='warning' if code in
                    ['thin_faces', 'sharp_edges', 'overhangs', 'distorted_faces'] else 'error')
               for code, item in zip(codes, findings)]
+    if clearance is not None:
+        threshold, close = clearance
+        # Either manufacturing mode needs the gap: print-in-place parts fuse, separate parts do not fit.
+        checks.append(dict(code='insufficient_clearance', count=len(close), severity='error',
+            details=dict(minimumClearanceMm=threshold,
+                         pairs=[dict(a=a, b=b, gapMm=round(gap, 4)) for gap, a, b in close[:8]])))
     dimensions = {axis: high[i]-low[i] for i, axis in enumerate('xyz')}
     volume = request['volume']
     if volume is not None:

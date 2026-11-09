@@ -10,6 +10,7 @@ SETTINGS = dict(maxTotalSteps=2000000, retentionWorkers=2, timeStepSeconds=.0002
                 restDurationSeconds=.02, retentionDurationSeconds=.05,
                 densityKgM3=1250, forceN=1, torqueNm=.05,
                 linearToleranceMm=.5, angularToleranceDegrees=3, maxPenetrationMm=.05,
+                retentionTravelMm=2, retentionTiltDegrees=15,
                 gravityMps2=[0,0,0], friction=0, movementSampleDegrees=45, movementSampleMm=2, assemblySampleMm=.2)
 
 
@@ -78,9 +79,11 @@ def revolution(name, profile, segments=64):
     return dict(id=name, vertices=vertices, triangles=triangles)
 
 
-def wheel():
-    bodies = [revolution('axle', [(0,-5),(9,-5),(9,-4.3),(3.8,-4.3),
-                                  (3.8,4.3),(9,4.3),(9,5),(0,5)]),
+def wheel(play=.3):
+    # play is the axial clearance between each axle flange and the wheel hub.
+    inner = 4 + play
+    bodies = [revolution('axle', [(0,-inner-.7),(9,-inner-.7),(9,-inner),(3.8,-inner),
+                                  (3.8,inner),(9,inner),(9,inner+.7),(0,inner+.7)]),
               revolution('wheel', [(4,-4),(12,-4),(12,4),(4,4)])]
     return assembly(bodies,'axle',[dict(id='wheel',parent='axle',child='wheel',kind='revolute',axis=[0,0,1],pivot=[0,0,0],range=[-180,180])])
 

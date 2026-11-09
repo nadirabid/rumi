@@ -7,7 +7,7 @@ import subprocess
 import sys
 import unittest
 sys.dont_write_bytecode = True
-from fixtures import request, box, slider, wheel, assembly, two_wheels, loose_pin, loose_cap
+from fixtures import request, box, slider, wheel, assembly, two_wheels, loose_pin, loose_cap, revolution
 
 parser = argparse.ArgumentParser()
 parser.add_argument('executable', type=Path)
@@ -90,6 +90,20 @@ class NativeTests(unittest.TestCase):
         positions=[p['actual']['wheel'] for p in result['connections'][0]['probes'] if p['kind']=='movement']
         self.assertTrue(any(abs(v-180)<3 for v in positions));self.assertTrue(any(abs(v+180)<3 for v in positions))
 
+    def test_captive_part_with_play_is_retained(self):
+        # Retention allows travel through the play but requires the part to stop at its stops.
+        value=wheel(.8);value['settings'].update(retentionTravelMm=2,retentionTiltDegrees=15)
+        result=self.assert_verified(value)
+        retention=[p for p in result['connections'][0]['probes'] if p['kind']=='retention']
+        self.assertTrue(retention);self.assertTrue(all(p['retentionTravelMm']==2 for p in retention))
+
+    def test_part_without_retaining_feature_escapes(self):
+        value=wheel()
+        value['bodies'][0]=revolution('axle',[(0,-5),(3.8,-5),(3.8,5),(0,5)])
+        code,result=run(value)
+        self.assertEqual(code,0,result);self.assertEqual(result['status'],'needs_repair',result)
+        self.assertEqual(result['checks'][0]['code'],'unretained_part')
+
     def test_complete_assembly_with_two_dynamic_wheels(self):
         value=two_wheels()
         value['assembly']['sequences']=[dict(id='both',waypoints=[dict(lower=45,upper=-45),dict(lower=0,upper=0)])]
@@ -115,11 +129,10 @@ class NativeTests(unittest.TestCase):
         code,result=run(value)
         self.assertEqual(code,0,result);self.assertEqual(result['checks'][0]['code'],'unretained_part')
 
-    def test_separate_parts_without_assembly_path_remain_unverified(self):
+    def test_separate_parts_without_declared_removal_steps_are_verified_by_probes(self):
         value=wheel();value['assembly']['manufacturing']['mode']='separate'
-        code,result=run(value)
-        self.assertEqual(code,0,result);self.assertEqual(result['status'],'review',result)
-        self.assertFalse(result['assemblyVerified']);self.assertIn('assembly_route_unverified',[c['code'] for c in result['checks']])
+        result=self.assert_verified(value)
+        self.assertEqual(result['coverage']['assemblySteps'],[])
 
     def test_separate_slider_has_sampled_removal_route(self):
         value=slider();value['assembly']['manufacturing']=dict(mode='separate',steps=[dict(part='moving',path=[[0,0,0],[20,0,0]])])
@@ -161,7 +174,7 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(result['checks'][0]['code'],'probe_inconclusive')
 
     def test_simulation_policy_rejects_out_of_bounds_settings(self):
-        for name,setting in [('gravityMps2',[0,0,-21]),('friction',1.01),('movementSampleMm',.01),('assemblySampleMm',3),('maxTotalSteps',999),('maxTotalSteps',10000001),('maxTotalSteps',1000.5),('retentionWorkers',0),('retentionWorkers',5),('retentionWorkers',1.5)]:
+        for name,setting in [('gravityMps2',[0,0,-21]),('friction',1.01),('movementSampleMm',.01),('assemblySampleMm',3),('maxTotalSteps',999),('maxTotalSteps',10000001),('maxTotalSteps',1000.5),('retentionWorkers',0),('retentionWorkers',5),('retentionWorkers',1.5),('retentionTravelMm',.05),('retentionTravelMm',11),('retentionTiltDegrees',.5),('retentionTiltDegrees',46)]:
             value=assembly([box('part',[0,0,0],[2,2,2])],'part',[]);value['settings'][name]=setting
             code,result=run(value)
             self.assertEqual(code,2,result);self.assertEqual(result['error']['code'],'invalid_request')
@@ -169,7 +182,7 @@ class NativeTests(unittest.TestCase):
     def test_larger_allowance_completes_the_same_motion_plan(self):
         value=slider()
         value['assembly']['sequences']=[dict(id='repeat',waypoints=[{value['assembly']['connections'][0]['id']: 0} for _ in range(64)])]
-        value['settings']['maxTotalSteps']=250000
+        value['settings']['maxTotalSteps']=100000
         code,limited=run(value)
         self.assertEqual(code,0,limited)
         self.assertFalse(limited['coverage']['complete'])

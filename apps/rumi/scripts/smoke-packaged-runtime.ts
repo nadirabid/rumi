@@ -26,4 +26,4 @@ await smokePreparedRuntime(join(resources, 'app.asar', 'dsh'), executable, join(
 smokeBlenderRuntime(resources, target)
 smokeBulletRuntime(resources, target)
 if (!windows) execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', join(application, '..')], { stdio: 'pipe' })
-console.log('Rumi runtime: bundled Blender editing, GLB export and Bullet mechanics passed')
+console.log('Rumi runtime: bundled Blender editing, USD export and Bullet mechanics passed')

@@ -15,9 +15,24 @@ const range = (value, cap) => Array.isArray(value) && value.length === 2 && valu
  * @returns Normalized assembly, motion coverage, and blocking declaration findings.
  */
 export function mechanismMetadata(manifest) {
-  const extras = object(manifest.asset?.extras) ? manifest.asset.extras : {}
+  return validateRobotAssembly({
+    assembly: manifest.asset?.extras?.rumiAssembly,
+    nodes: manifest.nodes,
+    motionKeys: manifest.asset?.extras?.rumiMotionKeys,
+    motionRanges: manifest.asset?.extras?.rumiMotionRanges,
+    legacy: manifest.asset?.extras?.rumiMechanisms,
+  })
+}
+
+/** Validate a solver-neutral projection of USD robot bodies and joints.
+ * @param {object} description Parsed robot, mesh inventory and optional movement intent.
+ * @returns {object} Bounded assembly and blocking findings for unsupported declarations.
+ */
+export function validateRobotAssembly(description) {
+  const extras = { rumiAssembly: description.assembly, rumiMotionKeys: description.motionKeys,
+    rumiMotionRanges: description.motionRanges, rumiMechanisms: description.legacy }
   let raw = extras.rumiAssembly
-  const nodes = Array.isArray(manifest.nodes) ? manifest.nodes : []
+  const nodes = Array.isArray(description.nodes) ? description.nodes : []
   const meshes = nodes.filter(node => Number.isSafeInteger(node?.mesh) && node.mesh >= 0)
   const motionKeys = extras.rumiMotionKeys === undefined ? [] : extras.rumiMotionKeys
   const motionRanges = extras.rumiMotionRanges === undefined ? [] : extras.rumiMotionRanges
@@ -45,7 +60,7 @@ export function mechanismMetadata(manifest) {
       && name(mesh.name) && nodes.filter(node => node?.name === mesh.name).length === 1) {
       raw = { version: 1, root: mesh.name, parts: [{ id: mesh.name, mesh: mesh.name }], connections: [], manufacturing: { mode: 'print-in-place' } }
     } else {
-      issue('Publish rumiAssembly version 1 with every physical part and connection; movement-only declarations cannot validate an assembly.', 'assembly_description_required')
+      issue('Publish USD with IsaacRobotAPI, IsaacLinkAPI and IsaacJointAPI covering every physical mesh and connection.', 'assembly_description_required')
       return result(null)
     }
   }

@@ -94,7 +94,7 @@ export async function runBullet(config, geometry, signal) {
     const stop = error => { failure ??= error; child.kill('SIGKILL') }
     child.stdout.on('data', chunk => {
       outputBytes += chunk.length
-      if (outputBytes > 1024 * 1024) stop(new Error('Bullet validation output exceeded 1 MiB'))
+      if (outputBytes > 8 * 1024 * 1024) stop(new Error('Bullet validation output exceeded 8 MiB'))
       else stdout += chunk.toString()
     })
     child.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-4000) })

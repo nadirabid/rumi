@@ -49,7 +49,7 @@ export async function blenderStatus(configured, home) {
 export function applyBlender(ctx, defineTool, config) {
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'blender_status',
-    description: 'Find the local Blender executable and Rumi export helper. Use Blender background Python scripts for mesh creation and editing, then viewer_load the exported GLB for Three.js viewing and iteration. Read the blender-modeling skill. This tool only discovers paths; scripts run through the existing shell tool and its permissions.',
+    description: 'Find the local Blender executable and Rumi export helper. Use Blender background Python scripts for mesh creation and editing, then viewer_load the exported USD for Three.js viewing and iteration. Read the blender-modeling skill. This tool only discovers paths; scripts run through the existing shell tool and its permissions.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     presentCall: () => ({ card: 'generic', title: 'Find Blender', kind: 'read' }),

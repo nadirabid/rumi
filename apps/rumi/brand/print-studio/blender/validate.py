@@ -1,5 +1,6 @@
 """Read an immutable mesh snapshot and emit structured Print Toolbox findings."""
 import json
+import copy
 import math
 import random
 from pathlib import Path
@@ -20,7 +21,20 @@ def validate(request):
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete(use_global=False)
     path = request['input']
-    if path.endswith('.glb'):
+    robot = None
+    robot_error = None
+    if path.endswith(('.usda', '.usd')):
+        from pxr import Usd
+        from robot_usd import read_robot
+        try:
+            robot = read_robot(Usd.Stage.Open(path))
+            request['assembly'] = copy.deepcopy(robot['assembly'])
+        except (ValueError, KeyError, TypeError, AttributeError) as error:
+            robot_error = str(error)
+            request.pop('mechanicsOutput', None)
+        bpy.ops.wm.usd_import(filepath=path)
+        factor = 1000
+    elif path.endswith('.glb'):
         bpy.ops.import_scene.gltf(filepath=path)
         factor = 1000
     else:
@@ -148,7 +162,7 @@ def validate(request):
         checks.append(dict(code='oversized', count=int(any(dimensions[a] > volume[a] for a in 'xyz')), severity='error'))
     return dict(version=1, status='needs_repair' if any(c['count'] and c['severity'] == 'error' for c in checks)
                 else 'review' if any(c['count'] for c in checks) else 'passed', checks=checks,
-                dimensions=dimensions, settings=settings, printReady=False)
+                dimensions=dimensions, settings=settings, printReady=False, robot=robot, robotError=robot_error)
 
 
 if __name__ == '__main__':

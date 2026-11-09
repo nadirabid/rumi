@@ -6,7 +6,7 @@ import json
 import math
 from pathlib import Path
 
-SETTINGS = dict(timeStepSeconds=.00025, iterations=40, probeDurationSeconds=.5,
+SETTINGS = dict(maxTotalSteps=2000000, retentionWorkers=2, timeStepSeconds=.00025, iterations=40, probeDurationSeconds=.5,
                 restDurationSeconds=.02, retentionDurationSeconds=.05,
                 densityKgM3=1250, forceN=1, torqueNm=.05,
                 linearToleranceMm=.5, angularToleranceDegrees=3, maxPenetrationMm=.05,

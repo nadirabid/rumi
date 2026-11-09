@@ -10,14 +10,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { applyViewer } from '../viewer/host.js'
-import { assemblyGlb } from './fixtures/assembly-glb.js'
-import { parseGlbModel } from '../viewer/viewport/glb.js'
+import { robotUsd } from './fixtures/robot-usd.js'
+import { parseUsdModel } from '../viewer/viewport/usd.js'
 import { disposeModel } from '../viewer/viewport/model.js'
 import { readMotion } from '../viewer/motion.js'
 import { analyzeMesh } from '../viewer/checks.js'
 
 class LoadReplay extends LlmAdapter {
-  path = 'models/box/model.glb'
+  path = 'models/box/model.usda'
   requests: GenerateOptions[] = []
   override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     return Promise.resolve({ provider, id: model, name: model })
@@ -40,17 +40,17 @@ class LoadReplay extends LlmAdapter {
   }
 }
 
-it.each(['glb'])('delivers %s load measurements and movement to the next model request in a keyless session', async (format) => {
+it.each(['usd'])('delivers %s load measurements and movement to the next model request in a keyless session', async (format) => {
   const temporary = await mkdtemp(join(tmpdir(), 'rumi-load-session-'))
   const ctx = new Context(), controller = new AbortController()
   try {
     const root = await realpath(temporary)
     await mkdir(join(root, 'models', 'box'), { recursive: true })
-    if (format === 'glb') await writeFile(join(root, 'models', 'box', 'model.glb'), assemblyGlb())
+    if (format === 'usd') await writeFile(join(root, 'models', 'box', 'model.usda'), robotUsd())
     await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
     const harness = await mountAgentLoopTestHarness(ctx)
     const adapter = new LoadReplay()
-    if (format === 'glb') adapter.path = 'models/box/model.glb'
+    if (format === 'usd') adapter.path = 'models/box/model.usda'
     ctx.effect(() => ctx.llm.registerAdapter(['fixture'], adapter))
     const routes = new Map<string, (request: Request) => Promise<Response>>()
     applyViewer({
@@ -79,7 +79,7 @@ it.each(['glb'])('delivers %s load measurements and movement to the next model r
       const { scene } = await request('state')
       const source = await routes.get(scene.design.url)!(new Request(`http://fixture${scene.design.url}`))
       const generated = { bytes: await source.arrayBuffer(), parameters: {} }
-      const model = await parseGlbModel(generated.bytes)
+      const model = await parseUsdModel(generated.bytes)
       let glbFeedback
       try {
         glbFeedback = { parameters: { ...generated.parameters, ...model.parameters },
@@ -105,7 +105,7 @@ it.each(['glb'])('delivers %s load measurements and movement to the next model r
     const events = agent.session.snapshotEvents()
     expect(events.filter(event => event.type === 'tool/call').map(event => event.data.name)).toEqual(['viewer_load'])
     expect(events.filter(event => event.type === 'turn/end').map(event => event.data.reason)).toEqual([{ kind: 'completed' }])
-    if (format === 'glb') {
+    if (format === 'usd') {
       expect({ load: result.load.status, format: result.design.format,
         motion: result.design.motion, parameters: result.design.parameters }).toMatchSnapshot()
     }

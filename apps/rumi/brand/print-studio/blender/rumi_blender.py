@@ -7,13 +7,31 @@ import shutil
 import struct
 import uuid
 
+from pxr import Usd
+import runpy
+_robot = runpy.run_path(str(Path(__file__).with_name("robot_usd.py")))
+initialize_robot = _robot["initialize_robot"]
+description_layer = _robot["description_layer"]
+restore_description = _robot["restore_description"]
+read_robot = _robot["read_robot"]
+
 import bpy
 
 
 def import_mesh(path):
-    """Import standard GLB (metres) or Rumi STL (millimetres) into Blender."""
+    """Import self-contained USD, legacy GLB (metres), or Rumi STL (millimetres)."""
     path = Path(path).resolve()
-    if path.suffix.lower() == '.glb':
+    if path.suffix.lower() in ('.usd', '.usda'):
+        text = path.read_text()
+        if not text.startswith('#usda 1.0') or '@' in text:
+            raise ValueError('Import a self-contained ASCII USD layer')
+        stage = Usd.Stage.Open(str(path))
+        read_robot(stage)
+        if bpy.context.scene.get('rumi_robot_description'):
+            raise ValueError('Compose robot descriptions explicitly before importing another assembly')
+        bpy.ops.wm.usd_import(filepath=str(path))
+        bpy.context.scene['rumi_robot_description'] = description_layer(stage)
+    elif path.suffix.lower() == '.glb':
         data = path.read_bytes()
         length = struct.unpack_from('<I', data, 12)[0]
         manifest = json.loads(data[20:20+length])
@@ -46,45 +64,25 @@ def import_mesh(path):
     elif path.suffix.lower() == '.stl':
         bpy.ops.wm.stl_import(filepath=str(path), global_scale=0.001)
     else:
-        raise ValueError('Import a GLB or STL; open .blend originals with bpy.ops.wm.open_mainfile')
+        raise ValueError('Import USD, GLB or STL; open .blend originals with bpy.ops.wm.open_mainfile')
 
 
-def publish(model_directory, mechanisms=None, assembly=None):
-    """Save a new editable revision and atomically replace model.glb after validation.
+def publish(model_directory, configure_robot=None):
+    """Atomically publish self-contained model.usda and a recoverable editable .blend.
 
-    The scene uses metres, Z up. Evaluated visible mesh objects must fit the
-    200,000-triangle preview limit. Originals retain modifiers in the .blend.
-    Assembly version 1 maps physical part ids to mesh object names. Axes and
-    pivots use millimetres/Z up; rotation ranges use degrees relative to the
-    saved pose. None retains the scene description. Legacy mechanisms remain
-    readable but require an assembly upgrade before mechanical acceptance.
-    Failed exports never replace the previous preview; partial revisions may
-    remain for diagnosis. This checks geometry validity, not print readiness.
+    configure_robot(stage), when supplied, authors USD Physics joints and Isaac
+    relationships on the exported stage. Otherwise saved USD declarations persist.
+    Meshes are rigid links; unsupported articulation remains a validation finding.
     """
     directory = Path(model_directory).resolve()
-    if mechanisms is not None:
-        if not isinstance(mechanisms, list):
-            raise ValueError('Mechanisms must be a list of saved movement declarations')
-        bpy.context.scene['rumi_mechanisms_json'] = json.dumps(mechanisms, allow_nan=False)
-    if assembly is not None:
-        if not isinstance(assembly, dict) or assembly.get('version') != 1:
-            raise ValueError('Assembly must be a version 1 description')
-        bpy.context.scene['rumi_assembly_json'] = json.dumps(assembly, allow_nan=False)
-    saved_assembly = bpy.context.scene.get('rumi_assembly_json')
-    if saved_assembly is not None:
-        assembly = json.loads(saved_assembly)
-    saved_mechanisms = bpy.context.scene.get('rumi_mechanisms_json')
-    if saved_mechanisms is not None:
-        mechanisms = json.loads(saved_mechanisms)
     meshes = [obj for obj in bpy.context.scene.objects
               if obj.type == 'MESH' and obj.visible_get() and not obj.hide_render]
     if not meshes:
         raise ValueError('No visible mesh objects to publish')
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    triangles = 0
-    points = []
+    graph = bpy.context.evaluated_depsgraph_get()
+    triangles, points = 0, []
     for obj in meshes:
-        evaluated = obj.evaluated_get(depsgraph)
+        evaluated = obj.evaluated_get(graph)
         mesh = evaluated.to_mesh()
         try:
             mesh.calc_loop_triangles()
@@ -97,56 +95,57 @@ def publish(model_directory, mechanisms=None, assembly=None):
         finally:
             evaluated.to_mesh_clear()
     if not 0 < triangles <= 200000:
-        raise ValueError('Preview requires 1–200,000 triangles; preserve the detailed original and explicitly make a lighter preview')
+        raise ValueError('Preview requires 1–200,000 triangles; preserve detailed originals')
     revision = directory / 'revisions' / uuid.uuid4().hex
     revision.mkdir(parents=True, exist_ok=False)
     bpy.context.scene.unit_settings.system = 'METRIC'
     bpy.context.scene.unit_settings.scale_length = 1.0
-    bpy.ops.wm.save_as_mainfile(filepath=str(revision / 'model.blend'))
     bpy.ops.object.select_all(action='DESELECT')
     for obj in meshes:
         obj.select_set(True)
-    glb = revision / 'model.glb'
-    bpy.ops.export_scene.gltf(
-        filepath=str(glb), export_format='GLB', use_selection=True,
-        export_yup=True, export_apply=True, export_animations=False,
-        export_skins=False, export_morph=False, export_cameras=False,
-        export_lights=False, export_extras=True,
+    usd = revision / 'model.usda'
+    bpy.ops.wm.usd_export(
+        filepath=str(usd), selected_objects_only=True, export_animation=False,
+        export_materials=True, export_textures=False, export_armatures=False,
+        export_shapekeys=False, export_hair=False, export_lights=False,
+        export_cameras=False, export_curves=False, export_points=False,
+        export_volumes=False, root_prim_path='/Model', merge_parent_xform=True,
+        author_blender_name=False, export_custom_properties=False,
+        triangulate_meshes=True, use_instancing=False,
     )
-    if not glb.is_file() or not 20 <= glb.stat().st_size <= 64 * 1024 * 1024:
-        raise ValueError('GLB export failed or exceeded 64 MiB; previous preview retained')
-    metadata = {}
-    if mechanisms is not None:
-        metadata['rumiMechanisms'] = mechanisms
-    if assembly is not None:
-        metadata['rumiAssembly'] = assembly
-    for key in ('rumiMotionKeys', 'rumiMotionRanges'):
+    stage = Usd.Stage.Open(str(usd))
+    initialize_robot(stage)
+    saved = bpy.context.scene.get('rumi_robot_description')
+    if saved:
+        restore_description(stage, saved)
+    elif bpy.context.scene.get('rumi_assembly_json'):
+        _robot['migrate_assembly'](stage, json.loads(bpy.context.scene['rumi_assembly_json']))
+    elif configure_robot is None and any(bpy.context.scene.get(key) for key in ['rumi_mechanisms_json', 'rumiMotionKeys']):
+        raise ValueError('Legacy movement needs explicit USD Physics joints before publishing')
+    if configure_robot is not None:
+        configure_robot(stage)
+    metadata = read_robot(stage)
+    stage.GetRootLayer().Save()
+    if not 10 <= usd.stat().st_size <= 64 * 1024 * 1024 or '@' in usd.read_text():
+        raise ValueError('USD must fit 64 MiB and contain no external assets; use embedded surface colours')
+    bpy.context.scene['rumi_robot_description'] = description_layer(stage)
+    for key in ['rumi_assembly_json', 'rumi_mechanisms_json', 'rumiMotionKeys', 'rumiMotionRanges']:
         if key in bpy.context.scene:
-            metadata[key] = json.loads(bpy.context.scene[key])
-    if metadata:
-        data = glb.read_bytes()
-        length = struct.unpack_from('<I', data, 12)[0]
-        manifest = json.loads(data[20:20+length])
-        manifest['asset'].setdefault('extras', {}).update(metadata)
-        encoded = json.dumps(manifest, allow_nan=False).encode('utf8')
-        encoded += b' ' * (-len(encoded) % 4)
-        tail = data[20+length:]
-        if 20 + len(encoded) + len(tail) > 64 * 1024 * 1024:
-            raise ValueError('GLB movement metadata exceeded 64 MiB; previous preview retained')
-        glb.write_bytes(struct.pack('<IIIII', 0x46546c67, 2, 20+len(encoded)+len(tail), len(encoded), 0x4e4f534a) + encoded + tail)
+            del bpy.context.scene[key]
+    bpy.ops.wm.save_as_mainfile(filepath=str(revision / 'model.blend'))
     report = {
-        'blend': str(revision / 'model.blend'), 'revisionGlb': str(glb),
-        'preview': str(directory / 'model.glb'), 'triangles': triangles,
-        'parts': [obj.name for obj in meshes],
-        'dimensionsMm': {axis: (max(p[i] for p in points) - min(p[i] for p in points)) * 1000
+        'blend': str(revision / 'model.blend'), 'revisionUsd': str(usd),
+        'preview': str(directory / 'model.usda'), 'triangles': triangles,
+        'parts': [part['mesh'] for part in metadata['assembly']['parts']],
+        'dimensionsMm': {axis: (max(p[i] for p in points)-min(p[i] for p in points))*1000
                          for i, axis in enumerate('xyz')},
         'printReady': False,
     }
     (revision / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
-    temporary = directory / ('.preview-' + uuid.uuid4().hex + '.glb')
+    temporary = directory / ('.preview-' + uuid.uuid4().hex + '.usda')
     try:
-        shutil.copyfile(glb, temporary)
-        os.replace(temporary, directory / 'model.glb')
+        shutil.copyfile(usd, temporary)
+        os.replace(temporary, directory / 'model.usda')
     finally:
         temporary.unlink(missing_ok=True)
     print('RUMI_MODEL ' + json.dumps(report))

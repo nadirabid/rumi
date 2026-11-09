@@ -54,10 +54,8 @@ it('updates uniforms without rewriting buffers and restores shared materials on 
 it('rejects stale feedback and freezes a live capture newer than the last released value', async () => {
   const root = await mkdtemp(join(tmpdir(), 'rumi-analog-')), owner = new Context()
   try {
-    const json = JSON.stringify({ asset: { version: '2.0' }, scene: 0, scenes: [{ nodes: [] }], nodes: [] })
-    const content = Buffer.from(json + ' '.repeat((4 - json.length % 4) % 4)), bytes = Buffer.alloc(20 + content.length)
-    ;[0x46546c67, 2, bytes.length, content.length, 0x4e4f534a].forEach((n, i) => bytes.writeUInt32LE(n, i * 4)); content.copy(bytes, 20)
-    const path = join(root, 'model.glb'); await writeFile(path, bytes)
+    const bytes = Buffer.from('#usda 1.0\n# preview\n')
+    const path = join(root, 'model.usda'); await writeFile(path, bytes)
     const source = await createSource({ effect: owner.effect.bind(owner), connection: { fetch: { register: () => () => {} } } }, path, root)
     const state = source.state(), spec = source.shape({ ...recipe, ...state, ...recipe })
     const feedback = { id: spec.id, url: state.url, status: 'adjusted', sequence: 2, values: { ...INITIAL_VALUES, amount: .7 } }

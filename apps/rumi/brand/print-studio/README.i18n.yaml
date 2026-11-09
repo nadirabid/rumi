@@ -9,8 +9,8 @@
   en: 9a60197d35201e39
   zh: 93cbf14689151364
 /print-studio/mesh-preview:
-  en: fa53f0d3bb03fc56
-  zh: 855dcd6ce5d649b4
+  en: a5986976e6b6e551
+  zh: f14c9a1d8975cb75
 /print-studio/client-build:
   en: bebe7ccf8177c5dd
   zh: 7233a8d3b4a7eb93
@@ -20,21 +20,21 @@
 /print-studio/source-ownership:
   en: d5d901e4edea32f2
   zh: 3a95521f4153b966
-/print-studio/blender-editing-and-glb-previews:
-  en: 7cb2d6a6fba7dc3b
-  zh: 57ca2bcbdbb0eea3
+/print-studio/blender-editing-and-usd-previews:
+  en: 2cba5bb3c143aad6
+  zh: 88a5313d009cbde7
 /print-studio/automatic-blender-validation:
-  en: 319d0a8148e7ceca
-  zh: d581eb5014fe0923
+  en: 59620e59b486a116
+  zh: c8bd27b834afa9e3
 /print-studio/mechanical-validation:
-  en: 81926e63e4eeff80
-  zh: c6d853a8d9d9cd88
+  en: f3a995721c787ec8
+  zh: 3a5149d5c837f887
 /print-studio/persistent-movement-controls:
-  en: 34fba5dc657ba0f0
-  zh: 33f4b9f2ab29b021
+  en: 6b94574196247ecb
+  zh: 5338b565ead0058c
 /print-studio/editable-three-js-models:
-  en: c6bda4627ec932cd
-  zh: 35f31b9bc44f9066
+  en: 447cb5175075d011
+  zh: 3b071e874b6af7a8
 /print-studio/editable-three-js-models/visual-clarification:
   en: 8d9ab37f7ec899a8
   zh: 7817dc78b333ba64
@@ -45,8 +45,8 @@
   en: 89a0b811599b7bc9
   zh: f0f82c0d0e60c451
 /print-studio/analog-mesh-editing:
-  en: 0a9db78f7ac4524c
-  zh: 0e0dba5ff1f6e583
+  en: 9d73db0b74ddf05e
+  zh: 6bad1380aaa31451
 /print-studio/live-model-context:
   en: 391d18501eed9de1
   zh: 8730661248666fa4

@@ -1,10 +1,12 @@
 /** Turn completion validates source revisions independently of selection and tool use. */
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, expect, it, vi } from 'vitest'
+import { writeFileSync } from 'node:fs'
 import { mkdtemp, mkdir, writeFile, rm, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createValidation } from '../viewer/validation.js'
+import { summarizeValidationState } from '../viewer/validation-summary.js'
 import { preserveMovement, validationState } from '../viewer/validation-state.js'
 import { normalizePlacement } from '../viewer/transform.js'
 import { encodeStl } from '../viewer/stl.js'
@@ -18,7 +20,8 @@ const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 const report = { version: 1, status: 'needs_repair', checks: [{ code: 'intersecting_faces', count: 2, severity: 'error' }], printReady: false }
 const mechanicalReport = { ...report, checks: [{ code: 'unretained_part', count: 1, severity: 'error', mechanism: 'door' }],
-  mechanics: { version: 1, engine: 'bullet', status: 'needs_repair', printReady: false, checks: [{ code: 'unretained_part', count: 1, severity: 'error', mechanism: 'door' }] } }
+  mechanics: { version: 1, engine: 'bullet', status: 'needs_repair', printReady: false, checks: [{ code: 'unretained_part', count: 1, severity: 'error', mechanism: 'door' }],
+    connections: [{ id: 'door', probes: [{ status: 'passed', kind: 'rest' }, { status: 'needs_repair', kind: 'retention', code: 'unretained_part' }] }] } }
 async function fixture(run = vi.fn(async () => report), agent?: { status: string; followup: ReturnType<typeof vi.fn> }) {
   const root = await mkdtemp(join(tmpdir(), 'rumi-validation-test-'))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
@@ -30,7 +33,7 @@ async function fixture(run = vi.fn(async () => report), agent?: { status: string
     connection: { fetch: { register: (spec: { path: string }) => {
       routes.set(spec.path, spec); return () => routes.delete(spec.path)
     } } } }
-  const makeValidation = () => createValidation(ctx, { validation: {}, validationRepairAttempts: 2, validationStateDirectory: join(root, 'validation-state') }, { createUserMessage, run, notify: () => {},
+  const makeValidation = () => createValidation(ctx, { validation: {}, validationRepairAttempts: 5, validationStateDirectory: join(root, 'validation-state') }, { createUserMessage, run, notify: () => {},
     view: () => ({ selectedModel: null, volume: null, meshes: [] }) })
   const validation = makeValidation()
   cleanup.push(() => validation.dispose())
@@ -143,7 +146,7 @@ it.each([{ kind: 'geometry', result: report }, { kind: 'mechanics', result: mech
   cleanup.push(() => validator.dispose())
   ctx.effect(() => ctx.systemPrompt.context({ name: 'validation-fixture', order: 210, required: true,
     text: ({ agent }) => {
-      const item = agent && validator.read(agent.session.id).models[0]
+      const item = agent && summarizeValidationState(validator.read(agent.session.id)).models[0]
       return JSON.stringify({ validation: item ? { status: item.status, report: item.report, previousReport: item.previousReport } : null })
     } }))
   const agent = await harness.create(SessionId('validation-session'), { provider: 'mock', model: 'mock' }, { cwd: f.root })
@@ -170,6 +173,48 @@ it.each([{ kind: 'geometry', result: report }, { kind: 'mechanics', result: mech
   expect(agent.session.snapshotEvents().filter(event => event.type === 'turn/end')).toHaveLength(2)
 })
 
+it('records five automatic repair turns and keeps a sixth failed revision unresolved', async () => {
+  const f = await fixture()
+  const ctx = new Context()
+  cleanup.push(() => ctx.fiber.dispose())
+  await mountAgentLoopTestDependencies(ctx)
+  const harness = await mountAgentLoopTestHarness(ctx)
+  const adapter = new MockAdapter(Array.from({ length: 6 }, (_, revision) => () => {
+    writeFileSync(join(f.root, 'models/car/model.js'), `export const revision = ${revision}`)
+    return textResponse(`Saved revision ${revision}.`)
+  }))
+  ctx.effect(() => ctx.llm.registerAdapter(['mock'], adapter))
+  const validator = createValidation({ agents: ctx.agents, on: ctx.on.bind(ctx), effect: ctx.effect.bind(ctx),
+    connection: { fetch: { register: () => () => {} } } },
+  { validation: {}, validationRepairAttempts: 5, validationStateDirectory: join(f.root, 'validation-state') }, {
+    createUserMessage, view: () => ({ selectedModel: null, volume: null, meshes: [] }), notify: () => {}, run: async () => report,
+  })
+  cleanup.push(() => validator.dispose())
+  const agent = await harness.create(SessionId('five-repairs'), { provider: 'mock', model: 'mock' }, { cwd: f.root })
+  agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Create the car.' }] }))
+  for (let revision = 0; revision < 6; revision++) {
+    await expect.poll(() => validator.requests(agent.session.id).length).toBe(1)
+    const job = validator.requests(agent.session.id)[0]
+    validator.submit(agent.session.id, job.id, f.bytes, null)
+  }
+  await expect.poll(() => validator.read(agent.session.id).models[0]?.status).toBe('needs_repair')
+  await validator.dispose()
+  await agent.whenIdle()
+  const events = agent.session.snapshotEvents()
+  const messages = events.flatMap((event) => {
+    if (event.type === 'user/message' && ['user', 'print-validation'].includes(String(event.data.source.kind))) {
+      if (String(event.data.source.kind) === 'print-validation') {
+        expect(event.data.content).toMatchObject([{ type: 'text', text: expect.stringContaining('intersecting_faces') }])
+      }
+      return [String(event.data.source.kind)]
+    }
+    if (event.type === 'assistant/message') return event.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : [])
+    return []
+  })
+  expect(messages).toMatchSnapshot()
+  expect(adapter.requests).toHaveLength(6)
+})
+
 it('keeps inconclusive mechanical checks visible and queues repair once per revision', async () => {
   const agent = { status: 'idle', followup: vi.fn() }
   const f = await fixture(vi.fn(async () => ({ ...report, status: 'review', checks: [{ code: 'probe_inconclusive', severity: 'warning', count: 1 }],
@@ -183,21 +228,17 @@ it('keeps inconclusive mechanical checks visible and queues repair once per revi
   expect(agent.followup).toHaveBeenCalledTimes(1)
 })
 
-it('checks GLB snapshots without a renderer and detects source changes during validation', async () => {
+it('checks USD snapshots without a renderer and detects source changes during validation', async () => {
   let finish!: (value: typeof report) => void
   const run = vi.fn(() => new Promise<typeof report>((resolve) => { finish = resolve }))
   const f = await fixture(run)
-  const json = JSON.stringify({ asset: { version: '2.0' }, scene: 0, scenes: [{ nodes: [] }] })
-  const body = Buffer.from(json.padEnd(Math.ceil(json.length / 4) * 4, ' '))
-  const glb = Buffer.alloc(20 + body.length)
-  glb.writeUInt32LE(0x46546c67, 0); glb.writeUInt32LE(2, 4); glb.writeUInt32LE(glb.length, 8)
-  glb.writeUInt32LE(body.length, 12); glb.writeUInt32LE(0x4e4f534a, 16); body.copy(glb, 20)
-  await writeFile(join(f.root, 'models/car/model.glb'), glb)
+  const usd = Buffer.from('#usda 1.0\n# snapshot 0\n')
+  await writeFile(join(f.root, 'models/car/model.usda'), usd)
   f.emit('turn/end')
   await expect.poll(() => run.mock.calls.length).toBe(1)
   expect(f.validation.requests('a')).toEqual([])
-  const modified = Buffer.from(glb); modified[modified.length - 1] = 10
-  await writeFile(join(f.root, 'models/car/model.glb'), modified)
+  const modified = Buffer.from(usd); modified[modified.length - 2] = 49
+  await writeFile(join(f.root, 'models/car/model.usda'), modified)
   finish(report)
   await expect.poll(() => f.validation.read('a').models[0]?.status).toBe('changed')
   expect(f.validation.read('a').models[0]?.report).toBeNull()
@@ -218,10 +259,12 @@ it('bounds automatic repairs across changed revisions and respects cancelled tur
   expect(agent.followup).not.toHaveBeenCalled()
   await edit(2)
   expect(agent.followup).toHaveBeenCalledTimes(1)
-  await edit(3)
-  expect(agent.followup).toHaveBeenCalledTimes(2)
-  await edit(4)
-  expect(agent.followup).toHaveBeenCalledTimes(2)
+  for (let revision = 3; revision <= 6; revision++) {
+    await edit(revision)
+    expect(agent.followup).toHaveBeenCalledTimes(revision - 1)
+  }
+  await edit(7)
+  expect(agent.followup).toHaveBeenCalledTimes(5)
   expect(f.validation.read('a').models[0]?.report.status).toBe('needs_repair')
 })
 
@@ -430,4 +473,25 @@ it('defers opening checks until an active edit turn ends', async () => {
   expect(f.validation.requests('a')).toEqual([])
   f.emit('turn/end')
   await f.ready()
+})
+
+it('compacts successful probes without losing failures, coverage, policy or diagnostic data', () => {
+  const full = { ...mechanicalReport, mechanics: { ...mechanicalReport.mechanics,
+    policy: { maxTotalSteps: 2000000 }, coverage: { complete: false, connections: [] },
+    connections: [{ id: 'wheel', probes: [
+      ...Array.from({ length: 1000 }, () => ({ status: 'passed', kind: 'retention' })),
+      { status: 'needs_repair', code: 'excessive_penetration', maxPenetrationMm: 0.23 },
+      { status: 'review', code: 'probe_budget_exhausted' },
+    ] }],
+  } }
+  const state = { models: [{ path: 'models/car/model.usda', status: 'changed', report: full, previousReport: full }] }
+  const summary = summarizeValidationState(state)
+  for (const report of [summary.models[0].report, summary.models[0].previousReport]) {
+    expect(report.mechanics.coverage).toEqual(full.mechanics.coverage)
+    expect(report.mechanics.policy).toEqual(full.mechanics.policy)
+    expect(report.mechanics.connections[0]).toEqual({ id: 'wheel', probeCounts: { passed: 1000, needs_repair: 1, review: 1 },
+      probes: full.mechanics.connections[0].probes.slice(-2) })
+  }
+  expect(full.mechanics.connections[0].probes).toHaveLength(1002)
+  expect(JSON.stringify(summary).length).toBeLessThan(JSON.stringify(state).length / 10)
 })

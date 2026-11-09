@@ -1,4 +1,5 @@
 /** Turn-end validation owns immutable sources, renderer requests, and Blender subprocesses. */
+import { summarizeValidationReport } from './validation-summary.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { realpath } from 'node:fs/promises'
@@ -6,12 +7,12 @@ import { createSource, createSourcePresentation } from './source.js'
 import { discoverModels } from './catalog.js'
 import { normalizePlacement } from './transform.js'
 import { parseStl, STL_LIMITS } from './stl.js'
-import { validateGlb, GLB_MAX_BYTES } from './glb.js'
+import { validateUsd, USD_MAX_BYTES } from './usd.js'
 import { runValidation } from '../blender/validation-runner.js'
 import { validationState, preserveMovement } from './validation-state.js'
 
 // Persisted acceptance is reusable only under the same validation semantics.
-const POLICY_VERSION = 3
+const POLICY_VERSION = 4
 
 /**
  * Automatically check changed project models on turn/end; no model tool call is required.
@@ -40,7 +41,7 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
     const failures = items.filter(item => (item.status === 'needs_repair' || (item.status === 'review' && item.result?.mechanics?.status === 'review'))
       && item.checkedFingerprint === item.fingerprint && !session.sent.has(`${item.path}:${item.fingerprint}`))
     if (!failures.length) return
-    const findings = failures.map(item => ({ path: item.path, fingerprint: item.fingerprint, report: item.result }))
+    const findings = failures.map(item => ({ path: item.path, fingerprint: item.fingerprint, report: summarizeValidationReport(item.result) }))
     session.attempts++
     for (const item of failures) session.sent.add(`${item.path}:${item.fingerprint}`)
     try {
@@ -199,8 +200,8 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
           item.fingerprint = hash; item.sourceHash = state.contentHash; item.error = null
           if (item.checkedFingerprint === hash) { item.status = item.result.status; continue }
           item.controller?.abort(); item.request = null
-          const input = { format: state.format === 'glb' ? 'glb' : 'stl', transform, volume }
-          if (state.format === 'glb') enqueue(id, session, item, { ...input, bytes: item.source.snapshotBytes() }, generation)
+          const input = { format: state.format === 'usd' ? 'usd' : 'stl', transform, volume }
+          if (state.format === 'usd') enqueue(id, session, item, { ...input, bytes: item.source.snapshotBytes() }, generation)
           else {
             item.status = 'awaiting_viewer'
             item.request = { id: randomUUID(), path: model.path, url: state.url, contentHash: state.contentHash, parameters: state.parameters, fingerprint: hash }
@@ -300,17 +301,17 @@ export function createValidation(ctx, config, { view, notify, createUserMessage,
     meshPlacement(id, path) { return sessions.get(id)?.models.get(path)?.accepted?.transform ?? null },
     /** Renderer jobs use immutable module URLs and never change viewer selection. */
     requests(id) { return [...(sessions.get(id)?.models.values() ?? [])].flatMap(item => item.request ? [item.request] : []) },
-    /** Accept bounded STL or named GLB only for the still-pending request. */
+    /** Accept bounded STL or named USD only for the still-pending request. */
     submit(id, requestId, bytes, error) {
       const session = sessions.get(id)
       const item = [...(session?.models.values() ?? [])].find(item => item.request?.id === requestId)
       if (!item || closed) return false
       if (error !== null) { item.status = 'unavailable'; item.error = error.slice(0, 2000); item.request = null; notify(id); repair(id); return true }
-      const glb = bytes.byteLength >= 4 && new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true) === 0x46546c67
-      if (bytes.byteLength > (glb ? GLB_MAX_BYTES : STL_LIMITS.maxBytes)) throw new Error('Validation mesh exceeds its format limit')
-      if (glb) validateGlb(bytes)
+      const usd = new TextDecoder().decode(bytes.subarray(0, 10)).startsWith('#usda 1.0')
+      if (bytes.byteLength > (usd ? USD_MAX_BYTES : STL_LIMITS.maxBytes)) throw new Error('Validation mesh exceeds its format limit')
+      if (usd) validateUsd(bytes)
       else parseStl(bytes)
-      enqueue(id, session, item, { ...item.input, format: glb ? 'glb' : 'stl', bytes }, item.generation)
+      enqueue(id, session, item, { ...item.input, format: usd ? 'usd' : 'stl', bytes }, item.generation)
       return true
     },
     /** Stop admission, kill children, await scans and jobs, then release snapshots. */

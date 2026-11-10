@@ -449,3 +449,36 @@ it('shows USD movement, retains its pose across reloads and restores saved geome
     expect(reset[0].matrix.elements[1]).toBe(0)
   } finally { viewport.dispose() }
 })
+
+it('highlights the visible moved surface and restores hover after resetting movement', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+  vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(robotUsd())))
+  const spec = { path: 'models/car/model.usda', format: 'usd', url: 'https://example.test/model.usda', transform: {} }
+  try {
+    await viewport.applyDesign(spec, null)
+    await viewport.applyShape(null)
+    state.resize()
+    const move = state.renderer.domElement.addEventListener.mock.calls.find(([name]) => name === 'pointermove')[1]
+    for (const angle of [60, 30, 0, 45, 0]) {
+      viewport.updateMotion({ joint0: angle })
+      const visible = []
+      rendered().traverseVisible(node => { if (node.isMesh && node.name === 'Door') visible.push(node) })
+      expect(visible).toHaveLength(1)
+      const door = visible[0]
+      const camera = state.renderer.render.mock.calls.at(-1)[1]
+      const center = new THREE.Box3().setFromObject(door).getCenter(new THREE.Vector3())
+      camera.position.copy(center).add(new THREE.Vector3(0, 0, 100))
+      camera.up.set(0, 1, 0); camera.lookAt(center); camera.updateMatrixWorld(true)
+      move({ pointerType: 'mouse', clientX: 200, clientY: 150 })
+      requestAnimationFrame.mock.calls.at(-1)[0]()
+      const shader = { uniforms: {}, vertexShader: '#include <begin_vertex>', fragmentShader: '#include <opaque_fragment>' }
+      door.material.onBeforeCompile(shader, state.renderer)
+      expect(shader.uniforms.rumiHover.value.w).toBeGreaterThan(0)
+      expect(shader.uniforms.rumiCursorMesh.value).toBe(door.id)
+      expect(shader.uniforms.rumiMeshId.value).toBe(door.id)
+      if (angle !== 0) expect(viewport.captureCursor()).toEqual({ status: 'viewer_unavailable' })
+    }
+  } finally { await viewport.dispose() }
+})

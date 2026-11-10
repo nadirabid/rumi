@@ -1,7 +1,7 @@
 /** The gallery lists projects; opening one starts a session in the project directory. */
 import * as React from 'react'
 import * as ReactDOM from 'react-dom'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 
@@ -41,6 +41,8 @@ const COPY: Record<string, string> = {
   empty: 'No projects yet.', emptyHint: 'Make one, then ask Rumi to help build it.',
   updated: 'Updated {when}', failed: 'That did not work. Try again.', untitled: 'Untitled project',
   count: '{count} projects',
+  open: 'Open', delete: 'Delete', deleteTitle: 'Delete "{name}"?',
+  deleteMessage: "You can't get it back after this.", cancel: 'Cancel',
 }
 
 const project = (overrides: Record<string, unknown> = {}) => ({
@@ -53,14 +55,22 @@ const project = (overrides: Record<string, unknown> = {}) => ({
 const Icon = () => null
 
 /** Apply the plugin into a fake context and return its handles. */
-function fixture(host: { projects?: object[]; knownSessions?: Record<string, object>; activePanelId?: string | null; associationOk?: boolean } = {}) {
+function fixture(host: { projects?: object[]; knownSessions?: Record<string, object>; activePanelId?: string | null; associationOk?: boolean; deleteOk?: boolean } = {}) {
   type Injection = { hooks: { sidebar: HostObservable<string> }; toggleSidebar: () => void; toggleMode: () => void }
   const injections = new Map<string, () => Injection>()
   const entries = new Map<string, React.ComponentType<Record<string, unknown>>>()
   const register = () => () => {}
   const posts: { url: string; body: unknown }[] = []
+  const deletes: string[] = []
   let listed = host.projects ?? []
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL, init?: RequestInit) => {
+    if (init?.method === 'DELETE') {
+      deletes.push(String(url))
+      if (host.deleteOk === false) return { ok: false, status: 500, json: async () => ({}) }
+      const id = new URL(String(url), 'http://rumi').searchParams.get('projectId')
+      listed = listed.filter(item => (item as { id: string }).id !== id)
+      return { ok: true, status: 204, json: async () => ({}) }
+    }
     if (init?.method === 'POST') {
       const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
       posts.push({ url: String(url), body })
@@ -113,10 +123,10 @@ function fixture(host: { projects?: object[]; knownSessions?: Record<string, obj
     workspaces: { create: handles.createWorkspace, rename: handles.renameWorkspace },
     uiWorkspace: { openSession: handles.openSession, connectWorkspace: handles.connect },
   }
-  const definition = loaded!.factory(name => name === 'react' ? React : name === 'react-dom' ? ReactDOM : { IconPlusOutlineRegular: Icon, IconChevronLeftOutlineRegular: Icon, IconPanelLeftOutlineRegular: Icon, Tooltip: ({ children }: { children: React.ReactNode }) => children })
+  const definition = loaded!.factory(name => name === 'react' ? React : name === 'react-dom' ? ReactDOM : { IconPlusOutlineRegular: Icon, IconFolderOpenOutlineRegular: Icon, IconTrashOutlineRegular: Icon, IconChevronLeftOutlineRegular: Icon, IconPanelLeftOutlineRegular: Icon, Tooltip: ({ children }: { children: React.ReactNode }) => children })
   definition.apply(ctx)
   return {
-    ...handles, posts, sidebar,
+    ...handles, posts, deletes, sidebar,
     view: (key: string) => {
       const component = entries.get(key)!
       const usePanelInfo = ((selector: (value: { activePanelId: string | null }) => unknown) =>
@@ -296,4 +306,65 @@ it('loads saved covers as lazy images and falls back when a cover cannot be read
   fireEvent.error(image)
   expect(container.querySelector('.rumi-project-cover img')).toBeNull()
   expect(container.querySelector('.rumi-project-initial')).not.toBeNull()
+})
+
+async function askToDelete(view: ReturnType<typeof fixture>, name = 'Dragon cup') {
+  render(view.view('main:projects'))
+  await settle()
+  fireEvent.contextMenu(screen.getByRole('button', { name }), { clientX: 40, clientY: 60 })
+  fireEvent.click(screen.getByRole('menuitem', { name: COPY.delete }))
+}
+
+it('opens a context menu on right-click with Open focused first', async () => {
+  const view = fixture({ projects: [project()] })
+  render(view.view('main:projects'))
+  await settle()
+  fireEvent.contextMenu(screen.getByRole('button', { name: 'Dragon cup' }), { clientX: 40, clientY: 60 })
+  const items = screen.getAllByRole('menuitem')
+  expect(screen.getByRole('menu')).toBeTruthy()
+  expect(items.map(item => item.textContent)).toEqual([COPY.open, COPY.delete])
+  expect(document.activeElement).toBe(items[0])
+  fireEvent.keyDown(items[0], { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(items[1])
+  fireEvent.keyDown(items[1], { key: 'Escape' })
+  expect(screen.queryByRole('menu')).toBeNull()
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Dragon cup' }))
+  fireEvent.contextMenu(screen.getByRole('button', { name: 'Dragon cup' }))
+  fireEvent.pointerDown(document.body)
+  expect(screen.queryByRole('menu')).toBeNull()
+})
+
+it('asks before deleting and leaves the project when cancelled', async () => {
+  const view = fixture({ projects: [project()] })
+  await askToDelete(view)
+  const alert = screen.getByRole('alertdialog')
+  expect(alert.getAttribute('aria-modal')).toBe('true')
+  expect(screen.getByText('Delete "Dragon cup"?')).toBeTruthy()
+  expect(alert.getAttribute('aria-describedby')).not.toBeNull()
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: COPY.cancel }))
+  fireEvent.click(screen.getByRole('button', { name: COPY.cancel }))
+  expect(screen.queryByRole('alertdialog')).toBeNull()
+  expect(screen.getByRole('button', { name: 'Dragon cup' })).toBeTruthy()
+  expect(view.deletes).toEqual([])
+})
+
+it('deletes the project once confirmed', async () => {
+  const view = fixture({ projects: [project()] })
+  await askToDelete(view)
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: COPY.delete }))
+  await settle()
+  expect(view.deletes).toEqual(['/api/rumi-projects?projectId=p1'])
+  expect(screen.queryByRole('alertdialog')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Dragon cup' })).toBeNull()
+})
+
+it('keeps the project and reports the failure when deleting fails', async () => {
+  const view = fixture({ projects: [project()], deleteOk: false })
+  await askToDelete(view)
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: COPY.delete }))
+  await settle()
+  expect(view.deletes).toHaveLength(1)
+  expect(screen.queryByRole('alertdialog')).toBeNull()
+  expect(screen.getByRole('button', { name: 'Dragon cup' })).toBeTruthy()
+  expect(screen.getByRole('alert').textContent).toBe(COPY.failed)
 })

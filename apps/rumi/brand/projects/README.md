@@ -29,6 +29,7 @@ The id is immutable and is the directory name; the name is user-facing and lives
 
 - `GET /api/rumi-projects` — every readable project, most recently updated first.
 - `POST /api/rumi-projects` — create one (`{ name }`).
+- `DELETE /api/rumi-projects?projectId=<id>` — delete a project and its directory; `204` on success, `404` when no such project exists.
 - `POST /api/rumi-projects/session` — record the session a project now uses (`{ projectId, sessionId }`).
 
 ## Boundaries
@@ -60,3 +61,5 @@ The app header has a separate tinted surface and a single divider; the underlyin
 The right sidebar starts below the project header so its preview tabs and Close controls remain visible.
 
 The top bar keeps Full/Regular view and Open/Close sidebar controls immediately before New. Closing the sidebar preserves its tabs; Open restores them. The size control is disabled while closed. Sidebar Split controls are hidden.
+
+Right-clicking a project opens a glass menu with Open and Delete. Delete asks first, in an alert that shows the project's cover and name and says it cannot be undone; Cancel is the default. Confirming removes the project directory from disk. Where the browser's canvas is unavailable, the glass falls back to a plain blur.

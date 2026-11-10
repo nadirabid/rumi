@@ -1,5 +1,5 @@
 /** Projects are directories on disk; the host routes expose them without touching session state. */
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
@@ -64,6 +64,18 @@ it('refuses an id that is not a plain directory name', async () => {
   await expect(projects.attachSession('../escape', 'session-1')).rejects.toThrow('invalid id')
 })
 
+it('removes a project directory and refuses unknown or invalid ids', async () => {
+  const projects = createProjectStore(root())
+  const project = await projects.create('Paper boat')
+  const kept = await projects.create('Kite')
+  await projects.remove(project.id)
+  expect(existsSync(project.path)).toBe(false)
+  expect((await projects.list()).map(item => item.name)).toEqual(['Kite'])
+  expect(existsSync(kept.path)).toBe(true)
+  await expect(projects.remove(project.id)).rejects.toMatchObject({ code: 'ENOENT' })
+  await expect(projects.remove('../escape')).rejects.toThrow('invalid id')
+})
+
 it('serves the gallery over the connection routes', async () => {
   const routes = new Map<string, (request: Request) => Promise<Response>>()
   const cleanup: (() => void)[] = []
@@ -118,6 +130,13 @@ it('serves the gallery over the connection routes', async () => {
   expect((await request(`${thumbnailRoute}?projectId=../escape`)).status).toBe(404)
   image.writeUInt32BE(999999, 16)
   expect((await request(`${thumbnailRoute}?sessionId=session-9`, { method: 'POST', body: image })).status).toBe(400)
+
+  expect((await request('/api/rumi-projects?projectId=unknown', { method: 'DELETE' })).status).toBe(404)
+  expect((await request('/api/rumi-projects?projectId=../escape', { method: 'DELETE' })).status).toBe(404)
+  expect((await request('/api/rumi-projects', { method: 'DELETE' })).status).toBe(404)
+  const removed = await request(`/api/rumi-projects?projectId=${created.project.id}`, { method: 'DELETE' })
+  expect(removed.status).toBe(204)
+  expect((await (await request('/api/rumi-projects')).json()).projects).toEqual([])
   for (const dispose of cleanup.toReversed()) dispose()
   expect(routes.size).toBe(0)
 })

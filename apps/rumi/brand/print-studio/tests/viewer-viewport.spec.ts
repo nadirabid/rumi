@@ -10,6 +10,10 @@ vi.mock('three', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
+    PMREMGenerator: class {
+      fromScene() { return { texture: new actual.Texture(), dispose: vi.fn() } }
+      dispose() {}
+    },
     WebGLRenderer: class {
       constructor() {
         this.domElement = {

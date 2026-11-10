@@ -85,6 +85,75 @@ window.__ModuleLoader__.load({
       return () => { style.remove(); };
     }
 
+    /** Size chat automatically until a divider drag chooses a proportional split; double-click resets it. */
+    function styleViewerLayout() {
+      const style = document.createElement('style');
+      style.id = 'rumi-viewer-layout';
+      const frame = '[data-sidebar-collapsed]:not([data-rightbar-collapsed]):not([data-rightbar-fullscreen]):has([data-sidebar-right-panel="push"][data-sidebar-right-open] .rumi-print-viewer)';
+      const handleSelector = `${frame}>[data-side="rightbar"]`;
+      style.textContent = `
+${frame}{--rumi-chat-width:clamp(240px,var(--rumi-chat-share,min(25%,500px)),calc(100% - 300px));grid-template-columns:0px var(--rumi-chat-width) minmax(0,1fr)!important}
+${frame} [data-sidebar-right-panel="push"]{width:100%!important;--dsh-sidebar-width:100%!important}
+${handleSelector}{left:var(--rumi-chat-width)!important}
+`;
+      document.head.append(style);
+      const changed = new Set();
+      let drag = null;
+      function handle(event) {
+        return event.target instanceof Element ? event.target.closest(handleSelector) : null;
+      }
+      function update(event) {
+        const bounds = drag.frame.getBoundingClientRect();
+        const width = Math.max(240, Math.min(bounds.width - 300, event.clientX - bounds.left - drag.offset));
+        drag.frame.style.setProperty('--rumi-chat-share', `${width / bounds.width * 100}%`);
+        changed.add(drag.frame);
+      }
+      function finish() {
+        if (!drag) return;
+        const previous = drag;
+        drag = null;
+        if (previous.handle.hasPointerCapture(previous.id)) previous.handle.releasePointerCapture(previous.id);
+      }
+      function down(event) {
+        const target = handle(event);
+        if (!target || event.button !== 0 || drag) return;
+        event.preventDefault(); event.stopImmediatePropagation();
+        const owner = target.parentElement;
+        const bounds = target.getBoundingClientRect();
+        drag = { handle: target, frame: owner, id: event.pointerId, offset: event.clientX - bounds.left - bounds.width / 2 };
+        target.setPointerCapture(event.pointerId);
+      }
+      function move(event) {
+        if (!drag || drag.id !== event.pointerId) return;
+        event.preventDefault(); event.stopImmediatePropagation();
+        update(event);
+      }
+      function up(event) {
+        if (!drag || drag.id !== event.pointerId) return;
+        event.preventDefault(); event.stopImmediatePropagation();
+        update(event); finish();
+      }
+      function cancel(event) { if (drag?.id === event.pointerId) finish(); }
+      function reset(event) {
+        const target = handle(event);
+        if (!target) return;
+        event.preventDefault(); event.stopImmediatePropagation();
+        finish();
+        target.parentElement.style.removeProperty('--rumi-chat-share');
+        changed.delete(target.parentElement);
+      }
+      const listeners = { pointerdown: down, pointermove: move, pointerup: up, pointercancel: cancel, lostpointercapture: cancel, dblclick: reset };
+      for (const [name, listener] of Object.entries(listeners)) document.addEventListener(name, listener, true);
+      window.addEventListener('blur', finish);
+      return () => {
+        finish();
+        for (const [name, listener] of Object.entries(listeners)) document.removeEventListener(name, listener, true);
+        window.removeEventListener('blur', finish);
+        for (const owner of changed) owner.style.removeProperty('--rumi-chat-share');
+        style.remove();
+      };
+    }
+
     /** Rumi document tabs reserve separate space for their title and close control. */
     function styleDocumentTabs() {
       const style = document.createElement('style');
@@ -253,12 +322,7 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale', 'layout'],
       apply(ctx) {
-        ctx.slots.inject('root', () => {
-          const entry = ctx.slots.entries('root')[0];
-          const store = entry.store.create();
-          const { rightbar, viewportWidth } = store.getSnapshot().layoutInfo;
-          if (rightbar === null) store.actions.setRightbar(viewportWidth * 0.6);
-        });
+        ctx.effect(styleViewerLayout, 'rumi-brand: responsive viewer layout');
         ctx.effect(hideChrome, 'rumi-brand: hide developer chrome');
         ctx.effect(styleDocumentTabs, 'rumi-brand: document tab glass');
         ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'rumi-brand: live voice copy');

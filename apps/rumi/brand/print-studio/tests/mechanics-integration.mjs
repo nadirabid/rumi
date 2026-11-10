@@ -10,8 +10,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const [blenderExecutable, bulletExecutable, packagedPlugin] = process.argv.slice(2)
 assert(blenderExecutable && bulletExecutable, 'Pass Blender and rumi-bullet executable paths')
-const { runValidation } = await import(packagedPlugin ? pathToFileURL(join(packagedPlugin, 'blender/validation-runner.js')).href
+const { runValidation, runValidationStage } = await import(packagedPlugin ? pathToFileURL(join(packagedPlugin, 'blender/validation-runner.js')).href
   : new URL('../blender/validation-runner.js', import.meta.url).href)
+const { runBullet } = await import(packagedPlugin ? pathToFileURL(join(packagedPlugin, 'bullet/runner.js')).href
+  : new URL('../bullet/runner.js', import.meta.url).href)
 const directory = await mkdtemp(join(tmpdir(), 'rumi-mechanics-integration-'))
 try {
   await new Promise((resolve, reject) => {
@@ -58,6 +60,25 @@ try {
       ? { ...config, mechanics: { ...config.mechanics, timeStepSeconds: 0.000125 } } : config
     const report = await runValidation(policy, { bytes: await readFile(join(directory, variant, `model.${format === 'usd' ? 'usda' : format}`)), format,
       transform: { scale: 1, rotate: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 0 } }, volume: null }, new AbortController().signal)
+    if (variant === 'static') {
+      const input = { bytes: await readFile(join(directory, variant, `model.${format === 'usd' ? 'usda' : format}`)), format,
+        transform: { scale: 1, rotate: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 0 } }, volume: null }
+      const signal = new AbortController().signal
+      const assembly = await runValidationStage(policy, input, signal, 'assembly')
+      assert.equal(assembly.status, 'passed')
+      assert.equal(assembly.mechanics, undefined)
+      const geometry = await runValidationStage(policy, input, signal, 'geometry')
+      assert.equal(geometry.checks.length, 9)
+      assert.equal(geometry.preparedGeometry, undefined)
+      assert.equal(geometry.mechanics, undefined)
+      const fit = await runValidationStage(policy, input, signal, 'fit')
+      assert.equal(fit.printerVolumeChecked, false)
+      assert.equal(fit.checks.some(check => check.code === 'non_manifold_edges'), false)
+      assert.equal(fit.preparedGeometry.bodies.length, 1)
+      const mechanical = await runBullet(policy, fit.preparedGeometry, signal)
+      assert.equal(mechanical.assemblyVerified, true)
+      console.log('EXPLICIT_STAGES_OK', format)
+    }
     console.log(JSON.stringify({ variant, format, durationMs: Math.round(performance.now() - start), report }))
     const success = ['normal', 'wheel', 'static'].includes(variant)
     assert.equal(report.mechanics?.status, success ? 'passed' : 'needs_repair')

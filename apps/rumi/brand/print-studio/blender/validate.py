@@ -69,6 +69,9 @@ def measure_clearances(bodies, assembly, threshold):
 
 def validate(request):
     """Validate evaluated geometry in millimetres without changing project files."""
+    stage = request.get('stage', 'all')
+    if stage not in ('all', 'assembly', 'geometry', 'fit'):
+        raise ValueError('Unknown validation stage')
     toolbox.register()
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete(use_global=False)
@@ -84,6 +87,9 @@ def validate(request):
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             robot_error = str(error)
             request.pop('mechanicsOutput', None)
+        if stage == 'assembly':
+            return dict(version=1, status='needs_repair' if robot_error else 'passed', checks=[],
+                        dimensions=dict(x=0, y=0, z=0), printReady=False, robot=robot, robotError=robot_error)
         bpy.ops.wm.usd_import(filepath=path)
         factor = 1000
     elif path.endswith('.glb'):
@@ -92,6 +98,8 @@ def validate(request):
     else:
         bpy.ops.wm.stl_import(filepath=path)
         factor = 1
+    if stage == 'assembly':
+        return dict(version=1, status='passed', checks=[], dimensions=dict(x=0, y=0, z=0), printReady=False)
     meshes = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH' and not obj.hide_render]
     if not meshes:
         raise ValueError('No mesh geometry to validate')
@@ -186,32 +194,34 @@ def validate(request):
         for step in assembly['manufacturing'].get('steps', []):
             step['path'] = [list(rotation @ (Vector(point) * transform['scale'])) for point in step['path']]
         Path(request['mechanicsOutput']).write_text(json.dumps(dict(bodies=mechanics_meshes, assembly=assembly), allow_nan=False)+'\n')
-    # GLB splits vertices at material/normal seams; topology uses positional welding.
-    bm = bmesh.new()
-    try:
-        bm.from_mesh(obj.data)
-        bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=0.001)
-        bm.to_mesh(obj.data)
-    finally:
-        bm.free()
-    obj.data.update()
-    settings = request['settings']
-    props = bpy.context.scene.print_3d
-    props.thickness_min = settings['minimumThicknessMm']
-    props.threshold_zero = settings['degenerateThreshold']
-    props.angle_overhang = math.radians(settings['overhangDegrees'])
-    props.angle_sharp = math.radians(settings['sharpDegrees'])
-    props.angle_distort = math.radians(settings['distortionDegrees'])
-    random.seed(0)
-    bpy.ops.mesh.print3d_check_all()
-    codes = ['non_manifold_edges', 'inconsistent_winding', 'intersecting_faces',
-             'degenerate_faces', 'degenerate_edges', 'distorted_faces', 'thin_faces', 'sharp_edges', 'overhangs']
-    findings = toolbox.report.info()
-    if len(findings) != len(codes):
-        raise ValueError('Unexpected Toolbox report version')
-    checks = [dict(code=code, count=len(item[1][1]), severity='warning' if code in
-                   ['thin_faces', 'sharp_edges', 'overhangs', 'distorted_faces'] else 'error')
-              for code, item in zip(codes, findings)]
+    checks = []
+    if stage in ('all', 'geometry'):
+        # GLB splits vertices at material/normal seams; topology uses positional welding.
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(obj.data)
+            bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=0.001)
+            bm.to_mesh(obj.data)
+        finally:
+            bm.free()
+        obj.data.update()
+        settings = request['settings']
+        props = bpy.context.scene.print_3d
+        props.thickness_min = settings['minimumThicknessMm']
+        props.threshold_zero = settings['degenerateThreshold']
+        props.angle_overhang = math.radians(settings['overhangDegrees'])
+        props.angle_sharp = math.radians(settings['sharpDegrees'])
+        props.angle_distort = math.radians(settings['distortionDegrees'])
+        random.seed(0)
+        bpy.ops.mesh.print3d_check_all()
+        codes = ['non_manifold_edges', 'inconsistent_winding', 'intersecting_faces',
+                 'degenerate_faces', 'degenerate_edges', 'distorted_faces', 'thin_faces', 'sharp_edges', 'overhangs']
+        findings = toolbox.report.info()
+        if len(findings) != len(codes):
+            raise ValueError('Unexpected Toolbox report version')
+        checks = [dict(code=code, count=len(item[1][1]), severity='warning' if code in
+                       ['thin_faces', 'sharp_edges', 'overhangs', 'distorted_faces'] else 'error')
+                  for code, item in zip(codes, findings)]
     if clearance is not None:
         threshold, close = clearance
         # Either manufacturing mode needs the gap: print-in-place parts fuse, separate parts do not fit.
@@ -224,7 +234,7 @@ def validate(request):
         checks.append(dict(code='oversized', count=int(any(dimensions[a] > volume[a] for a in 'xyz')), severity='error'))
     return dict(version=1, status='needs_repair' if any(c['count'] and c['severity'] == 'error' for c in checks)
                 else 'review' if any(c['count'] for c in checks) else 'passed', checks=checks,
-                dimensions=dimensions, settings=settings, printReady=False, robot=robot, robotError=robot_error)
+                dimensions=dimensions, settings=request['settings'], printReady=False, robot=robot, robotError=robot_error)
 
 
 if __name__ == '__main__':

@@ -9,7 +9,8 @@ const TOOLS = new Set(['bash', 'read', 'write', 'edit', 'str_replace_editor', 'g
   'load_workspace_dependencies', 'job_output', 'job_list', 'job_kill', 'blender_status',
   'print_studio_status', 'print_studio_progress', 'print_studio_print_test',
   'viewer_cursor_snapshot', 'viewer_working_model', 'viewer_load', 'viewer_transform', 'viewer_highlight',
-  'viewer_controls', 'viewer_camera', 'mesh_open', 'mesh_transform', 'mesh_remove'])
+  'viewer_controls', 'viewer_camera', 'mesh_open', 'mesh_transform', 'mesh_remove',
+  'validation_mechanics', 'validation_accept'])
 const checkout = resolve(import.meta.dirname, '../../../../..')
 const applicationRoots = import.meta.dirname.includes('.app/Contents/')
   ? [import.meta.dirname.slice(0, import.meta.dirname.indexOf('.app/Contents/') + '.app/Contents'.length)]

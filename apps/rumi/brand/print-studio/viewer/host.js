@@ -25,6 +25,7 @@ import { createCursorRequests, cursorIdentity } from './cursor.js'
 import { cursorCommand } from './cursor-commands.js'
 import { createModelFocus } from './model-focus.js'
 import { createValidation } from './validation.js'
+import { registerValidationTools } from './validation-tools.js'
 import { summarizeValidationState } from './validation-summary.js'
 import { createSource } from './source.js'
 import { discoverModels, readSelection, saveSelection } from './catalog.js'
@@ -190,10 +191,9 @@ function loadIdentity(record) {
  * @param {string} diagnosticsDirectory - Private local journal directory.
  * @param {number} loadTimeoutMs - Maximum renderer acknowledgment wait, in milliseconds.
  * @param {object} [validationConfig] Resolved validator settings; omitted by isolated viewer fixtures.
- * @param {Function} [createUserMessage] DSH message factory for automatic repair turns.
  * @returns {void}
  */
-export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs, validationConfig, createUserMessage) {
+export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs, validationConfig) {
   const diagnostics = createViewerDiagnostics(diagnosticsDirectory)
   const sessions = new Map()
   const receipts = createHighlightReceipts()
@@ -201,7 +201,6 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   const events = createViewerEvents()
   const focus = createModelFocus(ctx, { read: id => sessions.get(id), notify: id => events.notify(id) })
   const validation = validationConfig ? createValidation(ctx, validationConfig, {
-    createUserMessage,
     notify: id => events.notify(id),
     view: id => {
       const record = sessions.get(id), scene = record?.history.current(), design = record?.source?.state()
@@ -211,6 +210,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         })) }
     },
   }) : null
+  if (validation) registerValidationTools(ctx, defineTool, validation, validationConfig)
   const displaySource = record => record.source
   const displayIdentity = record => cursorIdentity({ ...record, source: displaySource(record) })
   const cursors = createCursorRequests(sessionId => events.notify(sessionId))
@@ -616,7 +616,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       + 'Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. '
       + 'Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. '
       + 'Executable .js/.mjs previews are disabled by project isolation; export USD instead. '
-      + 'Saved models display immediately; automatic validation and repair run independently of preview visibility. '
+      + 'Saved models display immediately; use validation_mechanics then validation_accept before claiming acceptance. '
       + 'Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.',
     parameters: {
       path: { type: 'string', required: true, description: 'Model entry to bring into view, for example models/helmet/model.usda.' },

@@ -86,3 +86,17 @@ Chromium headless shell revision 1228 已安装在忽略目录 `.desktop-build/p
 - Windows 原生剪贴板写入通过。已尝试启动默认浏览器，但因自动化工具无法可靠识别当前 URL，目标地址验证停止。macOS 浏览器和剪贴板集成仍未验证。
 - 强更与常规失败使用本地化摘要和折叠诊断；复制失败展示可选择的地址。常规错误悬停提示显示摘要，不展示原始诊断。Windows／macOS 安装包的图标提醒、通知权限与专注模式行为仍未验证。
 - 完整 `doc-sync`（文档同步门禁）在文档站测试中遇到 Windows 文件符号链接 `EPERM`。这不是 updater 失败，也不代表完整文档门禁通过。
+
+<a id="validation-tool-qualification"></a>
+
+## 验证工具验收
+
+打包流程通过实际 Host 配置和项目隔离策略，使用内置 Blender 和 Bullet，在实体模型与受限轮轴装配上运行 Print Studio 的两个验证工具。两个模型均须达到接受状态；同时检查缓存、跨项目拒绝、过期版本拒绝，以及单个录制回合内的四次工具调用。此无密钥测试使用脚本模型适配器，不衡量真实模型是否遵循建模技能。
+
+打包后，可用以下命令验证已安装的 macOS 应用：
+
+```sh
+DSH_DESKTOP_APP_ID=com.nadirmuzaffar.rumi pnpm exec tsx apps/rumi/scripts/smoke-packaged-runtime.ts --unsigned --application /Applications/Rumi.app/Contents
+```
+
+此命令使用当前构建描述符及临时配置、项目、会话和验证存储。可将 `RUMI_VALIDATION_SMOKE_MODEL` 设为现有独立 USD 文件路径，以检查其副本；结果仅供诊断，不会将有缺陷模型视为通过的测试数据。原始模型文件和用户当前配置保持不变。

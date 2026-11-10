@@ -23,12 +23,12 @@
 /print-studio/blender-editing-and-usd-previews:
   en: b766208d2f3b1570
   zh: 2412765e10fc60c0
-/print-studio/automatic-blender-validation:
-  en: 204b6eaf6c8e9f91
-  zh: 0114a1c75a03d65d
+/print-studio/explicit-validation-tools:
+  en: 76e3d2aec658e713
+  zh: c925e71f5df7fefa
 /print-studio/mechanical-validation:
-  en: b70de28473310d3b
-  zh: 103d20b6443d01dd
+  en: 8e5048977798ac92
+  zh: 8b1d42a9be9fc67f
 /print-studio/persistent-movement-controls:
   en: 6b94574196247ecb
   zh: 5338b565ead0058c
@@ -51,5 +51,5 @@
   en: 391d18501eed9de1
   zh: 8730661248666fa4
 /print-studio/model-selection-and-agent-work:
-  en: 260814a30332d377
-  zh: e5d185a810b5d68e
+  en: 21b84251009e76da
+  zh: 4bdada6a7c56d625

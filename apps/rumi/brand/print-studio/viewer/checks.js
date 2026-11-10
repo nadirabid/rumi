@@ -1,7 +1,7 @@
 /**
  * Bounds and input guards for triangle positions in millimetres, Z up.
  *
- * Geometry analysis belongs to the turn-end Blender validator. These synchronous
+ * Geometry analysis belongs to the explicit Blender validation tools. These synchronous
  * measurements keep the viewer renderable and never establish print readiness.
  */
 

@@ -2,7 +2,7 @@
 import { robotUsd } from './fixtures/robot-usd.js'
 import { Context } from '@deepseek-ai/cordis'
 import { expect, it } from 'vitest'
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { validateGlb } from '../viewer/glb.js'
@@ -12,7 +12,7 @@ import { disposeModel } from '../viewer/viewport/model.js'
 import { analyzeMesh } from '../viewer/checks.js'
 import { createSource } from '../viewer/source.js'
 import { discoverModels } from '../viewer/catalog.js'
-import { blenderStatus } from '../blender/host.js'
+import { applyBlender, blenderStatus } from '../blender/host.js'
 
 function glb(extra = {}) {
   const positions = new Float32Array([0, 0, 0, 0.1, 0, 0, 0, 0.3, -0.2])
@@ -95,4 +95,26 @@ it('does not silently fall back from an invalid explicit Blender executable', as
   const status = await blenderStatus(process.execPath, '/unused')
   expect(status.status).toBe('ready')
   expect(await readFile(status.helper, 'utf8')).toContain('def publish(')
+})
+
+it('writes the project check settings only when Blender is ready', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-blender-status-'))
+  try {
+    const validation = { minimumThicknessMm: 1, minimumClearanceMm: 0.2 }
+    const tools: Array<{ name: string, execute(args: object, exec: object): Promise<string> }> = []
+    const ctx = { effect: (run: () => unknown) => run(), tools: { register: (tool: typeof tools[number]) => tools.push(tool) },
+      workingDirectory: { ensure: async () => root } }
+    const status = (blenderExecutable: string) => {
+      tools.length = 0
+      applyBlender(ctx, (tool: object) => tool, { blenderExecutable, blenderHome: '/unused', validation })
+      return tools[0]!.execute({}, { agent: {}, signal: new AbortController().signal }).then(JSON.parse)
+    }
+    expect(await status('/missing/Blender')).toMatchObject({ status: 'invalid_executable' })
+    await expect(readFile(join(root, '.rumi/print-checks.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    const ready = await status(process.execPath)
+    expect(ready).toMatchObject({ status: 'ready', checks: join(root, '.rumi/print-checks.json') })
+    expect(ready.execution).toContain('RUMI_CHECKS')
+    expect(JSON.parse(await readFile(ready.checks, 'utf8'))).toEqual({ version: 1, settings: validation })
+    expect(await readdir(join(root, '.rumi'))).toEqual(['print-checks.json'])
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

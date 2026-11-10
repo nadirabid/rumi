@@ -28,7 +28,7 @@ export async function smokeDesktopRuntime(
   const profile = join(home, 'profiles', 'desktop')
   const hostEnvironment = {
     ...Object.fromEntries(Object.entries(environment).filter(([name]) => !/^(?:npm|pnpm|corepack)_/iu.test(name))),
-    DSH_HOME: home, HOME: home, USERPROFILE: home,
+    DSH_HOME: home, DSH_RUMI_HOME: join(home, 'rumi'), HOME: home, USERPROFILE: home,
     XDG_CONFIG_HOME: home, XDG_CACHE_HOME: home, XDG_STATE_HOME: home,
     APPDATA: home, LOCALAPPDATA: home,
     npm_config_userconfig: join(home, 'npmrc'), npm_config_globalconfig: join(home, 'npmrc'),
@@ -83,12 +83,22 @@ export function apply(ctx) {
       name: pluginName, version: '1.0.0', type: 'module', exports: './index.js',
       peerDependencies: { '@deepseek-ai/cordis': cordis.version }, dsh: { bundle: { patch: './bundle.yml' } },
     }))
+    const validationFixtures = join(home, 'validation-fixtures')
+    await promisify(execFile)(join(resourcesRuntime, 'blender', process.platform === 'win32' ? 'Blender/blender.exe' : 'blender'),
+      ['--background', '--factory-startup', '--disable-autoexec', '--python-exit-code', '1', '--python',
+        fileURLToPath(new URL('../tests/fixtures/validation-models.py', import.meta.url)), '--', validationFixtures,
+        join(root, 'node_modules/@rumi/print-studio/blender/rumi_blender.py').replace(/app\.asar([/\\])/u, 'app.asar.unpacked$1'),
+        fileURLToPath(new URL('../brand/print-studio/bullet/tests/fixtures.py', import.meta.url))],
+      { env: { ...hostEnvironment, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' }, timeout: 60000 })
+    cpSync(fileURLToPath(new URL('../tests/fixtures/validation-smoke-plugin.mjs', import.meta.url)), join(plugin, 'validation-smoke.mjs'))
     writeFileSync(join(plugin, 'index.js'), `
 import { Context } from '@deepseek-ai/cordis'
 import { inspect, promisify } from 'node:util'
 import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { applyValidationSmoke } from './validation-smoke.mjs'
 export function apply(ctx) {
+  applyValidationSmoke(ctx, ${JSON.stringify({ fixtures: validationFixtures, extraModel: process.env.RUMI_VALIDATION_SMOKE_MODEL })})
   if (!(ctx instanceof Context)) throw new Error('desktop runtime: external plugin loaded another Cordis instance')
   ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/desktop-smoke',
     handler(_request, response) { response.end('plugin route ready') } }))
@@ -135,7 +145,7 @@ export function apply(ctx) {
   }
 }
 `)
-    writeFileSync(join(plugin, 'bundle.yml'), '- insert:\n    - id: desktop-runtime-smoke-plugin\n      name: desktop-runtime-smoke-plugin\n      inject: [webServer, officeToPdf, skills, pluginManager]\n')
+    writeFileSync(join(plugin, 'bundle.yml'), '- insert:\n    - id: desktop-runtime-smoke-plugin\n      name: desktop-runtime-smoke-plugin\n      inject: [webServer, officeToPdf, skills, pluginManager, agents, tools, rumiProjectScope, llm]\n')
     cpSync(plugin, join(profile, 'node_modules', pluginName), { recursive: true })
     const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>
@@ -185,6 +195,16 @@ export function apply(ctx) {
       throw new Error('desktop runtime: skill CLI did not return capabilities and a PDF')
     }
     console.log('desktop runtime: DOCX, XLSX, PPTX to PDF and skill CLI discovery passed')
+    // Print Studio finds its bundled Blender and Bullet relative to the archive, so only an archived root can run them.
+    if (/app\.asar(?:\.unpacked)?[/\\]/u.test(root + '/')) {
+      const validationResponse = await fetch(new URL('/desktop-smoke-validation', ready.url), {
+        headers: { cookie }, signal: AbortSignal.timeout(1500000),
+      })
+      const validationReport = await validationResponse.text()
+      if (!validationResponse.ok) throw new Error(`Rumi validation tools: ${validationReport}`)
+      console.log('Rumi validation tools: isolated production profile, real Blender/Bullet, acceptance, cache and stale-revision checks passed')
+      console.log(validationReport)
+    }
   } finally {
     clearTimeout(timer)
     try { await host.stop() } finally {

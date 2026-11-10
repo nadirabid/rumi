@@ -1,6 +1,6 @@
 /** Validate the assembled application, including native Office conversion outside ASAR. */
 import { execFileSync } from 'node:child_process'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { desktopArtifactOutput, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
 import { readDesktopRuntime, verifyDesktopRuntime } from '../src/runtime-tree.ts'
@@ -11,11 +11,11 @@ import { smokeBulletRuntime } from './prepare-bullet-runtime.ts'
 import { resolveDesktopPackageTarget } from './package-target.ts'
 
 const paths = resolveDesktopTargetBuildPaths()
-const { values } = parseArgs({ options: { unsigned: { type: 'boolean', default: false }, 'skip-notarization': { type: 'boolean', default: false } }, allowPositionals: false })
+const { values } = parseArgs({ options: { application: { type: 'string' }, unsigned: { type: 'boolean', default: false }, 'skip-notarization': { type: 'boolean', default: false } }, allowPositionals: false })
 const target = resolveDesktopBuildTarget()
 const windows = target === 'win-x64'
 const artifacts = desktopArtifactOutput(paths, { unsigned: values.unsigned, skipNotarization: values['skip-notarization'] }).directory
-const application = windows ? join(artifacts, 'win-unpacked')
+const application = values.application ? resolve(values.application) : windows ? join(artifacts, 'win-unpacked')
   : join(artifacts, target === 'mac-arm64' ? 'mac-arm64' : 'mac', 'Rumi.app', 'Contents')
 const resources = join(application, windows ? 'resources' : 'Resources')
 const executable = windows ? join(application, 'Rumi.exe') : join(application, 'MacOS', 'Rumi')

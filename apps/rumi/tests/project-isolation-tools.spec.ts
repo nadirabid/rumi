@@ -1,4 +1,5 @@
 /** Real tool dispatch and saved-session policy cannot widen Rumi project access. */
+import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, expect, it } from 'vitest'
 import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises'
@@ -13,6 +14,8 @@ import { Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
+import { createValidation } from '../brand/print-studio/viewer/validation.js'
+import { registerValidationTools } from '../brand/print-studio/viewer/validation-tools.js'
 import { createProjectScope } from '../brand/projects/isolation/scope-provider.js'
 import { createProjectPolicy } from '../brand/projects/isolation/policy-provider.js'
 import { createProjectFileSystem } from '../brand/projects/isolation/filesystem-provider.js'
@@ -33,6 +36,7 @@ async function fixture(runtimeRoots: string[] = []) {
   await ctx.plugin(ProjectScope, { workspaceRoot: workspace, runtimeRoots })
   await ctx.plugin(ProjectPolicy)
   await ctx.plugin(ProjectFileSystem)
+  await ctx.plugin(WorkingDirectory)
   const harness = await mountAgentLoopTestHarness(ctx)
   const adapter = new MockAdapter([toolCallResponse('read-other', 'read', { path: '../other/private.txt' }), textResponse('That file must be imported into this project first.')])
   ctx.effect(() => ctx.llm.registerAdapter(['mock'], adapter))
@@ -130,4 +134,43 @@ it.skipIf(process.platform !== 'darwin')('logs only the owning project instructi
   await f.agent.whenIdle()
   expect(f.adapter.requests).toHaveLength(count)
   expect(JSON.stringify(f.agent.session.snapshotEvents())).not.toContain('Private parent instructions.')
+})
+
+it.skipIf(process.platform !== 'darwin')('admits both explicit validation tools while rejecting paths outside the owning project', async () => {
+  const f = await fixture()
+  const path = 'models/car/model.usda'
+  await mkdir(join(f.root, 'models/car'), { recursive: true })
+  await writeFile(join(f.root, path), '#usda 1.0\n# isolated validation fixture\n')
+  const config = { validation: {}, mechanics: {}, validationTimeoutMs: 1000, mechanicsTimeoutMs: 1000,
+    validationStateDirectory: join(f.workspace, 'validation-state') }
+  const validation = createValidation({ effect: f.ctx.effect.bind(f.ctx), on: f.ctx.on.bind(f.ctx),
+    connection: { fetch: { register: () => () => {} } } }, config, {
+    view: () => ({ selectedModel: null, volume: null, meshes: [] }), notify: () => {},
+    run: async (_config, _input, _signal, stage) => ({ version: 1, status: 'passed', checks: [], printReady: false,
+      intent: { assembly: { connections: [] }, motionKeys: [], motionRanges: [] },
+      ...(stage === 'fit' ? { preparedGeometry: { bodies: [], assembly: { connections: [] } } } : {}) }),
+    bullet: async () => ({ status: 'passed', checks: [], connections: [], assemblyVerified: true,
+      coverage: { complete: true }, printReady: false }),
+  }) as { dispose(): Promise<void> }
+  cleanup.push(() => validation.dispose())
+  registerValidationTools(f.ctx, defineTool, validation, config)
+  const run = (name: string, args: object) => f.ctx.tools.execute({ callId: ToolCallId(name), name, arguments: args,
+    agent: f.agent, signal: new AbortController().signal })
+  const outcomes = []
+  let fingerprint = ''
+  for (const stage of ['mechanics', 'accept']) {
+    const result = await run(`validation_${stage}`, stage === 'mechanics' ? { path } : { path, fingerprint })
+    expect(result.isError).toBe(false)
+    const content = result.content.find(block => block.type === 'text')
+    if (content?.type !== 'text') throw new Error('Expected validation text')
+    const value = JSON.parse(content.text) as { status: string, fingerprint?: string }
+    if (stage === 'mechanics') fingerprint = value.fingerprint!
+    outcomes.push({ stage, status: value.status })
+  }
+  expect(outcomes).toMatchSnapshot()
+  for (const stage of ['mechanics', 'accept']) {
+    const result = await run(`validation_${stage}`, { path: '../other/private.txt', fingerprint })
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result.content)).toContain('Project isolation denied access')
+  }
 })

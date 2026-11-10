@@ -90,7 +90,8 @@ function fixture(source: Uint8Array = stl(box()), cwd = '/workspace', loadTimeou
   }
   const diagnosticsDirectory = mkdtempSync(join(tmpdir(), 'rumi-viewer-diagnostics-'))
   diagnosticRoots.push(diagnosticsDirectory)
-  applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs, validationConfig)
+  applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs,
+    validationConfig ? { validationTimeoutMs: 1000, mechanicsTimeoutMs: 1000, ...validationConfig } : undefined)
   owner.provide('systemPrompt', {
     getContextOrder: () => 210, getSectionOrder: () => 2600,
     section: () => () => {},

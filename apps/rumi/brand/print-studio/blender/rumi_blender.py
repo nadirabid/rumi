@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import shutil
 import struct
+import subprocess
+import tempfile
 import uuid
 
 from pxr import Usd
@@ -67,8 +69,68 @@ def import_mesh(path):
         raise ValueError('Import USD, GLB or STL; open .blend originals with bpy.ops.wm.open_mainfile')
 
 
-def publish(model_directory, configure_robot=None):
+CHECKS_TIMEOUT_SECONDS = 60
+CHECKS_NOTE = 'Bullet mechanics were not run; call validation_mechanics when the design is ready.'
+
+
+def _unavailable(message):
+    return dict(status='unavailable', message=str(message)[:400])
+
+
+def run_checks(usd, model_directory):
+    """Check a published revision in a separate Blender process and return a bounded summary.
+
+    The validator deletes every scene object, so it never runs in the calling process. Settings
+    come from the nearest ancestor `.rumi/print-checks.json`, written by `blender_status`. Every
+    failure, including a timeout, yields status "unavailable"; nothing here raises or reports a pass.
+    """
+    project = next((parent for parent in (Path(model_directory).resolve(), *Path(model_directory).resolve().parents)
+                    if (parent / '.rumi' / 'print-checks.json').is_file()), None)
+    if project is None:
+        return _unavailable('Call blender_status in this project, then publish again.')
+    scratch = None
+    try:
+        settings = json.loads((project / '.rumi' / 'print-checks.json').read_text())['settings']
+        (project / '.rumi' / 'tmp').mkdir(parents=True, exist_ok=True)
+        scratch = Path(tempfile.mkdtemp(prefix='check-', dir=project / '.rumi' / 'tmp'))
+        output = scratch / 'result.json'
+        request = scratch / 'request.json'
+        request.write_text(json.dumps(dict(
+            input=str(usd), output=str(output), mechanicsOutput=str(scratch / 'mechanics.json'),
+            stage='all', volume=None, settings=settings,
+            transform=dict(scale=1, rotate=dict(x=0, y=0, z=0), position=dict(x=0, y=0, z=0)))))
+        environment = {key: value for key, value in os.environ.items() if not key.startswith('PYTHON')}
+        environment['PYTHONDONTWRITEBYTECODE'] = '1'
+        completed = subprocess.run(
+            [bpy.app.binary_path, '--background', '--factory-startup', '--disable-autoexec', '--python-exit-code', '1',
+             '--python', str(Path(__file__).with_name('validate.py')), '--', str(request)],
+            capture_output=True, text=True, timeout=CHECKS_TIMEOUT_SECONDS, env=environment, cwd=scratch)
+        if completed.returncode != 0:
+            return _unavailable('Check process failed: ' + (completed.stdout + completed.stderr)[-300:])
+        result = json.loads(output.read_text())
+        summary = dict(
+            status='needs_repair' if result.get('robotError') else result['status'],
+            checks=[{key: item[key] for key in ('code', 'count', 'severity', 'details') if key in item}
+                    for item in result['checks'] if item['count']],
+            dimensionsMm={axis: round(result['dimensions'][axis], 2) for axis in 'xyz'},
+            note=CHECKS_NOTE)
+        if result.get('robotError'):
+            summary['assemblyError'] = str(result['robotError'])[:400]
+        return summary
+    except subprocess.TimeoutExpired:
+        return _unavailable('Checks exceeded %d seconds.' % CHECKS_TIMEOUT_SECONDS)
+    except Exception as error:
+        return _unavailable('%s: %s' % (type(error).__name__, error))
+    finally:
+        if scratch is not None:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+
+def publish(model_directory, configure_robot=None, check=True):
     """Atomically publish self-contained model.usda and a recoverable editable .blend.
+
+    With check=True, the published revision is then checked in a separate Blender process and
+    `RUMI_CHECKS <json>` is printed and returned as report['checks'].
 
     configure_robot(stage), when supplied, authors USD Physics joints and Isaac
     relationships on the exported stage. Otherwise saved USD declarations persist.
@@ -149,6 +211,9 @@ def publish(model_directory, configure_robot=None):
     finally:
         temporary.unlink(missing_ok=True)
     print('RUMI_MODEL ' + json.dumps(report))
+    if check:
+        report['checks'] = run_checks(usd, directory)
+        print('RUMI_CHECKS ' + json.dumps(report['checks'], separators=(',', ':')))
     return report
 
 

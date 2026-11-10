@@ -18,6 +18,17 @@ import { runBullet } from '../bullet/runner.js'
  * @returns {Promise<object>} Validated structured findings.
  */
 export async function runValidation(config, input, signal) {
+  return runValidationStage(config, input, signal, 'all')
+}
+
+/** Run one explicit check; fit retains prepared bodies for a later Bullet call.
+ * @param {object} config Resolved validation policy.
+ * @param {object} input Immutable model snapshot.
+ * @param {AbortSignal} signal Tool cancellation.
+ * @param {string} stage assembly, geometry, fit, or all for integration tests.
+ * @returns {Promise<object>} Findings and optional prepared physical geometry; subprocess failures reject.
+ */
+export async function runValidationStage(config, input, signal, stage) {
   if (!['usd', 'stl'].includes(input.format)) throw new Error('Validation requires USD or STL')
   if (input.format === 'usd') validateUsd(input.bytes)
   const staticMetadata = validateRobotAssembly({ nodes: [{ name: 'model', mesh: 0 }] })
@@ -31,8 +42,8 @@ export async function runValidation(config, input, signal) {
     const request = join(directory, 'request.json')
     const mechanicsOutput = join(directory, 'mechanics.json')
     await writeFile(request, JSON.stringify({ input: path, output, transform: input.transform, volume: input.volume,
-      settings: config.validation,
-      mechanicsOutput, ...(input.format === 'stl' ? { assembly: staticMetadata.assembly } : {}),
+      settings: config.validation, stage,
+      ...(['all', 'fit'].includes(stage) ? { mechanicsOutput } : {}), ...(input.format === 'stl' ? { assembly: staticMetadata.assembly } : {}),
     }), { flag: 'wx', mode: 0o600 })
     const script = fileURLToPath(new URL('./validate.py', import.meta.url)).replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`)
     signal.throwIfAborted()
@@ -65,6 +76,17 @@ export async function runValidation(config, input, signal) {
     delete report.robot
     delete report.robotError
     report.intent = { assembly: metadata.assembly, motionKeys: metadata.motionKeys, motionRanges: metadata.motionRanges }
+    if (stage !== 'all') {
+      if (stage === 'assembly') {
+        report.checks.push(...metadata.checks)
+        report.status = metadata.checks.length ? 'needs_repair' : 'passed'
+      }
+      if (stage === 'fit') report.printerVolumeChecked = input.volume !== null
+      if (stage === 'fit' && !report.checks.some(check => check.severity === 'error' && check.count) && metadata.assembly) {
+        report.preparedGeometry = JSON.parse(await readFile(mechanicsOutput, 'utf8'))
+      }
+      return report
+    }
     if (metadata.declared || metadata.checks.length) {
       let mechanics
       if (metadata.checks.length) mechanics = { version: 2, engine: 'bullet', status: 'needs_repair', assemblyVerified: false,

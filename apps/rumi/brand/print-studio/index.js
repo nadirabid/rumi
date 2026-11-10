@@ -14,7 +14,7 @@ import { homedir } from 'node:os'
 import z from '@deepseek-ai/schemastery'
 import * as skillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { createDeveloperMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createDeveloperMessage } from '@deepseek-ai/dsh-llm'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import {
   DOWNLOAD_URL, MODELS, detectSlicer, discoverPrinters, mqttAuthorized, printStudioNextSteps, reachable, readPrinterConfig, text, writePrinterConfig,
@@ -38,6 +38,7 @@ export const Config = z.object({
   bulletExecutable: z.string().default(''),
   blenderHome: z.string().default(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi')),
   validationStateDirectory: z.string().min(1).default(join(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi'), 'validation')),
+  // Retained for existing profiles; validation tools never schedule repair turns.
   validationRepairAttempts: z.number().step(1).min(0).max(10).default(5),
   validationTimeoutMs: z.number().step(1).min(1000).max(300000).default(60000),
   mechanicsTimeoutMs: z.number().step(1).min(1000).max(600000).default(600000),
@@ -245,7 +246,7 @@ const PRINT_TYPE = {
 export function apply(ctx, config) {
   ctx.plugin(analogWorkflow)
   ctx.plugin(mechanicalWorkflow)
-  applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory, config.viewerLoadTimeoutMs, config, createUserMessage)
+  applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory, config.viewerLoadTimeoutMs, config)
   ctx.inject(['sessionProjections'], scoped => applyContextRetention(scoped, createDeveloperMessage))
   applyBlender(ctx, defineTool, config)
   // A project-type plugin contributes; it does not own the creation flow.

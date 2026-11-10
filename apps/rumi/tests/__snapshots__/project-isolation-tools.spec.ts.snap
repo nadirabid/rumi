@@ -1,5 +1,18 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`admits both explicit validation tools while rejecting paths outside the owning project 1`] = `
+[
+  {
+    "stage": "mechanics",
+    "status": "passed",
+  },
+  {
+    "stage": "accept",
+    "status": "accepted",
+  },
+]
+`;
+
 exports[`blocks a cross-project read in a recorded agent turn without disclosing contents 1`] = `
 [
   {

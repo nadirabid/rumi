@@ -1,7 +1,8 @@
 /** Locate Blender for agent-owned shell execution; never execute project scripts in the host. */
-import { access, realpath } from 'node:fs/promises'
+import { access, mkdir, realpath, rename, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { join, sep } from 'node:path'
+import { dirname, join, sep } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
@@ -27,7 +28,7 @@ export async function blenderStatus(configured, home) {
       return { status: 'ready', executable: await realpath(path),
         helper: fileURLToPath(new URL('./rumi_blender.py', import.meta.url)).replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`),
         skill: 'blender-modeling',
-        execution: 'Use the shell tool: executable --background --factory-startup --python-exit-code 1 --python script.py. Blender runs locally without a window. Read blender-modeling before editing.',
+        execution: 'Use the shell tool: executable --background --factory-startup --python-exit-code 1 --python script.py. Blender runs locally without a window. Read blender-modeling before editing. helper["publish"] prints RUMI_CHECKS findings for each revision.',
       }
     } catch (error) {
       if (!['ENOENT', 'ENOTDIR', 'EACCES'].includes(error.code)) throw error
@@ -40,7 +41,21 @@ export async function blenderStatus(configured, home) {
 }
 
 /**
- * Register read-only Blender discovery through the existing tool service.
+ * Atomically write the project's check settings for `publish()`.
+ * @param {string} project - Absolute project directory.
+ * @param {object} settings - Resolved Print Studio validation policy.
+ * @returns {Promise<string>} Absolute path of the settings file.
+ */
+async function writeCheckSettings(project, settings) {
+  const file = join(project, '.rumi', 'print-checks.json'), temporary = `${file}.${randomUUID()}.tmp`
+  await mkdir(dirname(file), { recursive: true })
+  await writeFile(temporary, JSON.stringify({ version: 1, settings }) + '\n', { mode: 0o600 })
+  await rename(temporary, file)
+  return file
+}
+
+/**
+ * Register Blender discovery through the existing tool service; ready status also writes the project's check settings.
  * @param {object} ctx - Plugin context.
  * @param {Function} defineTool - Host tool factory.
  * @param {object} config - Resolved Print Studio configuration.
@@ -49,11 +64,16 @@ export async function blenderStatus(configured, home) {
 export function applyBlender(ctx, defineTool, config) {
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'blender_status',
-    description: 'Find the local Blender executable and Rumi export helper. Use Blender background Python scripts for mesh creation and editing, then viewer_load the exported USD for Three.js viewing and iteration. Read the blender-modeling skill. This tool only discovers paths; scripts run through the existing shell tool and its permissions.',
+    description: 'Find the local Blender executable and Rumi export helper. Use Blender background Python scripts for mesh creation and editing, then viewer_load the exported USD for Three.js viewing and iteration. Read the blender-modeling skill. This tool discovers paths and records the project check settings that make publish print RUMI_CHECKS findings; scripts run through the existing shell tool and its permissions.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     presentCall: () => ({ card: 'generic', title: 'Find Blender', kind: 'read' }),
     isConcurrencySafe: () => true,
-    async execute() { return JSON.stringify(await blenderStatus(config.blenderExecutable, config.blenderHome)) },
+    async execute(_args, exec) {
+      const status = await blenderStatus(config.blenderExecutable, config.blenderHome)
+      if (status.status !== 'ready') return JSON.stringify(status)
+      const project = await ctx.workingDirectory.ensure(exec.agent, exec.signal)
+      return JSON.stringify({ ...status, checks: await writeCheckSettings(project, config.validation) })
+    },
   })), 'print-studio: Blender discovery')
 }

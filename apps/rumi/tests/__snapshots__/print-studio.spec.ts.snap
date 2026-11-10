@@ -1,34 +1,5 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`automatically queues one repair turn with durable 'geometry' findings and stops on unchanged geometry 1`] = `
-[
-  "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
-
-{"validation":null}",
-  "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
-
-{"validation":{"status":"changed","report":null,"previousReport":{"version":1,"status":"needs_repair","checks":[{"code":"intersecting_faces","count":2,"severity":"error"}],"printReady":false}}}",
-]
-`;
-
-exports[`automatically queues one repair turn with durable 'mechanics' findings and stops on unchanged geometry > physical movement instructions 1`] = `"For multi-part or movable prints, read blender-modeling and publish a complete assembly with every physical mesh, root fixture, connection, axis, pivot and full movement range. Include pins, caps and axles. JavaScript models export assembly and bind every motionControls axis to its connection; controls use degrees or millimetres. Blender publish preserves assembly metadata. Preserve requested features, connectors, controls and ranges during repairs. Changed candidates are checked automatically after turns: Blender checks geometry and bundled Bullet tests the whole assembly with only the root held, without ideal joints. Read the matching meshState.validation report before claiming acceptance. Missing descriptions, disconnected pieces and blocked movement require repair. Unavailable, unsupported or incomplete checks remain unverified. A passing rigid-contact test does not certify assembly accessibility, deformation, material strength or slicer readiness."`;
-
-exports[`automatically queues one repair turn with durable 'mechanics' findings and stops on unchanged geometry 1`] = `
-[
-  "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
-
-{"validation":null}",
-  "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
-
-{"validation":{"status":"changed","report":null,"previousReport":{"version":1,"status":"needs_repair","checks":[{"code":"unretained_part","count":1,"severity":"error","mechanism":"door"}],"printReady":false,"mechanics":{"version":1,"engine":"bullet","status":"needs_repair","printReady":false,"checks":[{"code":"unretained_part","count":1,"severity":"error","mechanism":"door"}],"connections":[{"id":"door","probes":[{"status":"needs_repair","kind":"retention","code":"unretained_part"}],"probeCounts":{"passed":1,"needs_repair":1,"review":0}}]}}}}",
-]
-`;
-
-exports[`collects every model before sending one repair and does not repair unavailable checks 1`] = `
-"Automatic print validation found blocking geometry or unverified mechanism findings. Repair the affected saved models now, preserving the requested design and moving parts. Inspect the findings and source; do not hide errors by removing requested features or movement declarations. Do not print or send to a printer. Fresh Blender and whole-assembly Bullet checks run automatically after your turn. These checks do not certify assembly, material strength, or slicer readiness. If you cannot safely resolve the errors, say so briefly. Findings:
-[{"path":"models/car/model.js","fingerprint":"<revision>","report":{"version":1,"status":"needs_repair","checks":[{"code":"intersecting_faces","count":2,"severity":"error"}],"printReady":false}},{"path":"models/second/model.js","fingerprint":"<revision>","report":{"version":1,"status":"needs_repair","checks":[{"code":"intersecting_faces","count":2,"severity":"error"}],"printReady":false}}]"
-`;
-
 exports[`documents creating multiple models and bringing a named entry into view 1`] = `
 {
   "analog": "Open temporary edit sliders, pads, or curves for supported USD deformation operations. For persistent doors and wheels, use USD assembly joints; read interactive-controls. Movement controls remain at the bottom-right independently of edits. Supply labeled controls and initial values for the selected operation. Read analog-shaping for geometry and Blender save rules. Executable JavaScript parameter previews are disabled by project isolation. Keep controls open while the person explores; freeze the latest values before applying and publishing the edit in Blender.",
@@ -50,7 +21,7 @@ Use these defaults from the first modeling operation, including edits to existin
 - Joining Blender objects does not fuse their geometry. Union pieces intended to form one solid, while keeping separate mechanical parts and their clearances distinct.
 - Establish the main solid before bevels and other finishing operations. Keep bevel widths compatible with nearby features and wall thickness; inspect the evaluated result for collapsed features and self-intersections.
 - Reserve voxel remeshing for organic geometry where changes to topology, sharpness and detail are acceptable. Preserve the original, choose a voxel size that resolves the smallest required feature, and recheck dimensions. Do not use it as routine repair for threads, mating surfaces, thin walls or moving-part clearances, or remesh separate moving parts into one solid.
-- Inspect evaluated geometry after significant topology changes, before building further features on it. \`Mesh.validate()\` checks and can repair mesh data; it does not establish manifoldness. Use 3D Print Toolbox findings for geometry diagnosis. Prefer correcting the construction that caused a defect over broad automatic cleanup; inspect any cleanup result for lost features and changed dimensions. Automatic turn-end validation remains required.
+- Inspect evaluated geometry after significant topology changes, before building further features on it. \`Mesh.validate()\` checks and can repair mesh data; it does not establish manifoldness. Use 3D Print Toolbox findings for geometry diagnosis. Prefer correcting the construction that caused a defect over broad automatic cleanup; inspect any cleanup result for lost features and changed dimensions. Before completion, follow the validation workflow below.
 
 ## Edit and publish
 
@@ -58,8 +29,8 @@ Use these defaults from the first modeling operation, including edits to existin
 2. Write a reproducible Python script under \`source/\`. Run \`"<executable>" --background --factory-startup --python-exit-code 1 --python "<script>"\`. This runs a full Blender process without a window; ordinary system Python cannot import \`bpy\`.
 3. Work in **metres, Z up** in Blender. Rumi's viewer, measurements and Gaussian regions use **millimetres, Z up**. Divide model-local cursor/highlight coordinates and radii by 1,000 before using them in Blender; account for object transforms when selecting vertices. Standard USD export/import handles the USD coordinate frame. Do not apply viewer placement to an editing selection twice.
 4. Follow the solid construction defaults above when choosing Blender modifiers and mesh operations. For symmetric objects construct one half and mirror it about an explicit plane; measure symmetry after evaluated modifiers. Keep planar faces planar, bevel widths consistent, sharp boundaries deliberate, and smooth normals confined to intended smooth surfaces. More subdivisions or smooth shading alone do not correct a lumpy silhouette. Inspect front, side and three-quarter views. Distinguish topology checks from visual/reference fidelity.
-5. Load the helper returned by \`blender_status\` with \`helper = runpy.run_path(helper_path)\`, then call \`helper["publish"]("models/<name>")\`. Use \`runpy\` so importing the helper does not write bytecode into the installed application. It saves an immutable \`.blend\` and USD revision, prints the paths, and atomically updates \`model.usda\`. Keep named parts, modifiers, and movement declarations in the editable original. Preview limits are 200,000 triangles and 64 MiB; preserve detailed assets separately if a lighter preview is required. Do not silently simplify the print deliverable.
-6. Call \`viewer_load\` on \`models/<name>/model.usda\`. Saved models display independently of validation. Use \`meshState.validation\` to inspect findings; a visible model is not a printability pass. Use \`viewer_camera\`, \`viewer_cursor_snapshot\`, and \`viewer_highlight\` for iteration.
+5. Load the helper returned by \`blender_status\` with \`helper = runpy.run_path(helper_path)\`, then call \`helper["publish"]("models/<name>")\`. Use \`runpy\` so importing the helper does not write bytecode into the installed application. It saves an immutable \`.blend\` and USD revision, prints the paths and \`RUMI_CHECKS\`, and atomically updates \`model.usda\`. Keep named parts, modifiers, and movement declarations in the editable original. Preview limits are 200,000 triangles and 64 MiB; preserve detailed assets separately if a lighter preview is required. Do not silently simplify the print deliverable.
+6. Call \`viewer_load\` on \`models/<name>/model.usda\`. Saved models display independently of validation. Use \`RUMI_CHECKS\` and \`meshState.validation\` to inspect findings; a visible model is not a printability pass. Use \`viewer_camera\`, \`viewer_cursor_snapshot\`, and \`viewer_highlight\` for iteration.
 
 ## Declare physical movement
 
@@ -96,7 +67,7 @@ Rumi-specific attributes cover information the robot schema does not define: \`r
 
 ## Clearances and retention
 
-Keep at least 0.3 mm between separate parts everywhere in the saved pose: radial gaps in bores, end-play and door-to-frame gaps. Validation reports \`insufficient_clearance\` as an error below 0.2 mm and lists the pairs and gaps. Parts joined by a fixed joint may touch.
+Keep at least 0.3 mm between separate parts everywhere in the saved pose: radial gaps in bores, end-play and door-to-frame gaps. \`RUMI_CHECKS\` reports \`insufficient_clearance\` as an error below 0.2 mm and lists the pairs and gaps. Parts joined by a fixed joint may touch.
 
 Play is expected. Retention passes when the connector stops the part; the pivot may travel up to 2 mm and tilt up to 15°. Never reduce clearances to reduce drift.
 
@@ -110,9 +81,13 @@ Use the cursor snapshot associated with the request and visually ground named re
 
 Keep \`.blend\` files as editable originals and USD as the shared geometry and robot description. Export print meshes separately from the intended evaluated solids and verify units, wall thickness, manifoldness, fit, supports and slicer output using \`fdm-design\`. Blender operations and viewer checks do not certify print readiness. Whole-model placement still uses \`viewer_transform\`; it does not rewrite the Blender original.
 
-Print Studio automatically runs Blender geometry validation after each agent turn for changed discovered models, then whole-assembly Bullet contact and movement probes when geometry has no blocking findings. Read \`meshState.validation\` for revision-specific findings, including \`report.mechanics\`; \`previousReport\` is historical. Do not claim the current edit passed before its matching result exists. The checker holds only the root fixture and tests actual mesh contacts while every other piece remains dynamic. It does not create ideal joints that supply missing connectors. Unsupported motion, incomplete checks, deformation, strength and slicing require separate evidence.
+## Validate a finished revision
 
-Blocking geometry or mechanism findings automatically start a repair turn with model paths and checked revisions. Preserve the requested design, moving parts, physical connectors, and declarations while repairing; do not remove requested features or narrow movement controls merely to hide failures. Repairs are checked again after the turn, with a bounded automatic retry budget. Unverified mechanical checks also trigger bounded repair; static geometry warnings and unavailable checks remain visible in the report without starting geometry repairs. If a repair cannot be made safely, report the remaining limitation briefly; never claim printability from geometry checks alone.
+Every \`publish\` checks the new revision in a separate Blender process and prints \`RUMI_CHECKS <json>\`: Toolbox geometry findings, part clearance, the assembly declaration error if any, and \`dimensionsMm\`. Only findings with a nonzero count appear. Read it after each build and fix \`error\` severity findings before building further; \`warning\` findings need judgment against the intended design. \`status: "unavailable"\` means no checks ran; call \`blender_status\` once in this project and publish again. Write no separate manifold, clearance or collision scripts, and do not invoke installed validator scripts or Bullet by hand.
+
+When the design is ready and \`RUMI_CHECKS\` has no blocking errors, call \`validation_mechanics\` once with the model \`path\`. The host re-runs any missing cheap checks for that revision first and stops with their findings if one blocks. Otherwise it runs Bullet, the costly stage (up to ten minutes), testing whole-assembly contacts, retention, sampled movement, declared sequences and removal paths with only the root held. Do not weaken settings, omit parts, narrow movement or substitute a reduced assembly to obtain a pass; incomplete coverage remains unverified. Then call \`validation_accept\` with the \`path\` and \`fingerprint\` it returned. Only an \`accepted\` result supports an acceptance claim, and it does not certify slicing, deformation, strength, assembly accessibility or print readiness. A printer volume that was never configured means printer fit is unchecked.
+
+After any repair or placement change, publish again and repeat for the new revision; never report a previous revision's results as current. Validation never starts follow-up turns, so finish repairs in this turn. Preserve requested features, connectors, controls and full movement ranges. If checks fail or cannot be resolved safely, report the remaining limitation briefly instead of claiming acceptance.
 ",
   "clarification": "---
 name: clarify-mesh-changes
@@ -194,7 +169,7 @@ Executable \`model.js\`/\`model.mjs\` previews are disabled by project isolation
 
 ### Movable prints
 
-Build physical connectors and publish a complete assembly for multi-part or movable models, following \`blender-modeling\` and \`interactive-controls\`. Include every mesh, pin, cap, connection and movement control; preserve requested movement and full ranges during repairs. Keep at least 0.3 mm between separate parts and capture parts with connector geometry rather than tight fits; see \`blender-modeling\`. Completed turns automatically check changed candidates with Blender and whole-assembly Bullet contact probes. Blocking findings and unverified mechanical checks trigger bounded repair turns. Models remain visible while validation and repair run. Read the matching \`meshState.validation\` report before claiming acceptance. Unsupported or incomplete checks remain unverified; a probe pass does not certify material strength or print readiness.
+Build physical connectors and publish a complete assembly for multi-part or movable models, following \`blender-modeling\` and \`interactive-controls\`. Include every mesh, pin, cap, connection and movement control; preserve requested movement and full ranges during repairs. Keep at least 0.3 mm between separate parts and capture parts with connector geometry rather than tight fits; see \`blender-modeling\`. After each build, read the \`RUMI_CHECKS\` line that \`publish\` prints and fix blocking errors. When the design is ready, follow the validation workflow in \`blender-modeling\`: \`validation_mechanics\` once, then \`validation_accept\` with its fingerprint. No turn-end checks or automatic repair turns run. Models remain visible while validation and repair run. Read the matching \`meshState.validation\` report before claiming acceptance. Unsupported or incomplete checks remain unverified; a probe pass does not certify material strength or print readiness.
 
 ### Model references
 
@@ -246,7 +221,7 @@ Keep the controls open while the person explores. Satisfaction or moving to anot
 
 Report build/save failures plainly. Failed previews preserve the last successful geometry and values. Never claim an edit is saved while controls remain unresolved.
 ",
-  "load": "Select a Blender-exported USD in the Three.js viewer. Use models/<name>/model.usda; the viewer discovers these entries and reloads completed exports automatically. USD uses metres and Z up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Executable .js/.mjs previews are disabled by project isolation; export USD instead. Saved models display immediately; automatic validation and repair run independently of preview visibility. Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.",
+  "load": "Select a Blender-exported USD in the Three.js viewer. Use models/<name>/model.usda; the viewer discovers these entries and reloads completed exports automatically. USD uses metres and Z up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Executable .js/.mjs previews are disabled by project isolation; export USD instead. Saved models display immediately; use validation_mechanics then validation_accept before claiming acceptance. Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.",
   "printer": "---
 name: printer-awareness
 description: Retrieve printer identity, connectivity, live state, filament and machine-profile limits before answering printer questions or making printer-specific design and fit decisions.
@@ -450,19 +425,19 @@ exports[`publishes the analog workflow in model instructions and removes it on u
 When the person asks to adjust a model themselves, including let me tilt both eyes, open real interactive controls before making their adjustment. Read interactive-controls and use viewer_controls with explicit labels and bindings. Controls are generic: sliders, two-axis pads, and curves can bind named JavaScript model parameters or supported USD deformation values. A missing binding means prepare a faithful parametric model first, not tell the person to request repeated rebuilds. Never substitute labels alone, unrelated deformation, or a simplified replacement that loses existing features. For direct edits without a request for controls, ordinary modeling remains appropriate. Read analog-shaping for built-in USD deformation math. Keep controls open while exploring; freeze then save the latest visible values on satisfaction or before another task, and close on explicit cancel. Final JavaScript parameter models save through viewer_controls. A temporary JavaScript preview of an edit to an existing model must declare finish blender, the preserved original and a semantic edit recipe; freeze its latest values, apply them to the original in Blender, check printability, publish and load the result. USD recipes save through Blender. Check the tool result before claiming controls are visible or a save succeeded."
 `;
 
-exports[`records five automatic repair turns and keeps a sixth failed revision unresolved 1`] = `
+exports[`records explicit validation tools and their results within one agent turn > explicit validation instructions 1`] = `"For multi-part or movable prints, read blender-modeling and publish a complete assembly with every physical mesh, root fixture, connection, axis, pivot and full movement range. Include pins, caps and axles. JavaScript models export assembly and bind every motionControls axis to its connection; controls use degrees or millimetres. Blender publish preserves assembly metadata. Preserve requested features, connectors, controls and ranges during repairs. After each build, read the RUMI_CHECKS line that publish prints and repair blocking findings. When the design is ready, follow blender-modeling: call validation_mechanics once for the costly Bullet test, then validation_accept with the returned fingerprint. The bundled Bullet checker holds only the root, without ideal joints. No turn-end checks or automatic repair turns run. Read the matching meshState.validation report before claiming acceptance. Missing descriptions, disconnected pieces and blocked movement require repair. Unavailable, unsupported or incomplete checks remain unverified. A passing rigid-contact test does not certify assembly accessibility, deformation, material strength or slicer readiness."`;
+
+exports[`records explicit validation tools and their results within one agent turn 1`] = `
 [
-  "user",
-  "Saved revision 0.",
-  "print-validation",
-  "Saved revision 1.",
-  "print-validation",
-  "Saved revision 2.",
-  "print-validation",
-  "Saved revision 3.",
-  "print-validation",
-  "Saved revision 4.",
-  "print-validation",
-  "Saved revision 5.",
+  {
+    "printReady": false,
+    "stage": "mechanics",
+    "status": "passed",
+  },
+  {
+    "printReady": false,
+    "stage": "accepted",
+    "status": "accepted",
+  },
 ]
 `;

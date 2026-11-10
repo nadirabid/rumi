@@ -86,3 +86,15 @@ The following items are not passing evidence and must remain visible during revi
 - Native clipboard writing passes on Windows. Default-browser launch is attempted, but destination verification stops because the automation tool cannot reliably identify the current URL. macOS browser and clipboard integration remain unverified.
 - Mandatory and ordinary failures use localized summaries and folded diagnostics; copy failure reveals a selectable address. Ordinary error tooltips show summaries rather than raw diagnostics. Installed Windows/macOS attention, notification permission, and focus-mode behavior remain unverified.
 - Full `doc-sync` encounters Windows file-symlink `EPERM` in the documentation-site test. This is not an updater failure and does not make the full documentation gate green.
+
+## Validation tool qualification
+
+Packaging runs the two Print Studio validation tools through the actual Host profile and project-isolation policy, using the bundled Blender and Bullet executables on a solid and a captive-wheel assembly. Both reach acceptance; cached results, cross-project denial, stale-revision rejection and four tool calls within one recorded turn are checked. This keyless test uses a scripted model adapter; it does not measure whether a live model follows the modeling skill.
+
+After packaging, qualify the installed macOS app with:
+
+```sh
+DSH_DESKTOP_APP_ID=com.nadirmuzaffar.rumi pnpm exec tsx apps/rumi/scripts/smoke-packaged-runtime.ts --unsigned --application /Applications/Rumi.app/Contents
+```
+
+The command uses the current build descriptor and a temporary profile, project, sessions and validation storage. Set `RUMI_VALIDATION_SMOKE_MODEL` to an existing self-contained USD path to inspect a copy alongside the fixtures; its findings are diagnostic and do not turn a defective model into a passing fixture. Original model files and the user's active profile are not changed.

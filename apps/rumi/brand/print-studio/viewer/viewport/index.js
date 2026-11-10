@@ -19,6 +19,7 @@ import { disposeModel } from './model.js'
 import { placeMesh } from '../transform.js'
 import { analyzeMesh } from '../checks.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
 /** Fallbacks for a stage mounted outside a themed tree, such as a test fixture. */
 const FALLBACK_INK = '#8a8a8a'
@@ -98,10 +99,21 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   camera.up.set(0, 0, 1)
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = false
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x606070, 2.5))
-  const light = new THREE.DirectionalLight(0xffffff, 3)
-  light.position.set(100, -150, 300)
-  scene.add(light)
+  // Image-based light from every direction shades all faces at any orbit angle.
+  // RoomEnvironment is Y up; the rotation puts its ceiling at the scene's +Z.
+  const pmrem = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment()
+  const environment = pmrem.fromScene(room, 0.04)
+  room.dispose(); pmrem.dispose()
+  scene.environment = environment.texture
+  scene.environmentRotation.x = Math.PI / 2
+  // Below full strength so pale materials keep shading instead of clipping to white.
+  scene.environmentIntensity = 0.75
+  // A weak light fixed above the camera's left shoulder adds a specular highlight that follows the view.
+  const light = new THREE.DirectionalLight(0xffffff, 0.5)
+  light.position.set(-0.5, 0.7, 0)
+  light.target.position.set(0, 0, -1)
+  camera.add(light, light.target)
+  scene.add(camera)
 
   const hover = createHover(renderer.domElement, camera,
     () => shapeDeformer || motionPreview ? [] : [...objects.values()].map(entry => entry.mesh).concat(design ? [design.root] : []), render, onCursorMode)
@@ -501,6 +513,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       clearVolume()
       solidMaterial.dispose()
       blockedMaterial.dispose()
+      environment.dispose()
       renderer.dispose()
       renderer.forceContextLoss()
       renderer.domElement.remove()

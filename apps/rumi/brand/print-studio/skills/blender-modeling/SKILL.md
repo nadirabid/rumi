@@ -7,6 +7,10 @@ description: Create, import, or edit Rumi meshes using background Blender Python
 
 Call `blender_status` for the executable and helper paths. Run Blender through the ordinary shell tool, using its permissions and cancellation; do not build a separate execution service. If Blender is unavailable, report the setup action returned by the tool.
 
+## Start from the joints kit
+
+For any model with more than one part, or with a wheel, hinge, slider, snap or gear, read `joints` first and build with its kit. It supplies millimetre primitives, cleaned Boolean operations, joint recipes and `K.publish`, which writes the whole USD assembly, so the script needs no `configure_robot`. Revisions, the viewer and validation below apply unchanged.
+
 ## Solid construction defaults
 
 Use these defaults from the first modeling operation, including edits to existing models. They reduce mesh defects but do not establish printability.

@@ -15,7 +15,7 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react');
     const { flushSync } = require('react-dom');
-    const { IconChevronLeftOutlineRegular, IconPlusOutlineRegular, IconPanelLeftOutlineRegular, Tooltip } = require('@deepseek-ai/dsh-client-ui-primitives');
+    const { IconChevronLeftOutlineRegular, IconFolderOpenOutlineRegular, IconPlusOutlineRegular, IconPanelLeftOutlineRegular, IconTrashOutlineRegular, Tooltip } = require('@deepseek-ai/dsh-client-ui-primitives');
     const h = React.createElement;
 
     const PANEL_ID = 'projects';
@@ -35,6 +35,11 @@ window.__ModuleLoader__.load({
       emptyHint: 'Make one, then ask Rumi to help build it.',
       updated: 'Updated {when}',
       failed: 'That did not work. Try again.',
+      open: 'Open',
+      delete: 'Delete',
+      deleteTitle: 'Delete "{name}"?',
+      deleteMessage: "You can't get it back after this.",
+      cancel: 'Cancel',
     };
     const zh = {
       title: '项目',
@@ -49,6 +54,11 @@ window.__ModuleLoader__.load({
       emptyHint: '先新建一个，然后请 Rumi 一起制作',
       updated: '更新于 {when}',
       failed: '没有成功，请再试一次',
+      open: '打开',
+      delete: '删除',
+      deleteTitle: '删除“{name}”？',
+      deleteMessage: '删除后无法恢复',
+      cancel: '取消',
     };
 
     const STYLES = `
@@ -90,10 +100,137 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
 .rumi-glass:hover{background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 78%,transparent)}
 .rumi-glass:active{background:color-mix(in srgb,var(--dsw-alias-bg-layer-3) 85%,transparent)}
 .rumi-glass:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
+/* Liquid Glass surfaces for the project menu and the delete alert. The tint
+   follows the theme; the specular rim, shadows and scrim are material constants. The
+   lens filter (--rumi-lens) is generated per element, with a plain blur until
+   or unless it exists. */
+.rumi-lq{position:relative;isolation:isolate}
+.rumi-lq::before{content:"";position:absolute;inset:0;border-radius:inherit;z-index:-1;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) var(--rumi-tint,30%),transparent);backdrop-filter:var(--rumi-lens,blur(var(--rumi-blur,6px))) saturate(170%) brightness(1.04);-webkit-backdrop-filter:var(--rumi-lens,blur(var(--rumi-blur,6px))) saturate(170%) brightness(1.04);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.45),inset 0 1.2px .5px -.2px rgba(255,255,255,.95),inset 0 -1px .5px -.2px rgba(255,255,255,.4),inset 0 0 5px rgba(255,255,255,.18)}
+.rumi-lq::after{content:"";position:absolute;inset:0;border-radius:inherit;z-index:-2;box-shadow:0 0 0 .5px rgba(0,0,0,.09),0 var(--rumi-sy,4px) var(--rumi-sb,12px) rgba(0,0,0,var(--rumi-sa,.12)),0 1px 2px rgba(0,0,0,.06)}
+.rumi-menu{position:fixed;z-index:60;width:196px;box-sizing:border-box;padding:5px;border-radius:14px;font-size:13px;color:var(--dsw-alias-label-primary);--rumi-tint:30%;--rumi-sy:14px;--rumi-sb:36px;--rumi-sa:.24;-webkit-font-smoothing:antialiased}
+.rumi-menu-item{display:flex;align-items:center;gap:8px;width:100%;height:26px;box-sizing:border-box;padding:0 9px;border:0;border-radius:8px;background:none;font:inherit;text-align:left;cursor:default;color:inherit}
+.rumi-menu-item svg{flex-shrink:0}
+.rumi-menu-item:hover,.rumi-menu-item:focus-visible{outline:none;background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary-foreground)}
+.rumi-menu-item-danger{color:var(--dsw-alias-state-error-primary)}
+.rumi-menu-item-danger:hover,.rumi-menu-item-danger:focus-visible{background:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-label-primary-foreground)}
+.rumi-menu-separator{height:.5px;margin:5px 9px;background:var(--dsw-alias-border-l2)}
+.rumi-scrim{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.16)}
+.rumi-alert{width:264px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:20px 16px 16px;border-radius:26px;color:var(--dsw-alias-label-primary);--rumi-tint:44%;--rumi-blur:9px;--rumi-sy:26px;--rumi-sb:64px;--rumi-sa:.34;-webkit-font-smoothing:antialiased}
+.rumi-alert:focus{outline:none}
+.rumi-alert-cover{width:84px;margin-bottom:14px}
+.rumi-alert .rumi-project-cover{border-radius:10px}
+.rumi-alert-title{margin:0;font-size:13px;font-weight:700;overflow-wrap:anywhere}
+.rumi-alert-message{margin:5px 0 16px;font-size:11px;line-height:1.4}
+.rumi-alert-actions{display:flex;gap:8px}
+.rumi-alert-button{flex:1;height:32px;border:0;border-radius:999px;font:inherit;font-weight:500;cursor:default;box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
+.rumi-alert-button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
+.rumi-alert-button:disabled{opacity:.5}
+.rumi-alert-cancel{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary-foreground)}
+.rumi-alert-delete{background:color-mix(in srgb,var(--dsw-alias-label-primary) 10%,transparent);color:var(--dsw-alias-state-error-primary)}
 @media(max-width:900px){.rumi-projects-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.rumi-projects-grid{grid-template-columns:minmax(0,1fr)}}
 @media(prefers-reduced-motion:reduce){.rumi-project-cover,.rumi-glass{transition:none}}
 `;
+
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    let lensCount = 0;
+
+    /**
+     * Give a glass element a refraction filter: a rounded-rectangle edge
+     * displacement map rendered on a canvas, wrapped in an SVG filter, exposed
+     * as `--rumi-lens`. Without a 2D canvas or a size the element keeps its
+     * plain blur.
+     * @param {HTMLElement} element - Glass element whose border radius shapes the lens.
+     * @param {number} blur - Gaussian blur before displacement, in px.
+     * @returns {() => void} Removes the filter and the custom property.
+     */
+    function lens(element, blur) {
+      const width = Math.round(element.offsetWidth);
+      const height = Math.round(element.offsetHeight);
+      if (!width || !height) return () => {};
+      const radius = Math.min(parseFloat(getComputedStyle(element).borderRadius) || 0, width / 2, height / 2);
+      const bevel = Math.min(11, radius, height / 2);
+      const render = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d');
+        if (!context) return null;
+        const image = context.createImageData(width, height);
+        const data = image.data;
+        const halfX = width / 2 - radius;
+        const halfY = height / 2 - radius;
+        for (let j = 0; j < height; j++) {
+          for (let i = 0; i < width; i++) {
+            const px = i + 0.5 - width / 2;
+            const py = j + 0.5 - height / 2;
+            const qx = Math.abs(px) - halfX;
+            const qy = Math.abs(py) - halfY;
+            let nx = 0;
+            let ny = 0;
+            let distance;
+            if (qx > 0 && qy > 0) {
+              const length = Math.hypot(qx, qy) || 1;
+              distance = length - radius;
+              nx = qx / length;
+              ny = qy / length;
+            } else if (qx > qy) {
+              distance = qx - radius;
+              nx = 1;
+            } else {
+              distance = qy - radius;
+              ny = 1;
+            }
+            nx *= Math.sign(px) || 1;
+            ny *= Math.sign(py) || 1;
+            const t = Math.max(0, 1 + distance / bevel);
+            const strength = t * t * t;
+            const offset = (j * width + i) * 4;
+            data[offset] = 128 - nx * strength * 127;
+            data[offset + 1] = 128 - ny * strength * 127;
+            data[offset + 2] = 128;
+            data[offset + 3] = 255;
+          }
+        }
+        context.putImageData(image, 0, 0);
+        return canvas.toDataURL();
+      };
+      let url = null;
+      try {
+        url = render();
+      } catch {
+        // A canvas the platform refuses to draw or export: the CSS blur fallback applies.
+      }
+      if (url === null) return () => {};
+      const id = `rumi-lens-${lensCount++}`;
+      const host = document.createElementNS(SVG_NS, 'svg');
+      host.setAttribute('width', '0');
+      host.setAttribute('height', '0');
+      host.setAttribute('aria-hidden', 'true');
+      host.style.position = 'absolute';
+      const filter = document.createElementNS(SVG_NS, 'filter');
+      filter.setAttribute('id', id);
+      filter.setAttribute('x', '0');
+      filter.setAttribute('y', '0');
+      filter.setAttribute('width', '100%');
+      filter.setAttribute('height', '100%');
+      filter.setAttribute('color-interpolation-filters', 'sRGB');
+      filter.innerHTML = `<feGaussianBlur in="SourceGraphic" stdDeviation="${blur}" result="b"/><feImage href="${url}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="none" result="m"/><feDisplacementMap in="b" in2="m" scale="${bevel * 2}" xChannelSelector="R" yChannelSelector="G"/>`;
+      const defs = document.createElementNS(SVG_NS, 'defs');
+      defs.append(filter);
+      host.append(defs);
+      document.body.append(host);
+      element.style.setProperty('--rumi-lens', `url(#${id})`);
+      return () => {
+        host.remove();
+        element.style.removeProperty('--rumi-lens');
+      };
+    }
+
+    /** Apply `lens` to the element in `ref` for as long as it is mounted. */
+    function useLens(ref, blur) {
+      React.useLayoutEffect(() => (ref.current ? lens(ref.current, blur) : undefined), [ref, blur]);
+    }
 
     /** Copy and styles installed once per plugin instance. */
     function installChrome(ctx, t) {
@@ -192,6 +329,22 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
             publish({ error: 'open' });
           }
         },
+        /** Delete a project from disk and from the gallery. */
+        async remove(project) {
+          try {
+            const response = await fetch(`${ROUTE}?projectId=${encodeURIComponent(project.id)}`, { method: 'DELETE' });
+            if (!response.ok) throw new Error(`projects: ${response.status}`);
+            publish({
+              projects: snapshot.projects.filter(item => item.id !== project.id),
+              activeId: snapshot.activeId === project.id ? null : snapshot.activeId,
+              error: '',
+            });
+            return true;
+          } catch {
+            publish({ error: 'delete' });
+            return false;
+          }
+        },
         close() {
           ctx.layout.selectPanel(PANEL_ID);
         },
@@ -239,28 +392,144 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
         ));
         const list = createProjectList(ctx);
 
-        function ProjectCard({ project, t, onOpen }) {
+        function Cover({ project }) {
           const [failedImage, setFailedImage] = React.useState(null);
+          return h('span', { className: 'rumi-project-cover', 'aria-hidden': 'true' },
+            project.thumbnailVersion && failedImage !== project.thumbnailVersion
+              ? h('img', { src: `${ROUTE}/thumbnail?projectId=${encodeURIComponent(project.id)}&v=${encodeURIComponent(project.thumbnailVersion)}`,
+                alt: '', width: 480, height: 320, loading: 'lazy', decoding: 'async',
+                onError: () => setFailedImage(project.thumbnailVersion) })
+              : h('span', { className: 'rumi-project-initial' }));
+        }
+
+        function ProjectCard({ project, t, onOpen, onMenu }) {
           const updated = new Date(project.updatedAt);
           const when = Number.isNaN(updated.valueOf()) ? '' : updated.toLocaleDateString();
           return h('button', {
             className: 'rumi-project', type: 'button', onClick: () => onOpen(project),
+            onContextMenu: (event) => {
+              event.preventDefault();
+              onMenu(project, event.clientX, event.clientY, event.currentTarget);
+            },
             'aria-label': project.name,
           },
-            h('span', { className: 'rumi-project-cover', 'aria-hidden': 'true' },
-              project.thumbnailVersion && failedImage !== project.thumbnailVersion
-                ? h('img', { src: `${ROUTE}/thumbnail?projectId=${encodeURIComponent(project.id)}&v=${encodeURIComponent(project.thumbnailVersion)}`,
-                  alt: '', width: 480, height: 320, loading: 'lazy', decoding: 'async',
-                  onError: () => setFailedImage(project.thumbnailVersion) })
-                : h('span', { className: 'rumi-project-initial' })),
+            h(Cover, { project }),
             h('p', { className: 'rumi-project-name' }, project.name),
             when === '' ? null : h('p', { className: 'rumi-project-meta' }, t('updated', { when })),
           );
         }
 
+        /** Context menu at the pointer, kept inside the viewport. */
+        function ProjectMenu({ name, x, y, t, onOpen, onDelete, onClose }) {
+          const ref = React.useRef(null);
+          const [position, setPosition] = React.useState({ x, y });
+          useLens(ref, 4);
+          React.useLayoutEffect(() => {
+            const menu = ref.current;
+            const items = menu.querySelectorAll('[role="menuitem"]');
+            items[0]?.focus();
+            const margin = 8;
+            setPosition({
+              x: Math.max(margin, Math.min(x, window.innerWidth - menu.offsetWidth - margin)),
+              y: Math.max(margin, Math.min(y, window.innerHeight - menu.offsetHeight - margin)),
+            });
+          }, [x, y]);
+          React.useEffect(() => {
+            const outside = (event) => { if (!ref.current?.contains(event.target)) onClose(); };
+            const close = () => onClose();
+            window.addEventListener('pointerdown', outside, true);
+            window.addEventListener('scroll', close, true);
+            window.addEventListener('blur', close);
+            window.addEventListener('resize', close);
+            return () => {
+              window.removeEventListener('pointerdown', outside, true);
+              window.removeEventListener('scroll', close, true);
+              window.removeEventListener('blur', close);
+              window.removeEventListener('resize', close);
+            };
+          }, [onClose]);
+          const onKeyDown = (event) => {
+            const items = [...ref.current.querySelectorAll('[role="menuitem"]')];
+            const index = items.indexOf(document.activeElement);
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              onClose(true);
+            } else if (event.key === 'Tab') {
+              onClose();
+            } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault();
+              const step = event.key === 'ArrowDown' ? 1 : -1;
+              items[(index + step + items.length) % items.length].focus();
+            }
+          };
+          return h('div', {
+            ref, role: 'menu', 'aria-label': name, className: 'rumi-menu rumi-lq',
+            style: { left: position.x, top: position.y }, onKeyDown,
+          },
+            h('button', { type: 'button', role: 'menuitem', className: 'rumi-menu-item', onClick: onOpen },
+              h(IconFolderOpenOutlineRegular, { size: 16 }), t('open')),
+            h('div', { role: 'separator', className: 'rumi-menu-separator' }),
+            h('button', { type: 'button', role: 'menuitem', className: 'rumi-menu-item rumi-menu-item-danger', onClick: onDelete },
+              h(IconTrashOutlineRegular, { size: 16 }), t('delete')));
+        }
+
+        function DeleteAlert({ project, busy, t, onCancel, onConfirm }) {
+          const ref = React.useRef(null);
+          useLens(ref, 9);
+          const titleId = React.useId();
+          const messageId = React.useId();
+          React.useEffect(() => {
+            ref.current.querySelector('.rumi-alert-cancel').focus();
+          }, []);
+          const onKeyDown = (event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              if (!busy) onCancel();
+            } else if (event.key === 'Tab') {
+              event.preventDefault();
+              const buttons = [...ref.current.querySelectorAll('button:not(:disabled)')];
+              if (buttons.length === 0) return;
+              const index = buttons.indexOf(document.activeElement);
+              buttons[(index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length].focus();
+            }
+          };
+          return h('div', {
+            className: 'rumi-scrim',
+            onMouseDown: (event) => { if (event.target === event.currentTarget && !busy) onCancel(); },
+          },
+            h('div', {
+              ref, role: 'alertdialog', 'aria-modal': 'true', tabIndex: -1, className: 'rumi-alert rumi-lq',
+              'aria-labelledby': titleId, 'aria-describedby': messageId, onKeyDown,
+            },
+              h('div', { className: 'rumi-alert-cover' }, h(Cover, { project })),
+              h('p', { id: titleId, className: 'rumi-alert-title' }, t('deleteTitle', { name: project.name })),
+              h('p', { id: messageId, className: 'rumi-alert-message' }, t('deleteMessage')),
+              h('div', { className: 'rumi-alert-actions' },
+                h('button', { type: 'button', className: 'rumi-alert-button rumi-alert-cancel', disabled: busy, onClick: onCancel }, t('cancel')),
+                h('button', { type: 'button', className: 'rumi-alert-button rumi-alert-delete', disabled: busy, onClick: onConfirm }, t('delete')))));
+        }
+
         function Gallery({ t }) {
           const state = React.useSyncExternalStore(list.subscribe, list.getSnapshot);
+          const [menu, setMenu] = React.useState(null);
+          const [confirming, setConfirming] = React.useState(null);
           React.useEffect(() => { void list.load(); }, []);
+          const closeMenu = React.useCallback((restoreFocus) => {
+            setMenu(current => {
+              if (restoreFocus === true && current?.opener.isConnected) current.opener.focus();
+              return null;
+            });
+          }, []);
+          const cancel = () => {
+            const opener = confirming?.opener;
+            setConfirming(null);
+            if (opener?.isConnected) opener.focus();
+          };
+          const confirm = async () => {
+            setConfirming(current => ({ ...current, busy: true }));
+            await list.remove(confirming.project);
+            setConfirming(null);
+          };
           return h('section', { className: 'rumi-projects', 'aria-label': t('title') },
             h('div', { className: 'rumi-projects-head' },
               h('h1', { className: 'rumi-projects-title' }, t('title'))),
@@ -270,7 +539,20 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
                 h('p', { className: 'rumi-projects-empty-title' }, t('empty')),
                 h('p', { className: 'rumi-projects-empty-hint' }, t('emptyHint')))
               : h('div', { className: 'rumi-projects-grid' },
-                state.projects.map(project => h(ProjectCard, { key: project.id, project, t, onOpen: p => { void list.open(p) } }))),
+                state.projects.map(project => h(ProjectCard, {
+                  key: project.id, project, t,
+                  onOpen: p => { void list.open(p) },
+                  onMenu: (p, x, y, opener) => setMenu({ project: p, x, y, opener }),
+                }))),
+            menu === null ? null : h(ProjectMenu, {
+              key: `${menu.project.id}:${menu.x}:${menu.y}`, name: menu.project.name, x: menu.x, y: menu.y, t,
+              onClose: closeMenu,
+              onOpen: () => { setMenu(null); void list.open(menu.project); },
+              onDelete: () => { setMenu(null); setConfirming({ project: menu.project, opener: menu.opener, busy: false }); },
+            }),
+            confirming === null ? null : h(DeleteAlert, {
+              project: confirming.project, busy: confirming.busy, t, onCancel: cancel, onConfirm: confirm,
+            }),
           );
         }
 

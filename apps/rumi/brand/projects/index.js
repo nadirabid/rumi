@@ -7,10 +7,11 @@
  * can simply be the project root.
  *
  * This half owns the filesystem and nothing else: the browser creates the DSH
- * session (it has the session controller) and records the id here.
+ * session (it has the session controller) and records the id here. Deleting a
+ * project removes its directory; the browser decides when to ask for that.
  */
 import { readFileSync } from 'node:fs'
-import { mkdir, readFile, readdir, writeFile, stat, rename, unlink } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile, stat, rename, rm, unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -129,7 +130,7 @@ function normalizeName(name) {
 /**
  * The project directory store.
  * @param {string} root - Directory that holds one subdirectory per project.
- * @returns {object} Project listing, creation, session association, and persistent PNG cover operations.
+ * @returns {object} Project listing, creation, removal, session association, and persistent PNG cover operations.
  */
 export function createProjectStore(root) {
   const directoryOf = (id) => {
@@ -214,6 +215,11 @@ export function createProjectStore(root) {
       }
       return write({ ...project, path: directory })
     },
+    /** Delete a project directory; only a directory with readable metadata counts as a project. */
+    async remove(id) {
+      await readFile(join(directoryOf(id), 'project.json'))
+      await rm(directoryOf(id), { recursive: true })
+    },
     /** Read the saved cover; project metadata must exist before serving a file. */
     async thumbnail(id) {
       await read(id)
@@ -278,7 +284,17 @@ export function apply(ctx, config = {}) {
   }), `rumi projects: ${methods.join(',')} ${ROUTE}${path}`)
 
   // One handler per path: the connection router keys routes by path alone.
-  route('', ['GET', 'POST'], async (request) => {
+  route('', ['GET', 'POST', 'DELETE'], async (request) => {
+    if (request.method === 'DELETE') {
+      const projectId = new URL(request.url).searchParams.get('projectId') ?? ''
+      try {
+        await store.remove(projectId)
+      } catch (error) {
+        if (error.code === 'ENOENT' || !/^[A-Za-z0-9-]+$/u.test(projectId)) return json({ error: 'project_not_found' }, 404)
+        throw error
+      }
+      return new Response(null, { status: 204 })
+    }
     if (request.method !== 'POST') return json({ projects: await store.list() })
     const body = await request.json().catch(() => ({}))
     const type = types.get(typeof body.type === 'string' ? body.type : DEFAULT_TYPE) ?? types.defaultType()

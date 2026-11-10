@@ -27,8 +27,9 @@ export async function blenderStatus(configured, home) {
       await access(path, constants.X_OK)
       return { status: 'ready', executable: await realpath(path),
         helper: fileURLToPath(new URL('./rumi_blender.py', import.meta.url)).replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`),
+        joints: fileURLToPath(new URL('./rumi_joints.py', import.meta.url)).replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`),
         skill: 'blender-modeling',
-        execution: 'Use the shell tool: executable --background --factory-startup --python-exit-code 1 --python script.py. Blender runs locally without a window. Read blender-modeling before editing. helper["publish"] prints RUMI_CHECKS findings for each revision.',
+        execution: 'Use the shell tool: executable --background --factory-startup --python-exit-code 1 --python script.py. Blender runs locally without a window. Read blender-modeling before editing. helper["publish"] prints RUMI_CHECKS findings for each revision. joints is the millimetre modelling kit with ready-made joint recipes; read the joints skill before modelling moving parts.',
       }
     } catch (error) {
       if (!['ENOENT', 'ENOTDIR', 'EACCES'].includes(error.code)) throw error

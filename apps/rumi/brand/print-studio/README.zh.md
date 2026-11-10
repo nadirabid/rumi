@@ -84,6 +84,8 @@ Print Studio 验证返回消息，通过 Bambu 的票据端点交换票据，并
 
 建模技能在编辑前提供[实体构建默认规则](skills/blender-modeling/SKILL.md#solid-construction-defaults)：封闭实体、Exact 布尔运算、独立机械部件、受控细节处理和选择性重网格化。这些是智能体指令，不是强制执行的操作限制；几何验证仍会检查结果。
 
+`blender_status` 还会返回 `joints`，即 `blender/rumi_joints.py` 的路径：这是一个以毫米为单位的建模工具包，提供经过清理的 Exact 布尔运算，并从 `blender/joints/*.py` 加载连接件配方。每个配方为传入的两个零件添加配合特征并返回连接记录；工具包的 `publish` 把这些记录写成 USD 装配。[`joints` 技能](skills/joints/SKILL.md)列出每个配方及其样例在真实检查中得到的结果，其 `references/` 卡片给出调用方式和选项。配方是供智能体使用的起点，而不是经过验证的库：每个配方只在默认尺寸下单独检查过，依靠摩擦、磁力或五金件固定的连接保持未验证状态，若干被形状约束的连接读出的 `excessive_penetration` 略高于默认限值。在本包目录下运行 `Blender --background --factory-startup --python-exit-code 1 --python tests/blender-joints.py` 可执行工具包回归测试。
+
 ## 显式验证工具
 
 智能体遵循[建模技能](skills/blender-modeling/SKILL.md#validate-a-finished-revision)。`blender_status` 依据插件的验证设置写入项目的 `.rumi/print-checks.json`。此后每次 `publish` 都在独立的 Blender 进程中检查新版本，并打印 `RUMI_CHECKS <json>`：计数非零的 Toolbox 与间隙结果、装配声明错误以及尺寸。没有该文件时，发布会打印 `status: unavailable`，失败或超时的检查绝不会报告通过。保留两个工具：`validation_mechanics` 接受模型 `path`，为当前版本运行缺失的装配、几何和适配阶段，任一阶段有阻断性错误时返回该阶段的结果，否则运行 Bullet；`validation_accept` 接受 `validation_mechanics` 返回的 `path` 和 `fingerprint`。指纹涵盖模型标识、源文件字节、放置变换、打印体积和验证策略；源文件或放置变化会使先前阶段的结果失效，未变化的已完成结果会复用。结果出现在工具返回值和 `meshState.validation` 中，未解决的结果仍在查看器中可见。打开项目和结束轮次都不会启动检查或修复轮次。为兼容现有配置，仍接受 `validationRepairAttempts`，但它不产生作用。

@@ -62,12 +62,14 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   let shapeDeformer = null, shapeId = null, shapeOperation = null, shapeFrame = null, shapeValues = null, inputTime = 0
   let motion = null, motionPreview = null
   const poses = new Map()
-  function clearMotion() { motionPreview?.dispose(); motionPreview = null }
+  function clearMotion() { if (motionPreview) clearHighlight(); motionPreview?.dispose(); motionPreview = null }
   function showMotion() {
     if (!motion || !design || shapeDeformer) return
     if (Object.entries(motion.values).every(([key, value]) => design.parameters[key] === value)) { clearMotion(); return }
-    clearHighlight()
-    if (!motionPreview) motionPreview = design.createMotionPreview(designRoot)
+    if (!motionPreview) {
+      clearHighlight()
+      motionPreview = design.createMotionPreview(designRoot)
+    }
     motionPreview.update(motion.values)
   }
   const shapeMetrics = { frames: 0, maxInputToDrawMs: 0, lastDrawMs: 0 }
@@ -116,7 +118,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   scene.add(camera)
 
   const hover = createHover(renderer.domElement, camera,
-    () => shapeDeformer || motionPreview ? [] : [...objects.values()].map(entry => entry.mesh).concat(design ? [design.root] : []), render, onCursorMode)
+    () => shapeDeformer ? [] : [...objects.values()].map(entry => entry.mesh).concat(design ? [designRoot] : []), render, onCursorMode)
   const cameraChanged = () => { if (!hover.invalidate()) render() }
 
   function clearVolume() {
@@ -184,11 +186,11 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   }
 
   function syncHighlight() {
-    const highlight = designUrl === designSpec?.url ? designSpec?.highlight : null
+    const highlight = !motionPreview && designUrl === designSpec?.url ? designSpec?.highlight : null
     if (highlightOverlay && highlightId === (highlight?.id ?? null)) return
-    if (!design || motionPreview) { clearHighlight(); return }
+    if (!design) { clearHighlight(); return }
     if (highlightOverlay) highlightOverlay.update(highlight ?? { blobs: [] })
-    else highlightOverlay = createHighlight(design.root, highlight ?? { blobs: [] }, hover)
+    else highlightOverlay = createHighlight(motionPreview?.root ?? design.root, highlight ?? { blobs: [] }, hover)
     highlightOverlay.setVisible(highlightVisible)
     highlightId = highlight?.id ?? null
   }
@@ -241,7 +243,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       try { showMotion() } catch (error) { motion.values = previous; throw error }
       poses.delete(designSpec.path); poses.set(designSpec.path, { values: { ...next }, identity: design.poseIdentity ?? null })
       if (poses.size > 32) poses.delete(poses.keys().next().value)
-      hover.clear(); cursorAnchors.clear(); clearHighlight(); render()
+      hover.clear(); cursorAnchors.clear(); syncHighlight(); render()
       return true
     },
     async applyShape(spec) {

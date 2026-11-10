@@ -92,6 +92,7 @@ export function robotMotion(metadata, nodes, root, nodeIndices, labels) {
         return { ...mesh, node }
       })
       return {
+        root: preview,
         update(values) {
           const transforms = new Map([[assembly.root, new THREE.Matrix4()]])
           for (const connection of ordered) {

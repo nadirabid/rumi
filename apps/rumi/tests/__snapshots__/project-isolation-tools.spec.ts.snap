@@ -35,3 +35,12 @@ exports[`logs only the owning project instructions and rejects an external instr
   },
 ]
 `;
+
+exports[`records todo progress in the owning project session 1`] = `
+[
+  {
+    "text": "Updated todo list: 0 pending, 1 in progress, 0 completed.",
+    "type": "text",
+  },
+]
+`;

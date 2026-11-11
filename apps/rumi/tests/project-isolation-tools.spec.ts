@@ -58,6 +58,17 @@ it.skipIf(process.platform !== 'darwin')('blocks a cross-project read in a recor
   expect(results.map(result => ({ isError: result.isError, content: result.content }))).toMatchSnapshot()
   expect(await readFile(join(f.sibling, 'private.txt'), 'utf8')).toBe('other project')
 })
+it.skipIf(process.platform !== 'darwin')('records todo progress in the owning project session', async () => {
+  const f = await fixture()
+  const todo = await import('../../../packages/todo/tool-todo/src/index.ts')
+  await f.ctx.plugin(todo, { allowParallelInProgress: false })
+  const todos = [{ content: 'Inspect the project model', status: 'in_progress' }]
+  const result = await f.ctx.tools.execute({ callId: ToolCallId('todo'), name: 'todo_write', arguments: { todos }, agent: f.agent, signal: new AbortController().signal })
+  expect(result.isError).not.toBe(true)
+  expect(result.content).toMatchSnapshot()
+  expect(f.agent.session.snapshotEvents().filter(event => event.type === 'todo/write').map(event => event.data)).toEqual([{ todos }])
+})
+
 it.skipIf(process.platform !== 'darwin')('ignores full-access overrides and denies escalation and unaudited tools', async () => {
   const f = await fixture()
   const policy = f.ctx.sandboxPolicy.resolve({ session: f.agent.session, mode: 'danger-full-access' })

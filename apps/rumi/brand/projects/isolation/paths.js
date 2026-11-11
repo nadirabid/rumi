@@ -63,13 +63,13 @@ const quote = value => JSON.stringify(value)
 /** Build kernel-enforced read/write limits inherited by all child processes.
  * @param {string} root Canonical project directory.
  * @param {string[]} runtimeRoots Canonical read-only runtime directories.
- * @returns {string} Seatbelt profile; no network, Apple events or unrestricted retry.
+ * @returns {string} Seatbelt profile; no Apple events or unrestricted retry.
  */
 export function seatbeltProfile(root, runtimeRoots) {
   const ancestors = new Set(['/'])
   for (const path of [root, ...runtimeRoots]) for (let parent = dirname(path); parent !== '/'; parent = dirname(parent)) ancestors.add(parent)
   return ['(version 1)', '(allow default)', '(deny file-read*)', '(deny file-write*)',
-    '(deny network*)', '(deny appleevent-send)', '(deny file-link)',
+    '(deny appleevent-send)', '(deny file-link)',
     '(deny file-write* (vnode-type SYMLINK))', '(deny file-write-create (vnode-type SYMLINK))', '(deny file-write-unlink (vnode-type DIRECTORY))', '(allow file-read* (literal "/"))',
     `(allow file-read-metadata ${[...ancestors].map(path => `(literal ${quote(path)})`).join(' ')})`,
     `(allow file-read* ${[root, ...runtimeRoots].map(path => `(subpath ${quote(path)})`).join(' ')})`,

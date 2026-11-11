@@ -6,6 +6,7 @@ import { resolve, join } from 'node:path'
 import { canonical, checkedPath, projectRoot } from './paths.js'
 
 const TOOLS = new Set(['bash', 'read', 'write', 'edit', 'str_replace_editor', 'glob', 'grep', 'read_image', 'skill',
+  'web_search', 'web_fetch',
   'load_workspace_dependencies', 'job_output', 'job_list', 'job_kill', 'blender_status',
   'print_studio_status', 'print_studio_progress', 'print_studio_print_test',
   'viewer_cursor_snapshot', 'viewer_working_model', 'viewer_load', 'viewer_transform', 'viewer_highlight',

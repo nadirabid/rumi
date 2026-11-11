@@ -66,6 +66,8 @@ it.skipIf(process.platform !== 'darwin')('ignores full-access overrides and deni
   const execute = (name: string, args: object) => f.ctx.tools.execute({ callId: ToolCallId('test'), name, arguments: args, agent: f.agent, signal: new AbortController().signal })
   expect(await execute('read', { path: 'own.txt' })).toMatchObject({ isError: false, content: [{ type: 'text', text: 'own project' }] })
   expect(await execute('read', { path: 'own.txt', sandbox_permissions: 'require_escalated' })).toMatchObject({ isError: true })
+  f.ctx.effect(() => f.ctx.tools.register(defineTool({ name: 'web_search', description: 'Search the web.', parameters: {}, output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] }, presentCall: () => ({ card: 'generic', title: 'Search' }), execute: async () => 'searched the web' })))
+  expect(await execute('web_search', {})).toMatchObject({ isError: false, content: [{ type: 'text', text: 'searched the web' }] })
   f.ctx.effect(() => f.ctx.tools.register(defineTool({ name: 'unreviewed', description: 'Unaudited plugin.', parameters: {}, output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] }, presentCall: () => ({ card: 'generic', title: 'Unreviewed' }), execute: async () => 'must not run' })))
   expect(await execute('unreviewed', {})).toMatchObject({ isError: true, content: [{ type: 'text', text: 'Error: This capability is not enabled for isolated Rumi projects.' }] })
 })

@@ -36,7 +36,7 @@ function translate(key: string, params?: Record<string, unknown>) {
 }
 
 const COPY: Record<string, string> = {
-  title: 'Projects', new: 'New', back: 'All projects',
+  title: 'Projects', new: 'New', plugins: 'Plugins', back: 'All projects',
   openPreview: 'Open sidebar', closePreview: 'Close sidebar', fullPreview: 'Full view', regularPreview: 'Regular view',
   empty: 'No projects yet.', emptyHint: 'Make one, then ask Rumi to help build it.',
   updated: 'Updated {when}', failed: 'That did not work. Try again.', untitled: 'Untitled project',
@@ -56,7 +56,12 @@ const Icon = () => null
 
 /** Apply the plugin into a fake context and return its handles. */
 function fixture(host: { projects?: object[]; knownSessions?: Record<string, object>; activePanelId?: string | null; associationOk?: boolean; deleteOk?: boolean } = {}) {
-  type Injection = { hooks: { sidebar: HostObservable<string> }; toggleSidebar: () => void; toggleMode: () => void }
+  type Injection = {
+    hooks: { sidebar: HostObservable<string> }
+    toggleSidebar: () => void
+    toggleMode: () => void
+    openPlugins: () => void
+  }
   const injections = new Map<string, () => Injection>()
   const entries = new Map<string, React.ComponentType<Record<string, unknown>>>()
   const register = () => () => {}
@@ -272,7 +277,7 @@ it('keeps sidebar controls before New and reopens the collapsed sidebar', async 
   const view = fixture({ projects: [project()] })
   render(view.view('shell.leading'))
   expect([...document.querySelectorAll('.rumi-header-actions button')].map(button => button.getAttribute('aria-label')))
-    .toEqual(['Full view', 'Close sidebar', 'New'])
+    .toEqual(['Full view', 'Close sidebar', 'Plugins', 'New'])
   fireEvent.click(screen.getByRole('button', { name: 'Full view' }))
   await settle()
   expect(view.sidebar.toggleFullscreen).toHaveBeenCalledWith({ sessionId: 'session-1' })
@@ -285,6 +290,20 @@ it('keeps sidebar controls before New and reopens the collapsed sidebar', async 
   await settle()
   expect(screen.getByRole('button', { name: 'Close sidebar' }).getAttribute('aria-expanded')).toBe('true')
   expect(view.sidebar.toggleExpanded).toHaveBeenCalledTimes(2)
+})
+
+it.each(['projects', null])('opens Plugins from the glass toolbar on panel %s', (activePanelId) => {
+  const view = fixture({ activePanelId })
+  render(view.view('shell.leading'))
+  const plugins = screen.getByRole('button', { name: COPY.plugins })
+  const create = screen.getByRole('button', { name: COPY.new })
+  expect(plugins.classList.contains('rumi-glass')).toBe(true)
+  expect(create.classList.contains('rumi-glass')).toBe(true)
+  expect(plugins.nextElementSibling).toBe(create)
+  fireEvent.click(plugins)
+  expect(view.selectPanel).toHaveBeenCalledWith('plugins')
+  expect(view.connect).not.toHaveBeenCalled()
+  expect(view.posts).toEqual([])
 })
 
 it('omits sidebar controls on the project gallery', () => {

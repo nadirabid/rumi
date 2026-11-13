@@ -1,6 +1,7 @@
 /** Selection boundaries and picking must agree on the same displayed triangles. */
 import * as THREE from 'three'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
+import { createHighlight } from '../viewer/viewport/highlight.js'
 import { createSurfaceIndex } from '../viewer/viewport/surfaces.js'
 import { cursorCommand } from '../viewer/cursor-commands.js'
 import { normalizeHighlight } from '../viewer/highlight.js'
@@ -56,4 +57,52 @@ it('retains a captured selection for exact agent confirmation and rejects malfor
   const selection = { partPath: ['helmet', 'faceplate'], surfaceId: 5, mode: 'surface' }
   expect(normalizeHighlight({ label: 'faceplate', blobs: [], selection }).selection).toEqual(selection)
   expect(() => normalizeHighlight({ label: '', blobs: [], selection: { ...selection, surfaceId: -1 } })).toThrow()
+})
+
+it.each(['curved', 'flat'])('matches native picking across a subdivided %s mesh', (kind) => {
+  const geometry = kind === 'curved' ? new THREE.SphereGeometry(5, 64, 32) : new THREE.PlaneGeometry(10, 10, 32, 32)
+  const material = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide })
+  const mesh = new THREE.Mesh(geometry, material)
+  const surfaces = createSurfaceIndex(geometry)
+  try {
+    for (const side of [THREE.FrontSide, THREE.BackSide, THREE.DoubleSide]) {
+      material.side = side
+      for (let i = 0; i < 32; i++) {
+        const ray = new THREE.Raycaster(new THREE.Vector3(Math.sin(i * 1.37) * 7, Math.cos(i * .81) * 7, 12), new THREE.Vector3(0, 0, -1))
+        const expected = ray.intersectObject(mesh)[0]
+        const actual = surfaces.pick(ray.ray, material)
+        expect(Boolean(actual)).toBe(Boolean(expected))
+        if (expected) {
+          expect(actual.faceIndex).toBe(expected.faceIndex)
+          expect(actual.point.distanceTo(expected.point)).toBeLessThan(1e-9)
+        }
+      }
+    }
+  } finally { geometry.dispose(); material.dispose() }
+})
+
+it.each(['suspended', 'resumed'])('retains prepared highlight resources across suspension and releases from %s state', (state) => {
+  const geometry = new THREE.BoxGeometry(2, 2, 2), material = new THREE.MeshStandardMaterial()
+  const mesh = new THREE.Mesh(geometry, material)
+  const overlay = createHighlight(mesh, { blobs: [] })
+  const displayGeometry = mesh.geometry, displayMaterial = mesh.material
+  const spatial = displayGeometry.userData.rumiSurfaceIndex
+  const geometryDisposed = vi.spyOn(displayGeometry, 'dispose'), materialDisposed = vi.spyOn(displayMaterial, 'dispose')
+  try {
+    overlay.suspend(); overlay.suspend()
+    expect(mesh.geometry).toBe(geometry)
+    expect(mesh.material).toBe(material)
+    expect(geometryDisposed).not.toHaveBeenCalled()
+    expect(materialDisposed).not.toHaveBeenCalled()
+    overlay.resume(); overlay.resume()
+    expect(mesh.geometry).toBe(displayGeometry)
+    expect(mesh.material).toBe(displayMaterial)
+    expect(mesh.geometry.userData.rumiSurfaceIndex).toBe(spatial)
+    if (state === 'suspended') overlay.suspend()
+    overlay.dispose(); overlay.dispose(); overlay.resume()
+    expect(mesh.geometry).toBe(geometry)
+    expect(mesh.material).toBe(material)
+    expect(geometryDisposed).toHaveBeenCalledTimes(1)
+    expect(materialDisposed).toHaveBeenCalledTimes(1)
+  } finally { overlay.dispose(); geometry.dispose(); material.dispose() }
 })

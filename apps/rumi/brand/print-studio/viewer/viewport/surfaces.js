@@ -54,7 +54,12 @@ export function createSurfaceIndex(geometry) {
   for (let face = 0; face < count; face++) ids.fill(find(face) + 1, face * 3, face * 3 + 3)
   // Keep extrema inside child boxes despite floating-point subdivision roundoff.
   tree.bounds.expandByScalar(epsilon * 2)
-  tree.build()
+  // Bound subdivision by input size: a full tree has at most eight leaf cells
+  // per triangle. Thin or degenerate faces cannot force sixteen levels of copies.
+  // split's starting level consumes the public Octree subdivision budget.
+  const depth = Math.max(1, Math.ceil(Math.log2(count) / 3))
+  tree.calcBox()
+  tree.split(Math.max(0, tree.maxLevel - depth + 1))
   edges.clear(); vertices.clear(); normals.length = 0
   const candidates = [], point = new THREE.Vector3()
   return {

@@ -7,7 +7,7 @@ import { createSurfaceIndex, partPath } from './surfaces.js'
  * @param {THREE.Object3D} root - Displayed design hierarchy; original resources are retained for restoration.
  * @param {object} highlight - Validated model-local Gaussian regions.
  * @param {object | null} hover - Shared world-space sphere uniform; null disables cursor reveal.
- * @returns {object} Visibility control and disposer restoring the original resources.
+ * @returns {object} Visibility, suspend/resume controls retaining prepared display resources, and a disposer restoring originals.
  */
 export function createHighlight(root, highlight, hover = null) {
   const enabled = { value: 1 }
@@ -135,5 +135,18 @@ export function createHighlight(root, highlight, hover = null) {
     dispose()
     throw error
   }
-  return { update, setVisible(visible) { enabled.value = visible ? 1 : 0 }, dispose }
+  return {
+    update,
+    setVisible(visible) { enabled.value = visible ? 1 : 0 },
+    suspend() {
+      for (const entry of entries) { entry.node.geometry = entry.geometry; entry.node.material = entry.material }
+    },
+    resume() {
+      for (const entry of entries) {
+        entry.node.geometry = entry.copy
+        entry.node.material = Array.isArray(entry.material) ? entry.materials : entry.materials[0]
+      }
+    },
+    dispose,
+  }
 }

@@ -50,7 +50,7 @@ On upgrade, Rumi migrates its seeded profile policy to `workspace-write` while p
 
 ## Gallery appearance
 
-The gallery uses neutral board covers, a three-column grid that reduces to two or one column on narrow windows, and a circular New control. Covers show the last successfully previewed model as a fitted 480 × 320 PNG, saved as `.preview.png` in the project directory. The open 3D viewport captures after scene changes settle, reusing its loaded geometry and renderer. The gallery loads images lazily and never builds meshes or creates WebGL contexts. Projects without a saved preview show a neutral placeholder until their model is opened. Failed model builds retain the last successful cover; source changes made without opening the preview are not reflected. Colors follow the active DSH theme. The glass treatment is CSS, not native SwiftUI Liquid Glass.
+The gallery uses neutral board covers, a three-column grid that reduces to two or one column on narrow windows, and matching circular glass controls for Plugins and New. The puzzle-piece Plugins control sits immediately left of New and opens the stock Plugins page from the gallery or an open project. Covers show the last successfully previewed model as a fitted 480 × 320 PNG, saved as `.preview.png` in the project directory. The open 3D viewport captures after scene changes settle, reusing its loaded geometry and renderer. The gallery loads images lazily and never builds meshes or creates WebGL contexts. Projects without a saved preview show a neutral placeholder until their model is opened. Failed model builds retain the last successful cover; source changes made without opening the preview are not reflected. Colors follow the active DSH theme. The glass treatment is CSS, not native SwiftUI Liquid Glass.
 
 New projects and their initial sessions share the name `Untitled <number>`. The host reserves numbers exclusively on disk so concurrent creation and app restarts do not reuse them. Existing names are preserved.
 
@@ -60,6 +60,6 @@ The app header has a separate tinted surface and a single divider; the underlyin
 
 The right sidebar starts below the project header so its preview tabs and Close controls remain visible.
 
-The top bar keeps Full/Regular view and Open/Close sidebar controls immediately before New. Closing the sidebar preserves its tabs; Open restores them. The size control is disabled while closed. Sidebar Split controls are hidden.
+The top bar keeps Full/Regular view and Open/Close sidebar controls before Plugins and New. Closing the sidebar preserves its tabs; Open restores them. The size control is disabled while closed. Sidebar Split controls are hidden.
 
 Right-clicking a project opens a glass menu with Open and Delete. Delete asks first, in an alert that shows the project's cover and name and says it cannot be undone; Cancel is the default. Confirming removes the project directory from disk. Where the browser's canvas is unavailable, the glass falls back to a plain blur.

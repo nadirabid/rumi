@@ -2,10 +2,16 @@
 import * as THREE from 'three'
 import { createHighlight } from '../viewer/viewport/highlight.js'
 
-const mesh = new THREE.Mesh(new THREE.SphereGeometry(100, 450, 220), new THREE.MeshStandardMaterial())
+const fixture = process.argv.includes('--small') ? 'small' : process.argv.includes('--flat') ? 'flat' : 'large'
+const geometry = fixture === 'small' ? new THREE.SphereGeometry(100, 32, 16)
+  : fixture === 'flat' ? new THREE.PlaneGeometry(200, 200, 300, 300) : new THREE.SphereGeometry(100, 450, 220)
+const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial())
+const triangles = (geometry.index?.count ?? geometry.getAttribute('position').count) / 3
 mesh.updateMatrixWorld(true)
 const hover = process.argv.includes('--hover')
 const accelerated = process.argv.includes('--accelerated')
+global.gc?.()
+const before = process.memoryUsage()
 const prepareStart = performance.now()
 const overlay = hover || accelerated ? createHighlight(mesh, { blobs: [] }, { value: new THREE.Vector4() }) : null
 const prepareMs = performance.now() - prepareStart
@@ -21,7 +27,7 @@ for (let i = 0; i < 140; i++) {
 samples.sort((a, b) => a - b)
 global.gc?.()
 console.log(JSON.stringify({
-  hover, accelerated, prepareMs, triangles: 197100, samples: samples.length,
+  fixture, hover, accelerated, prepareMs, triangles, samplesMs: samples, before,
   medianMs: samples[60], p95Ms: samples[114],
   memory: process.memoryUsage(), peakRssKiB: process.resourceUsage().maxRSS,
 }))

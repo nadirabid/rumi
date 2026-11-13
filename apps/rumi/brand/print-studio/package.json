@@ -25,6 +25,7 @@
     "assets",
     "slicer.js",
     "connect.js",
+    "app-setup.js",
     "monitor.js",
     "lib/client.js",
     "lib/THREE-LICENSE.txt",

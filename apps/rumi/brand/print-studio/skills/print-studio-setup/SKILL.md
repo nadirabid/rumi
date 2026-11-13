@@ -18,10 +18,8 @@ work from its `nextSteps`; do not guess.
 
 ## If the slicer is missing
 
-1. Tell the adult to install Bambu Studio from
-   https://bambulab.com/en/download/studio
-2. Open it once so it writes the H2D profiles.
-3. Re-run `print_studio_status`; do not claim it is installed until the probe finds it.
+1. Tell the adult to press **Set up Bambu Studio** in **Plugins → Print Studio**.
+2. Re-run `print_studio_status`; do not claim it is installed until the probe finds it.
 
 Do not download or install applications yourself.
 
@@ -44,9 +42,9 @@ do not fall back to cloud printing.
 
 ## If the H2D profiles are missing
 
-Open Bambu Studio once with the H2D selected so it writes its machine/process/filament
-presets, then re-run `print_studio_status`. If Bambu Studio is too old for the H2D,
-ask the adult to update it.
+The H2D profiles ship inside Bambu Studio. If the probe finds none, the installed
+Bambu Studio is too old for the H2D: ask the adult to update it, then re-run
+`print_studio_status`.
 
 ## Before any print
 

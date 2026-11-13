@@ -8,14 +8,13 @@ import { connect } from 'node:net'
 import dgram from 'node:dgram'
 import { connect as tlsConnect } from 'node:tls'
 import { randomBytes } from 'node:crypto'
-
-/** Where Bambu Studio can be installed on this Mac. */
-export const DOWNLOAD_URL = 'https://bambulab.com/en/download/studio'
+import { managedAppRoot } from './connect.js'
 
 /** Printer profiles Print Studio knows how to configure. */
 export const MODELS = ['H2D', 'X1C', 'X1E', 'P1S', 'P1P', 'A1', 'A1 mini', 'H2S', 'X2D']
 
-const BAMBU_APPS = ['/Applications/BambuStudio.app', join(homedir(), 'Applications', 'BambuStudio.app')]
+/** Bambu Studio locations in priority order; the managed root is read lazily so `DSH_HOME` overrides apply. */
+const bambuApps = () => [join(managedAppRoot(), 'BambuStudio.app'), '/Applications/BambuStudio.app', join(homedir(), 'Applications', 'BambuStudio.app')]
 
 /** @param {unknown} value @returns {string | null} */
 export function text(value) {
@@ -90,13 +89,18 @@ function detectApp(candidate, binary, displayName, id) {
   }
 }
 
+/** Locate Bambu Studio without reading its profiles. @returns {string | null} */
+export function findBambuStudio() {
+  return bambuApps().find(path => existsSync(join(path, 'Contents', 'MacOS', 'BambuStudio'))) ?? null
+}
+
 /**
  * Detect the installed Bambu Studio.
  * @param {{ bambuApps?: readonly string[] }} [options]
  * @returns {object} Bambu Studio installation and profile report.
  */
 export function detectSlicer(options = {}) {
-  return detectApp(options.bambuApps ?? BAMBU_APPS, 'BambuStudio', 'Bambu Studio', 'bambu')
+  return detectApp(options.bambuApps ?? bambuApps(), 'BambuStudio', 'Bambu Studio', 'bambu')
 }
 
 /** Harness home used when the caller does not supply one. */
@@ -276,9 +280,9 @@ export function printStudioNextSteps(status) {
   const discovered = status.discovered ?? []
   const slicer = status.slicer
   if (!slicer.found) {
-    steps.push({ id: 'install-bambu', title: 'Install Bambu Studio', detail: `Download it from ${DOWNLOAD_URL}, open it once, and add the printer.` })
+    steps.push({ id: 'install-bambu', title: 'Install Bambu Studio', detail: 'Use Set up Bambu Studio in Plugins → Print Studio.' })
   } else if (status.printer.model === 'H2D' && !slicer.profiles.h2d) {
-    steps.push({ id: 'missing-profiles', title: 'Add the H2D in Bambu Studio', detail: 'Open Bambu Studio once with the H2D selected so it writes the H2D profiles, then check again.' })
+    steps.push({ id: 'missing-profiles', title: 'Update Bambu Studio', detail: 'The installed Bambu Studio has no H2D profiles. Update it, then check again.' })
   }
   if (status.printer.host === null && discovered.length === 0) {
     steps.push({ id: 'find-printer', title: 'Turn the printer on', detail: 'Print Studio looks for the printer on this network automatically. Check that it is on and joined to the same Wi-Fi, then scan again.' })

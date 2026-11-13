@@ -46,6 +46,19 @@ it('detects Bambu Studio and its H2D profiles', () => {
   expect(bambu.profiles.filaments).toBe(1)
 })
 
+it('detects a Bambu Studio installed in the Rumi-owned applications folder first', () => {
+  const root = temporaryRoot()
+  const previous = process.env.DSH_RUMI_HOME
+  process.env.DSH_RUMI_HOME = root
+  try {
+    const app = fakeBambu(join(root, 'print-studio', 'applications'))
+    expect(detectSlicer().path).toBe(app)
+  } finally {
+    if (previous === undefined) delete process.env.DSH_RUMI_HOME
+    else process.env.DSH_RUMI_HOME = previous
+  }
+})
+
 it('reports Bambu Studio missing when the application directory is absent', () => {
   const root = temporaryRoot()
   const bambu = detectSlicer({ bambuApps: [join(root, 'missing.app')] })

@@ -17,11 +17,12 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createDeveloperMessage } from '@deepseek-ai/dsh-llm'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import {
-  DOWNLOAD_URL, MODELS, detectSlicer, discoverPrinters, mqttAuthorized, printStudioNextSteps, reachable, readPrinterConfig, text, writePrinterConfig,
+  MODELS, detectSlicer, discoverPrinters, mqttAuthorized, printStudioNextSteps, reachable, readPrinterConfig, text, writePrinterConfig,
 } from './probe.js'
 import { loginMessageToken, accessCodeFor, devices as cloudDevices } from './cloud.js'
 import { sliceMesh } from './slicer.js'
 import { handoffToBambuConnect, hasBambuConnect } from './connect.js'
+import { connectSpec, createAppSetup, studioSpec } from './app-setup.js'
 import { readPrinterStatus } from './monitor.js'
 import { applyBlender } from './blender/host.js'
 import { applyViewer } from './viewer/host.js'
@@ -34,6 +35,8 @@ export const name = 'print-studio'
 
 /** Print Studio diagnostics, validation policy, and app-owned storage paths. */
 export const Config = z.object({
+  appDownloadTimeoutSeconds: z.number().step(1).min(30).max(3600).default(900),
+  appDownloadRetries: z.number().step(1).min(0).max(5).default(2),
   blenderExecutable: z.string().default(''),
   bulletExecutable: z.string().default(''),
   blenderHome: z.string().default(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi')),
@@ -187,7 +190,6 @@ export async function collectStatus(ctx, options = {}) {
     discovered,
     cloud: { signedIn: cloudToken !== null },
     skills: [SKILL_NAME],
-    downloadUrl: DOWNLOAD_URL,
     nextSteps: [],
   }
   status.nextSteps = printStudioNextSteps(status)
@@ -260,6 +262,17 @@ export function apply(ctx, config) {
       requestBody: 'buffered',
       fetch,
     }), `print-studio: ${ROUTE}${path}`)
+  }
+
+  const budget = { downloadTimeoutSeconds: config.appDownloadTimeoutSeconds, downloadRetries: config.appDownloadRetries }
+  for (const [id, spec] of [['connect', connectSpec], ['studio', studioSpec]]) {
+    const setup = createAppSetup(spec, budget)
+    ctx.effect(() => () => setup.dispose(), `print-studio: ${spec.label} setup`)
+    register(`/${id}/status`, ['GET'], async () => json(setup.status()))
+    register(`/${id}/install`, ['POST'], async () => {
+      setup.start()
+      return json(setup.status(), 202)
+    })
   }
 
   register('/status', ['GET'], async (request) => {

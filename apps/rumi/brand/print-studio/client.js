@@ -20,6 +20,19 @@ window.__ModuleLoader__.load({
     const NS = 'rumi.printStudio';
 
     const en = {
+      connect: 'Bambu Connect',
+      studio: 'Bambu Studio',
+      setupButton: 'Set up {app}',
+      setupReady: 'Installed',
+      setupDownloading: 'Downloading {app}…',
+      setupVerifying: 'Verifying {app}…',
+      setupInstalling: 'Installing {app}…',
+      setupFailed: '{app} setup failed. Check your connection and try again.',
+      setupUnsupported: '{app} setup requires a Mac with Apple Silicon or Intel.',
+      setupDestination: 'An incomplete {app} copy is blocking setup. Move it out of Rumi’s print-studio/applications folder, then retry.',
+      setupCleanup: 'Setup could not remove its temporary files. Restart Rumi and try again.',
+      connectHint: 'Rumi downloads Bambu Connect from Bambu Lab. An adult confirms Send before printing.',
+      studioHint: 'Rumi downloads Bambu Studio from Bambu Lab. It slices the models before printing.',
       hostedSignIn: 'Sign in with Bambu',
       printTest: 'Print 5-minute test tile',
       printTestHint: 'Slices a small tile, opens Bambu Connect, and waits for you to press Send.',
@@ -35,10 +48,8 @@ window.__ModuleLoader__.load({
       ready: 'Ready to make something',
       needsSetup: 'Setup needed',
       intro: 'Print Studio finds your printer. Sign in with your Bambu account to read its status. Sliced jobs open in Bambu Connect for you to send.',
-      slicer: 'Slicer',
       notInstalled: 'not installed',
-      download: 'Download Bambu Studio',
-      profilesMissing: 'Open Bambu Studio once with the H2D selected',
+      profilesMissing: 'The installed Bambu Studio has no H2D profiles. Update Bambu Studio.',
       printer: 'Printer',
       searching: 'Searching this network…',
       noPrinter: 'No printer found. Turn it on and make sure it is on the same Wi-Fi.',
@@ -59,6 +70,19 @@ window.__ModuleLoader__.load({
     };
 
     const zh = {
+      connect: 'Bambu Connect',
+      studio: 'Bambu Studio',
+      setupButton: '设置 {app}',
+      setupReady: '已安装',
+      setupDownloading: '正在下载 {app}…',
+      setupVerifying: '正在验证 {app}…',
+      setupInstalling: '正在安装 {app}…',
+      setupFailed: '{app} 设置失败，请检查网络连接后重试',
+      setupUnsupported: '{app} 设置需要 Apple 芯片或 Intel Mac',
+      setupDestination: '不完整的 {app} 阻止了设置，请将其移出 Rumi 的 print-studio/applications 文件夹后重试',
+      setupCleanup: '无法删除设置临时文件，请重启 Rumi 后重试',
+      connectHint: 'Rumi 从 Bambu Lab 下载 Bambu Connect，打印前由成人确认发送',
+      studioHint: 'Rumi 从 Bambu Lab 下载 Bambu Studio，用于在打印前切片模型',
       hostedSignIn: '登录 Bambu 账号',
       printTest: '打印 5 分钟测试片',
       printTestHint: '切一个小测试片，打开 Bambu Connect，等待你点击发送。',
@@ -74,10 +98,8 @@ window.__ModuleLoader__.load({
       ready: '可以开始创作了',
       needsSetup: '需要设置',
       intro: '打印工作室会自动寻找打印机。请登录 Bambu 账号以读取打印机状态。切片后会打开 Bambu Connect，由你发送打印任务。',
-      slicer: '切片软件',
       notInstalled: '未安装',
-      download: '下载 Bambu Studio',
-      profilesMissing: '请打开一次 Bambu Studio 并选择 H2D',
+      profilesMissing: '已安装的 Bambu Studio 没有 H2D 配置文件，请更新 Bambu Studio',
       printer: '打印机',
       searching: '正在搜索网络…',
       noPrinter: '没有找到打印机。请打开打印机并确认它与电脑在同一 Wi-Fi。',
@@ -107,12 +129,67 @@ window.__ModuleLoader__.load({
         h('span', { style: subtle }, children));
     }
 
+    /** Poll one plugin-owned installer and expose its start action. */
+    function useAppSetup(id, active) {
+      const [setup, setSetup] = React.useState(null);
+      const [requestFailed, setRequestFailed] = React.useState(false);
+      React.useEffect(() => {
+        if (!active) return;
+        let live = true;
+        let timer;
+        const poll = async () => {
+          try {
+            const response = await fetch(`/api/print-studio/${id}/status`, { credentials: 'same-origin', cache: 'no-store' });
+            if (!response.ok) throw new Error('Setup status unavailable');
+            const result = await response.json();
+            if (live) { setSetup(result); setRequestFailed(false); }
+          } catch (error) {
+            if (live) setRequestFailed(true);
+          } finally {
+            if (live) timer = setTimeout(poll, 2000);
+          }
+        };
+        void poll();
+        return () => { live = false; clearTimeout(timer); };
+      }, [id, active]);
+      const start = async () => {
+        setRequestFailed(false);
+        setSetup({ installed: false, phase: 'downloading', error: null });
+        try {
+          const response = await fetch(`/api/print-studio/${id}/install`, { method: 'POST', credentials: 'same-origin' });
+          if (!response.ok) throw new Error('Setup unavailable');
+          setSetup(await response.json());
+        } catch (error) { setRequestFailed(true); setSetup(null); }
+      };
+      return { setup, requestFailed, start };
+    }
+
+    /** Install state, button, progress, and failure for one app; `app` is the product-name locale key. */
+    function AppSetup({ app, label, installedText, hint, installer, t }) {
+      const { setup, requestFailed, start } = installer;
+      const name = t(app);
+      const busy = ['downloading', 'verifying', 'installing'].includes(setup?.phase);
+      return h('div', { style: { display: 'grid', gap: 8 } },
+        h(StatusLine, { label }, setup?.installed ? installedText : t('notInstalled')),
+        setup?.installed ? null : h(Button, { variant: 'outline', disabled: busy,
+          onClick: () => { void start(); } }, t('setupButton', { app: name })),
+        h('p', { style: subtle, role: 'status' }, busy
+          ? t({ downloading: 'setupDownloading', verifying: 'setupVerifying', installing: 'setupInstalling' }[setup.phase], { app: name })
+          : t(hint)),
+        requestFailed || setup?.phase === 'failed'
+          ? h('p', { role: 'alert', style: subtle }, t(setup?.error === 'unsupported' ? 'setupUnsupported'
+            : setup?.error === 'cleanupFailed' ? 'setupCleanup' : setup?.error === 'destinationExists' ? 'setupDestination' : 'setupFailed', { app: name })) : null);
+    }
+
     /**
      * The setup card. The summary view is the card one-liner; the page view is
      * the discovered printer, the setup steps, and the Bambu account form.
      */
     function PrintStudio({ view, t }) {
       const [status, setStatus] = React.useState(null);
+      const connect = useAppSetup('connect', view !== 'summary');
+      const studio = useAppSetup('studio', view !== 'summary');
+
       const [error, setError] = React.useState('');
       const [note, setNote] = React.useState('');
       const [ssoWaiting, setSsoWaiting] = React.useState(false);
@@ -131,6 +208,10 @@ window.__ModuleLoader__.load({
         }
       }, []);
       React.useEffect(() => { void load(); }, [load]);
+      // A just-installed Bambu Studio appears in the host's slicer detection only on a fresh read.
+      React.useEffect(() => {
+        if (studio.setup?.phase === 'ready' && status?.slicer?.found === false) void load();
+      }, [studio.setup?.phase, status?.slicer?.found, load]);
 
       const startSso = async () => {
         setError('');
@@ -232,17 +313,11 @@ window.__ModuleLoader__.load({
       const discovered = status?.discovered ?? [];
       const signedIn = status?.cloud?.signedIn === true;
       const slicer = status === null ? null : status.slicer;
+      const studioInstalled = studio.setup?.installed === true;
 
       const statusPanel = status === null ? null : h('div', { style: { display: 'grid', gap: 6 } },
         printer.mode === 'cloud' ? h(Tag, { tone: 'warning' }, t('cloudMode')) : null,
         printer.mode === 'cloud' ? h('p', { style: subtle }, t('cloudDetail')) : null,
-        h(StatusLine, { label: t('slicer') },
-          slicer.found
-            ? `${slicer.name}${slicer.version === null ? '' : ` ${slicer.version}`}`
-            : h(React.Fragment, null,
-              t('notInstalled'),
-              ' · ',
-              h('a', { href: status.downloadUrl, target: '_blank', rel: 'noreferrer', style: { color: 'var(--dsw-alias-link)' } }, t('download')))),
         printer.model === 'H2D' && !slicer.profiles.h2d
           ? h(StatusLine, { label: t('profilesMissing') }, '')
           : null,
@@ -277,7 +352,12 @@ window.__ModuleLoader__.load({
             ssoWaiting ? h('p', { style: subtle }, t('ssoWaitingDetail')) : null);
 
 
-      const printSection = status?.ready
+      const studioSection = h(AppSetup, { app: 'studio', label: t('studio'), hint: 'studioHint', t, installer: studio,
+        installedText: slicer?.found ? `${slicer.name}${slicer.version === null ? '' : ` ${slicer.version}`}` : t('setupReady') });
+      const connectSection = h(AppSetup, { app: 'connect', label: t('connect'), hint: 'connectHint', t, installer: connect,
+        installedText: t('setupReady') });
+
+      const printSection = status?.ready && connect.setup?.installed && studioInstalled
         ? h('div', { style: { display: 'grid', gap: 8 } },
           h(Button, { variant: 'outline', disabled: printBusy, onClick: () => { void startTestPrint(); } },
             printBusy ? t('slicing') : t('printTest')),
@@ -305,7 +385,7 @@ window.__ModuleLoader__.load({
         h('p', { style: subtle }, t('intro')),
         status === null
           ? h('p', { style: subtle }, t('checking'))
-          : h('div', { style: { display: 'grid', gap: 12 } }, statusPanel, account, printSection, feedback),
+          : h('div', { style: { display: 'grid', gap: 12 } }, statusPanel, studioSection, connectSection, account, printSection, feedback),
       );
     }
 

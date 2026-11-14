@@ -28,7 +28,7 @@ exports[`delivers usd load measurements and movement to the next model request i
     "joint0": 0,
   },
   "printPreparation": {
-    "controls": "Back to model 1 Arrange 2 Check 3 Open Adjust: Door Drag parts to place them Plate 1 Auto arrange Undo More Review checks",
+    "controls": "Back to model 1 Arrange 2 Check 3 Open Adjust: Door Drag parts to place them Plate 1 Auto arrange Undo Review checks",
     "issues": [],
     "layout": {
       "gap": 5,

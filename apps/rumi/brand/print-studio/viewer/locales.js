@@ -1,5 +1,7 @@
 /** Copy shared by the mesh preview tab and the STL document preview. */
 export const en = {
+  layoutSaveFailed: 'Changes have not been saved. Keep this project open and retry.',
+  layoutRetrySave: 'Retry saving',
   layoutWorkflow: "Print preparation",
   layoutBackToModel: "Back to model",
   layoutStep_arrange: "Arrange",
@@ -51,7 +53,7 @@ export const en = {
   layoutOpen: 'Open plate in Bambu Studio',
   layoutOutside: 'A part is outside the plate or too tall. Turn it or ask Rumi to adjust its size.',
   layoutOverlap: 'Parts are too close. Move them apart or choose Auto arrange.',
-  layoutChanged: 'The model or plate changed. Review the new layout and save it.',
+  layoutChanged: 'The model or plate changed. Review the new layout.',
   layoutFailed: 'The layout could not be loaded, saved or opened. Finish any model edits and try again. Ask Rumi to check the model’s part definitions if it still fails.',
   layoutSaved: 'Layout saved.',
   layoutOpened: 'Plate sent to Bambu Studio. Review supports and slicing there before printing.',
@@ -89,6 +91,8 @@ export const en = {
 }
 
 export const zh = {
+  layoutSaveFailed: '更改尚未保存。请保持项目打开并重试',
+  layoutRetrySave: '重试保存',
   layoutWorkflow: "打印准备",
   layoutBackToModel: "返回模型",
   layoutStep_arrange: "排列",
@@ -140,7 +144,7 @@ export const zh = {
   layoutOpen: '在 Bambu Studio 中打开此板',
   layoutOutside: '部件超出打印板或过高。请旋转部件，或让 Rumi 调整大小。',
   layoutOverlap: '部件距离过近。请移开部件或选择重新排列。',
-  layoutChanged: '模型或打印板已更改。请检查新布局并保存。',
+  layoutChanged: '模型或打印板已更改。请检查新布局。',
   layoutFailed: '无法加载、保存或打开布局。完成模型编辑后重试。如仍失败，请让 Rumi 检查部件定义。',
   layoutSaved: '布局已保存。',
   layoutOpened: '已打开打印板以便切片。打印前请在 Bambu Studio 中检查。',

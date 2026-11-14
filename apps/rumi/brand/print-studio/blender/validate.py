@@ -78,17 +78,22 @@ def validate(request):
     path = request['input']
     robot = None
     robot_error = None
+    policy_checks = []
     if path.endswith(('.usda', '.usd')):
         from pxr import Usd
-        from robot_usd import read_robot
+        from robot_usd import read_robot, require_separate_moving_parts
         try:
             robot = read_robot(Usd.Stage.Open(path))
             request['assembly'] = copy.deepcopy(robot['assembly'])
+            try:
+                require_separate_moving_parts(robot['assembly'])
+            except ValueError as error:
+                policy_checks.append(dict(code='separate_printing_required', severity='error', count=1, message=str(error)))
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             robot_error = str(error)
             request.pop('mechanicsOutput', None)
         if stage == 'assembly':
-            return dict(version=1, status='needs_repair' if robot_error else 'passed', checks=[],
+            return dict(version=1, status='needs_repair' if robot_error or policy_checks else 'passed', checks=policy_checks,
                         dimensions=dict(x=0, y=0, z=0), printReady=False, robot=robot, robotError=robot_error)
         bpy.ops.wm.usd_import(filepath=path)
         factor = 1000
@@ -222,6 +227,7 @@ def validate(request):
         checks = [dict(code=code, count=len(item[1][1]), severity='warning' if code in
                        ['thin_faces', 'sharp_edges', 'overhangs', 'distorted_faces'] else 'error')
                   for code, item in zip(codes, findings)]
+    checks.extend(policy_checks)
     if clearance is not None:
         threshold, close = clearance
         # Either manufacturing mode needs the gap: print-in-place parts fuse, separate parts do not fit.

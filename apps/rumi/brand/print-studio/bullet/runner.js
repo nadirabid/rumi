@@ -1,3 +1,4 @@
+import { manufacturingChecks } from '../viewer/manufacturing.js'
 /** Run bounded mechanical probes with the packaged native Bullet executable. */
 import { access, realpath } from 'node:fs/promises'
 import { constants } from 'node:fs'
@@ -22,7 +23,8 @@ export async function bulletExecutable(configured) {
 
 /**
  * Validate assembly coverage before publishing native findings. A passing report
- * must cover every requested part, connection, sequence and removal step.
+ * must cover every requested part, connection, sequence and removal step. Moving
+ * assemblies without removal paths retain probe findings but cannot pass acceptance.
  * @param {object} report Parsed native stdout.
  * @param {object} expected Requested assembly description.
  * @returns {object} Consistent, bounded report; malformed or incomplete results throw.
@@ -70,6 +72,12 @@ export function validateBulletReport(report, expected) {
     || !sameNames(report.coverage.assemblySteps, (expected.manufacturing?.steps ?? []).map(step => step.part)))) {
     throw new Error('Incomplete Bullet assembly coverage')
   }
+  if (expected.connections.some(connection => connection.kind !== 'fixed') && !expected.manufacturing.steps?.length) {
+    return { ...report, status: report.status === 'needs_repair' ? 'needs_repair' : 'review', assemblyVerified: false,
+      checks: [...report.checks, { code: 'assembly_path_required', severity: 'warning', count: 1,
+        message: 'Declare removal paths for every nonroot part to verify assembly after separate printing. Snapping, flexing and threaded insertion remain unverified.' }],
+      coverage: { ...report.coverage, complete: false } }
+  }
   return report
 }
 
@@ -83,6 +91,9 @@ export function validateBulletReport(report, expected) {
  */
 export async function runBullet(config, geometry, signal) {
   signal.throwIfAborted()
+  const checks = manufacturingChecks(geometry.assembly)
+  if (checks.length) return { version: 2, engine: 'bullet', printReady: false, status: 'needs_repair', assemblyVerified: false,
+    checks, connections: [], coverage: { parts: geometry.assembly.parts.map(part => part.id), connections: [], sequences: [], assemblySteps: [], complete: false } }
   const executable = await bulletExecutable(config.bulletExecutable)
   const input = JSON.stringify({ ...geometry, version: 2, settings: config.mechanics })
   if (Buffer.byteLength(input) > 64 * 1024 * 1024) throw new Error('Mechanical geometry exceeds 64 MiB')

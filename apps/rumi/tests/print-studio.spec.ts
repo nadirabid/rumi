@@ -28,3 +28,4 @@ import '../brand/print-studio/tests/context-retention.spec.ts'
 import '../brand/print-studio/tests/viewer-load-receipts.spec.ts'
 
 import '../brand/print-studio/tests/validation.spec.ts'
+import '../brand/print-studio/tests/print-layout.spec.ts'

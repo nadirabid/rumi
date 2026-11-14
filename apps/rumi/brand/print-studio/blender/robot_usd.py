@@ -201,3 +201,9 @@ def migrate_assembly(stage, assembly):
                  for item in assembly.get('sequences', [])]
     if sequences:
         root.CreateAttribute('rumi:sequences', Sdf.ValueTypeNames.String, custom=False).Set(json.dumps(sequences))
+
+
+def require_separate_moving_parts(assembly):
+    """Reject printed-assembled motion without changing legacy model declarations."""
+    if any(joint['kind'] != 'fixed' for joint in assembly['connections']) and assembly['manufacturing']['mode'] != 'separate':
+        raise ValueError('Moving parts must be printed separately and assembled afterward. Redesign captive connectors and publish with mode="separate"; changing the label alone does not make assembly possible.')

@@ -1,7 +1,7 @@
 /** Exercise shipped tool registration, project guards, snapshot storage and real engines together. */
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { cp, mkdir, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ToolCallId, LlmAdapter, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -43,7 +43,7 @@ export function applyValidationSmoke(ctx, config) {
         const root = join(ctx.rumiProjectScope.workspaceRoot, id)
         await mkdir(join(root, 'models'), { recursive: true })
         await writeFile(join(root, 'project.json'), JSON.stringify({ id, name: 'Validation smoke', type: 'print', sessionIds: [sessionId] }))
-        for (const model of ['solid', 'wheel']) await cp(join(config.fixtures, model), join(root, 'models', model), { recursive: true })
+        for (const model of ['solid', 'slider']) await cp(join(config.fixtures, model), join(root, 'models', model), { recursive: true })
         if (config.extraModel) {
           await mkdir(join(root, 'models/diagnostic'))
           await cp(config.extraModel, join(root, 'models/diagnostic/model.usda'))
@@ -60,7 +60,7 @@ export function applyValidationSmoke(ctx, config) {
           assert(text, 'Validation must return a text report')
           return JSON.parse(text.text)
         }
-        const paths = ['solid', 'wheel', ...(config.extraModel ? ['diagnostic'] : [])].map(name => `models/${name}/model.usda`)
+        const paths = ['solid', 'slider', ...(config.extraModel ? ['diagnostic'] : [])].map(name => `models/${name}/model.usda`)
         const outcomes = [], receipts = new Map()
         for (const path of paths) {
           const reports = []
@@ -99,6 +99,22 @@ export function applyValidationSmoke(ctx, config) {
         assert.equal(events.filter(event => event.type === 'turn/end').length, 1)
         assert.equal(events.some(event => event.type === 'user/message' && event.data.source.kind === 'print-validation'), false)
         console.log('validation smoke: four tool calls completed within one recorded turn')
+        const sliderSource = await readFile(join(root, 'models/slider/model.usda'), 'utf8')
+        const withoutRoute = sliderSource.replace(/^\s*string rumi:disassembly = .*$/m, '')
+        for (const [name, source, code, status] of [
+          ['legacy', withoutRoute.replace('rumi:manufacturingMode = "separate"', 'rumi:manufacturingMode = "print-in-place"'),
+            'separate_printing_required', 'blocked'],
+          ['missing-route', withoutRoute, 'assembly_path_required', 'review'],
+        ]) {
+          const path = `models/${name}/model.usda`
+          await mkdir(join(root, 'models', name))
+          await writeFile(join(root, path), source)
+          const result = await invoke('mechanics', { path })
+          assert.equal(result.status, status, JSON.stringify(result))
+          assert(result.report.checks.some(check => check.code === code), JSON.stringify(result))
+          assert.notEqual((await invoke('accept', { path, fingerprint: result.fingerprint })).status, 'accepted')
+          console.log('validation smoke:', name, code, 'acceptance blocked')
+        }
         const denied = await ctx.tools.execute({ name: 'validation_mechanics', arguments: { path: '../outside/model.usda' },
           agent: handle.agent, callId: ToolCallId('validation-smoke-denied'), signal: AbortSignal.timeout(10000) })
         assert.equal(denied.isError, true)

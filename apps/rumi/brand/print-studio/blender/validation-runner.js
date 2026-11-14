@@ -79,7 +79,7 @@ export async function runValidationStage(config, input, signal, stage) {
     if (stage !== 'all') {
       if (stage === 'assembly') {
         report.checks.push(...metadata.checks)
-        report.status = metadata.checks.length ? 'needs_repair' : 'passed'
+        report.status = report.checks.some(check => check.count && check.severity === 'error') ? 'needs_repair' : 'passed'
       }
       if (stage === 'fit') report.printerVolumeChecked = input.volume !== null
       if (stage === 'fit' && !report.checks.some(check => check.severity === 'error' && check.count) && metadata.assembly) {

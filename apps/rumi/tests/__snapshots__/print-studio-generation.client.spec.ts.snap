@@ -27,5 +27,51 @@ exports[`delivers usd load measurements and movement to the next model request i
   "parameters": {
     "joint0": 0,
   },
+  "printPreparation": {
+    "issues": [],
+    "layout": {
+      "gap": 5,
+      "identity": "recorded-model",
+      "parts": [
+        {
+          "id": "Body",
+          "plate": 0,
+          "position": [
+            -135.00000022351742,
+            -145.00000022351742,
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+          ],
+        },
+        {
+          "id": "Door",
+          "plate": 0,
+          "position": [
+            -110.00000067055225,
+            -145.00000022351742,
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+          ],
+        },
+      ],
+      "version": 1,
+      "volume": {
+        "x": 300,
+        "y": 320,
+        "z": 320,
+      },
+    },
+    "manufacturingMode": "separate",
+    "parts": [
+      "Door",
+      "Body",
+    ],
+  },
 }
 `;

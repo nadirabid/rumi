@@ -1,3 +1,5 @@
+Rumi requires moving parts to print separately. Recipes labeled print-in-place below are legacy geometry references; do not use their captive versions for new movable prints. A separately assembleable variant still requires validation, and deformation or assembly routes outside the checker remain unverified.
+
 # Mechanisms
 
 Recipes from `joints/mechanisms.py`. Lengths are millimetres. `axis` points away from the base face the recipe grows from; the base must be flat there. Every moving part sits on an integral post or inside an integral guide, so nothing is loose hardware. Use axis-aligned directions such as `'+X'`; a diagonal direction left a degenerate face in one test.

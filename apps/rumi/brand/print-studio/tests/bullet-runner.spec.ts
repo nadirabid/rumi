@@ -8,9 +8,9 @@ import { runBullet, validateBulletReport } from '../bullet/runner.js'
 const cleanup: string[] = []
 afterEach(async () => { for (const path of cleanup.splice(0)) await rm(path, { recursive: true, force: true }) })
 const connection = { id: 'door', parent: 'frame', child: 'panel', kind: 'revolute' }
-const assembly = { parts: [{ id: 'frame' }, { id: 'panel' }], connections: [connection], sequences: [] }
+const assembly = { parts: [{ id: 'frame' }, { id: 'panel' }], connections: [connection], sequences: [], manufacturing: { mode: 'separate', steps: [{ part: 'panel', path: [[0, 0, 0], [0, 20, 0]] }] } }
 const report = { version: 2, engine: 'bullet', printReady: false, assemblyVerified: true, status: 'passed', checks: [],
-  coverage: { parts: ['frame', 'panel'], connections: ['door'], sequences: [], assemblySteps: [], complete: true },
+  coverage: { parts: ['frame', 'panel'], connections: ['door'], sequences: [], assemblySteps: ['panel'], complete: true },
   connections: [{ ...connection, probes: [{ status: 'passed' }] }] }
 async function helper(source: string, timeout = 5000) {
   const directory = await mkdtemp(join(tmpdir(), 'rumi-bullet-runner-'))
@@ -87,4 +87,20 @@ it('accepts bounded reports larger than one MiB', async () => {
   expect(Buffer.byteLength(serialized)).toBeGreaterThan(1024 * 1024)
   const fixture = await helper(`process.stdin.resume(); process.stdin.on('end', () => process.stdout.write(${JSON.stringify(serialized)}));`)
   expect(await runBullet(fixture.config, { assembly: expected }, new AbortController().signal)).toEqual(large)
+})
+
+it('rejects legacy printed-assembled movement before starting the native checker', async () => {
+  const result = await runBullet({ bulletExecutable: '/missing-checker' },
+    { assembly: { ...assembly, manufacturing: { mode: 'print-in-place' } } }, new AbortController().signal)
+  expect(result).toMatchObject({ status: 'needs_repair', assemblyVerified: false,
+    checks: [{ code: 'separate_printing_required' }], coverage: { complete: false } })
+})
+
+it('retains motion probes but withholds acceptance without separate assembly paths', async () => {
+  const withoutPaths = { ...assembly, manufacturing: { mode: 'separate' } }
+  const probes = { ...report, coverage: { ...report.coverage, assemblySteps: [] } }
+  const fixture = await helper(`process.stdin.resume(); process.stdin.on('end', () => process.stdout.write(${JSON.stringify(JSON.stringify(probes))}));`)
+  const result = await runBullet(fixture.config, { assembly: withoutPaths }, new AbortController().signal)
+  expect(result).toMatchObject({ status: 'review', assemblyVerified: false,
+    checks: [{ code: 'assembly_path_required' }], connections: report.connections, coverage: { complete: false } })
 })

@@ -2,7 +2,7 @@
 import { expect, it } from 'vitest'
 import * as THREE from 'three'
 import { robotUsd } from './fixtures/robot-usd.js'
-import { validateUsd } from '../viewer/usd.js'
+import { validateUsd, usdRequiresSeparatePrint } from '../viewer/usd.js'
 import { parseUsdModel } from '../viewer/viewport/usd.js'
 import { disposeModel } from '../viewer/viewport/model.js'
 import { analyzeMesh } from '../viewer/checks.js'
@@ -85,4 +85,17 @@ it('rejects fixed joint frames with inconsistent rest rotations', async () => {
   try {
     expect(model.motionIssue).toContain('Fixed joint body frame rotations must agree')
   } finally { disposeModel(model.root) }
+})
+
+it('keeps legacy moving models inspectable while identifying their separate-printing requirement', async () => {
+  const text = validateUsd(robotUsd()).replace('rumi:manufacturingMode = "separate"', 'rumi:manufacturingMode = "print-in-place"')
+  const bytes = new TextEncoder().encode(text)
+  expect(usdRequiresSeparatePrint(bytes)).toBe(true)
+  expect(usdRequiresSeparatePrint(robotUsd())).toBe(false)
+  const model = await parseUsdModel(bytes.buffer)
+  try {
+    expect(model.robot.assembly.manufacturing.mode).toBe('print-in-place')
+    expect(model.motionDefinitions[0].axes[0]).toMatchObject({ min: 0, max: 90 })
+  } finally { disposeModel(model.root) }
+  expect(usdRequiresSeparatePrint(new TextEncoder().encode(text.replace('PhysicsRevoluteJoint', 'PhysicsFixedJoint')))).toBe(false)
 })

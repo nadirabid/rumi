@@ -4,17 +4,18 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import { Menu, IconChevronDownOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { printLayoutIdentity } from '../viewer/print-layout/state.js'
 import { installViewer } from '../viewer/client.js'
 import { en, zh } from '../viewer/locales.js'
 import { encodeStl } from '../viewer/stl.js'
 
 vi.mock('../viewer/viewer.module.css', () => ({ default: '' }))
-const viewport = vi.hoisted(() => ({ motionControls: vi.fn(), updateMotion: vi.fn(), modelParameters: vi.fn(() => ({ width: 12 })), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
+const viewport = vi.hoisted(() => ({ closePrintLayout: vi.fn(), motionControls: vi.fn(), updateMotion: vi.fn(), modelParameters: vi.fn(() => ({ width: 12 })), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
 vi.mock('../viewer/viewport/index.js', () => ({
   createViewport: (...args: unknown[]) => {
     viewport.create(...args)
     return {
-      motionControls: viewport.motionControls, updateMotion: viewport.updateMotion,
+      closePrintLayout: viewport.closePrintLayout, motionControls: viewport.motionControls, updateMotion: viewport.updateMotion,
       modelParameters: viewport.modelParameters, renderedHighlight: viewport.renderedHighlight,
       captureCursor: viewport.captureCursor, setHighlightVisible: viewport.setHighlightVisible,
       thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose,
@@ -36,6 +37,7 @@ beforeEach(() => {
   viewport.applyDesign.mockReset().mockResolvedValue(null)
   viewport.captureCursor.mockReset().mockReturnValue({ status: 'no_hit' })
   viewport.renderedHighlight.mockReset().mockReturnValue(null)
+  viewport.closePrintLayout.mockReset()
   viewport.create.mockClear()
   viewport.apply.mockClear()
   viewport.dispose.mockClear()
@@ -75,7 +77,7 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
   const register = () => () => {}
   const opened = vi.fn()
   const state = { scene: host.scene ?? null, modelOk: host.modelOk ?? true, cursorRequest: null as { id: string } | null }
-  const fetch = vi.fn(async (url: string | URL) => {
+  const fetch = vi.fn(async (url: string | URL, _init?: RequestInit) => {
     if (String(url).includes('/state')) return { ok: true, json: async () => ({ scene: state.scene, cursorRequest: state.cursorRequest }) }
     if (!state.modelOk) return { ok: false }
     return { ok: true, arrayBuffer: async () => encodeStl(positions()) }
@@ -435,4 +437,44 @@ it.each([
   view.setScene({ ...base, design: { ...base.design, contentHash: 'new' } })
   await settle(2000)
   expect(screen.getByText(en[status === 'unavailable' ? 'validationUnavailable' : 'validationChanged'])).toBeTruthy()
+})
+
+
+it('autosaves committed placement, deduplicates selection, and exposes retry after failure', async () => {
+  const design = { path: 'models/kart/model.usda', url: '/kart/model.usda', contentHash: 'current', revision: 1 }
+  const volume = { x: 300, y: 320, z: 320 }
+  const view = fixture({ scene: { ...scene([]), volume, design } })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  const publish = viewport.create.mock.calls.at(-1)?.[4]
+  const layout = { identity: printLayoutIdentity(design, volume), parts: [{ id: 'body', plate: 0, position: [0, 0] }], volume, gap: 5 }
+  const state = { active: true, selected: 'body', plate: 0, parts: [{ id: 'body', name: 'Body' }], issues: [], layout }
+  act(() => publish(state))
+  await settle()
+  const saves = () => view.fetch.mock.calls.filter(([url, init]) => String(url).includes('/layout?') && init?.method === 'POST')
+  expect(saves()).toHaveLength(1)
+  act(() => publish({ ...state, selected: null }))
+  await settle()
+  expect(saves()).toHaveLength(1)
+  const pending = Promise.withResolvers<never>()
+  view.fetch.mockImplementationOnce(() => pending.promise)
+  try {
+    act(() => publish({ ...state, layout: { ...layout, gap: 6 } }))
+    const leaving = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(leaving)
+    expect(leaving.defaultPrevented).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: en.layoutBackToModel }))
+    expect(viewport.closePrintLayout).not.toHaveBeenCalled()
+    pending.reject(new Error('offline'))
+    await settle()
+    expect(screen.getByRole('alert').textContent).toContain(en.layoutSaveFailed)
+    expect(viewport.closePrintLayout).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: en.layoutRetrySave }))
+    await settle()
+    expect(screen.queryByText(en.layoutSaveFailed)).toBeNull()
+    expect(JSON.parse(String(saves().at(-1)?.[1]?.body)).gap).toBe(6)
+    fireEvent.click(screen.getByRole('button', { name: en.layoutBackToModel }))
+    await settle()
+    expect(viewport.closePrintLayout).toHaveBeenCalledOnce()
+  } finally { pending.reject(new Error('test cleanup')); await settle() }
 })

@@ -14,7 +14,12 @@ export function createPrintLayoutPanel(React, { Button, Menu, IconChevronDownOut
       anchor: h(Button, { variant: 'ghost', size: 'sm', disabled: busy, 'aria-haspopup': 'menu', 'aria-expanded': open && !busy,
         onClick: () => setOpen(!open), className: 'pv-print-choice' }, label, h(IconChevronDownOutlineRegular, { size: 14, className: 'pv-print-chevron' })) })
   }
-  function Preparation({ state, busy, message, validation, t, action }) {
+  function SaveFailure({ busy, t, action }) {
+    return h('div', { className: 'pv-print-glass pv-print-notice', role: 'alert' },
+      h('p', null, t('layoutSaveFailed')),
+      h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => action('retry-save') }, t('layoutRetrySave')))
+  }
+  function Preparation({ state, busy, message, saveStatus, validation, t, action }) {
     const signature = JSON.stringify(state.layout)
     const [navigation, setNavigation] = React.useState({ step: 'arrange', signature })
     const step = navigation.signature === signature ? navigation.step : 'arrange'
@@ -57,24 +62,22 @@ export function createPrintLayoutPanel(React, { Button, Menu, IconChevronDownOut
           h('h3', null, t('layoutOpenTitle')),
           h('p', null, t('layoutOpenHint'))),
         state.issues.length > 0 && h('div', { className: 'pv-print-glass pv-print-notice', role: 'alert' }, state.issues.map(code => h('p', { key: code }, t(code)))),
+        saveStatus === 'error' && h(SaveFailure, { busy, t, action }),
         message && h('p', { role: 'status', className: 'pv-print-glass pv-print-notice' }, t(message)),
         step === 'arrange' && h('p', { className: 'pv-print-drag-hint' }, t('layoutDragHint')),
         h('div', { className: 'pv-print-glass pv-print-toolbar', role: 'group', 'aria-label': t('layoutWorkflow') },
           h(Choice, { label: t('layoutPlate', { number: state.plate + 1 }), items: plateItems, selectedId: String(state.plate), select: id => action('plate', Number(id)), busy }),
           step === 'arrange' && button('layoutAutoArrange', () => action('arrange')),
           step === 'arrange' && button('layoutUndo', () => action('undo'), !state.canUndo),
-          h(Choice, { label: t('layoutMore'), busy, items: [
-            { id: 'parts', label: t('layoutParts'), submenu: state.parts.map(part => ({ id: `part:${part.id}`, label: part.name ?? t('layoutAssembly') })) },
-            { id: 'save', label: t('layoutSave') },
-          ], select: id => { if (id === 'save') action('save'); else { action('select', id.slice(5)); go('arrange') } } }),
           step === 'arrange' ? button('layoutReview', () => go('check'), false, true)
             : step === 'check' ? button('layoutContinue', () => go('open'), !canOpen, true)
               : button('layoutOpen', () => action('export'), !canOpen, true))))
   }
-  return function PrintLayoutPanel({ state, available, busy, message, validation = 'layoutChecksMissing', t, action }) {
-    if (state?.active) return h(Preparation, { key: state.layout.identity, state, busy, message, validation, t, action })
+  return function PrintLayoutPanel({ state, available, busy, message, saveStatus = 'idle', validation = 'layoutChecksMissing', t, action }) {
+    if (state?.active) return h(Preparation, { key: state.layout.identity, state, busy, message, saveStatus, validation, t, action })
     return h('div', { className: 'pv-print-entry', 'aria-busy': busy },
       h(Button, { variant: 'ghost', size: 'sm', className: 'pv-model-button', disabled: busy || !available, onClick: () => action('open') }, t('layoutPrint')),
+      saveStatus === 'error' && h(SaveFailure, { busy, t, action }),
       message === 'layoutFailed' && h(Button, { variant: 'ghost', size: 'sm', className: 'pv-model-button', disabled: busy, onClick: () => action('fresh') }, t('layoutFresh')),
       message && h('p', { role: 'status', className: 'pv-print-glass pv-print-notice' }, t(message)))
   }

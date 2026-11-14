@@ -6,6 +6,8 @@
  * placement only. Nothing here imports three: the viewport is a separate
  * module, and this half never measures or transforms geometry.
  */
+import { createLayoutAutosave } from './print-layout/autosave.js'
+import { printLayoutIdentity } from './print-layout/state.js'
 import { createPrintLayoutPanel } from './print-layout/panel.js'
 import { createModelSelector } from './model-selector.js'
 import { createAnalogPanel } from './analog/controls.js'
@@ -27,6 +29,7 @@ const MAX_SCENES = 8
 /** Datablocks cached across conversations; one scene needs only a few. */
 const MAX_GEOMETRY = 32
 const EMPTY = Object.freeze({ scene: null, view: null })
+const layoutSaveKey = view => JSON.stringify([view?.sessionId, view?.design?.path, view?.design?.contentHash, view?.design?.transform, view?.volume])
 
 /**
  * Register the viewer into an already-mounted client plugin.
@@ -36,6 +39,15 @@ const EMPTY = Object.freeze({ scene: null, view: null })
  * @returns {void}
  */
 export function installViewer(ctx, React, primitives) {
+  const autosave = createLayoutAutosave(async request => {
+    const response = await fetch(request.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: request.body })
+    if (!response.ok) throw new Error('Layout autosave failed')
+  }, MAX_SCENES)
+  ctx.effect(() => {
+    const preventUnsavedExit = event => { if (autosave.hasUnsaved()) { event.preventDefault(); event.returnValue = '' } }
+    window.addEventListener('beforeunload', preventUnsavedExit)
+    return async () => { await autosave.dispose(); window.removeEventListener('beforeunload', preventUnsavedExit) }
+  }, 'print viewer: layout autosave')
   const artifacts = createModelArtifacts()
   const viewportDisposals = new Set(), liveViewports = new Set()
   ctx.effect(() => async () => {
@@ -204,6 +216,20 @@ export function installViewer(ctx, React, primitives) {
     const [printBusy, setPrintBusy] = React.useState(false)
     const [printMessage, setPrintMessage] = React.useState(null)
     const printOptions = React.useRef(null), printRequest = React.useRef(null)
+    const saveKey = layoutSaveKey(view)
+    const saveStatus = React.useSyncExternalStore(autosave.subscribe, () => autosave.status(saveKey))
+    const printTarget = React.useRef(view)
+    printTarget.current = view
+    function receivePrintState(state) {
+      setPrintState(state)
+      const target = printTarget.current
+      if (!state.active || !target?.design || state.layout.identity !== printLayoutIdentity(target.design, state.layout.volume)) return
+      const query = `sessionId=${encodeURIComponent(target.sessionId)}&sourceHash=${encodeURIComponent(target.design.contentHash)}`
+      autosave.update(layoutSaveKey(target), {
+        sessionId: target.sessionId, url: `${ROUTE}/layout?${query}`, body: JSON.stringify(state.layout),
+      })
+    }
+
     React.useEffect(() => {
       setPrintMessage(null); setPrintBusy(false)
       return () => printRequest.current?.abort()
@@ -214,9 +240,9 @@ export function installViewer(ctx, React, primitives) {
       setPrintMessage(null)
       let controller = null
       try {
-        if (action === 'close') { owner.closePrintLayout(); return }
+        if (action === 'retry-save') { autosave.retry(saveKey); return }
+        if (action === 'close') { if (await autosave.flush(saveKey) && layoutSaveKey(printTarget.current) === saveKey && viewport.current === owner) owner.closePrintLayout(); return }
         if (action === 'plate') { owner.selectPrintPlate(value); return }
-        if (action === 'select') { owner.selectPrintPart(value); return }
         if (action === 'edit') { owner.editPrintPart(value); return }
         if (action === 'undo') { owner.undoPrintLayout(); return }
         if (action === 'arrange') { owner.rearrangePrintParts(printOptions.current); return }
@@ -225,23 +251,24 @@ export function installViewer(ctx, React, primitives) {
         setPrintBusy(true)
         const query = `sessionId=${encodeURIComponent(view.sessionId)}&sourceHash=${encodeURIComponent(view.design.contentHash)}`
         if (action === 'open' || action === 'fresh') {
+          await autosave.flush(saveKey)
           await designReady.current
           const response = await fetch(`${ROUTE}/layout?${query}&fresh=${action === 'fresh' ? '1' : '0'}`, { signal: controller.signal, cache: 'no-store' })
           if (!response.ok) { const failure = await response.json(); throw new Error(failure.error === 'layoutSeparateRequired' ? failure.error : 'layoutFailed') }
           const saved = await response.json()
           if (controller.signal.aborted) return
           printOptions.current = saved.options
-          owner.openPrintLayout(action === 'fresh' ? null : owner.printLayoutState().layout ?? saved.layout, saved.options)
+          owner.openPrintLayout(action === 'fresh' ? null : owner.printLayoutState().layout ?? autosave.draft(saveKey) ?? saved.layout, saved.options)
           if (saved.stale) setPrintMessage('layoutChanged')
         } else {
-          const exporting = action === 'export'
-          const response = await fetch(`${ROUTE}/${exporting ? 'open-plate' : 'layout'}?${query}`, {
+          if (!await autosave.flush(saveKey) || controller.signal.aborted || layoutSaveKey(printTarget.current) !== saveKey) return
+          const response = await fetch(`${ROUTE}/open-plate?${query}`, {
             method: 'POST', signal: controller.signal,
-            headers: { 'content-type': exporting ? 'application/octet-stream' : 'application/json' },
-            body: exporting ? owner.exportPrintPlate() : JSON.stringify(owner.printLayoutState().layout),
+            headers: { 'content-type': 'application/octet-stream' },
+            body: owner.exportPrintPlate(),
           })
           const result = await response.json()
-          if (!controller.signal.aborted) setPrintMessage(response.ok ? exporting ? 'layoutOpened' : 'layoutSaved'
+          if (!controller.signal.aborted) setPrintMessage(response.ok ? 'layoutOpened'
             : ['layoutSeparateRequired', 'layoutChanged', 'layoutOutside', 'layoutSlicerMissing', 'layoutOpenFailed'].includes(result.error) ? result.error : 'layoutFailed')
         }
       } catch (error) { if (!controller || (!controller.signal.aborted && printRequest.current === controller)) setPrintMessage(error.message === 'layoutSeparateRequired' ? error.message : 'layoutFailed') }
@@ -252,7 +279,7 @@ export function installViewer(ctx, React, primitives) {
     const analogAbort = React.useRef(null)
     React.useEffect(() => {
       try {
-        viewport.current = createViewport(holder.current, () => { viewportError.current = '3D viewer rendering failed'; setFailed(true) }, setCursorMode, artifacts, setPrintState)
+        viewport.current = createViewport(holder.current, () => { viewportError.current = '3D viewer rendering failed'; setFailed(true) }, setCursorMode, artifacts, receivePrintState)
         liveViewports.add(viewport.current)
         setFailed(false)
       } catch (error) {
@@ -444,7 +471,7 @@ export function installViewer(ctx, React, primitives) {
     }, [view])
     return h(React.Fragment, null,
       view?.design && h(PrintLayoutPanel, { state: printState, available: !view.design.analog && !failed,
-        busy: printBusy, message: printMessage, validation, t, action: printAction }),
+        busy: printBusy, message: printMessage, saveStatus, validation, t, action: printAction }),
       !printState?.active && h('div', { className: 'pv-bottom-controls' },
       motion && h('fieldset', { className: 'pv-motion-controls', disabled: Boolean(view?.design?.analog), inert: Boolean(view?.design?.analog), 'aria-label': t('motionControls') },
         h(AnalogPanel, { key: motion.id, spec: { ...motion, label: t('motionControls') }, t,
@@ -588,6 +615,8 @@ export function installViewer(ctx, React, primitives) {
     inject: sessionId => ({
       hooks: { scene: { subscribe, getSnapshot: () => read(sessionId) } },
       selectModel: async (path, signal) => {
+        if (!await autosave.flush(layoutSaveKey(read(sessionId).view))) throw new Error('Save the current layout before switching models')
+        if (signal.aborted) return
         const response = await fetch(`${ROUTE}/select?sessionId=${encodeURIComponent(sessionId)}`, {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ path }), signal,

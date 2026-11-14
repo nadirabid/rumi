@@ -20,6 +20,8 @@ it.each(['en', 'zh'] as const)('exposes keyboard placement, undo and handoff act
   const action = vi.fn()
   const result = render(<Panel state={state} available busy={false} message={null} t={t} action={action} />)
   expect(screen.queryByText(dictionary.layoutSeparate)).toBeNull()
+  expect(screen.queryByRole('button', { name: dictionary.layoutMore })).toBeNull()
+  expect(screen.queryByRole('button', { name: dictionary.layoutSave })).toBeNull()
   expect(screen.queryByRole('button', { name: dictionary.layoutOpen })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: t('layoutSelectedPart', { name: 'Door' }) }))
   fireEvent.click(screen.getByRole('menuitem', { name: dictionary.layoutRotateZ }))
@@ -52,4 +54,15 @@ it('explains legacy connector redesign without offering to relabel the model', (
   render(<Panel state={null} available busy={false} message="layoutSeparateRequired" t={t} action={action} />)
   expect(screen.getByRole('status').textContent).toBe(en.layoutSeparateRequired)
   expect(screen.queryByRole('button', { name: en.layoutFresh })).toBeNull()
+})
+
+
+it('keeps failed autosaves visible and offers retry without restoring a save menu', () => {
+  const action = vi.fn(), t = (key: keyof typeof en) => en[key]
+  const state = { active: true, plate: 0, parts: [], issues: [],
+    layout: { identity: 'model', parts: [{ id: 'body', plate: 0 }], volume: { x: 300, y: 320, z: 320 }, gap: 5 } }
+  render(<Panel state={state} available busy={false} message={null} saveStatus="error" t={t} action={action} />)
+  expect(screen.getByRole('alert').textContent).toContain(en.layoutSaveFailed)
+  fireEvent.click(screen.getByRole('button', { name: en.layoutRetrySave }))
+  expect(action).toHaveBeenCalledWith('retry-save')
 })

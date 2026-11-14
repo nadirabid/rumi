@@ -20,7 +20,7 @@ def Xform "Model" (
         </Model/Body>,
         </Model/Door>,
     ]
-    token rumi:manufacturingMode = "print-in-place"
+    token rumi:manufacturingMode = "separate"
 
     def Mesh "Door" (
         active = true

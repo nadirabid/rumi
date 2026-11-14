@@ -29,45 +29,31 @@ Use the kit and a recipe before designing a connector yourself. Working out rete
 | `K.paint(obj, (r, g, b))` | One surface colour. |
 | `K.bounds(obj)`, `K.solids(obj)` | Corner coordinates; the number of disconnected pieces (a printable part has one). |
 | `K.joint(name, kind, parent, child, axis, pivot, limits, control)` | A joint record for a connector you modelled yourself. |
-| `K.publish(directory, root, joints, mode='print-in-place')` | Publishes `model.usda`, writes the whole USD assembly from the joint records, and prints `RUMI_CHECKS`. It replaces `helper["publish"]` and `configure_robot`. |
+| `K.publish(directory, root, joints, mode=...)` | Publishes `model.usda`, writes the whole USD assembly from the joint records, and prints `RUMI_CHECKS`. It replaces `helper["publish"]` and `configure_robot`. |
 
 Axes are `'X'`, `'-Y'`, `'+Z'` or a vector. Give tools and helper solids names starting with `_`; never leave one in the scene, because every visible mesh is published as a part. Overlap pieces you fuse by at least 0.5 mm and run cutters past the surface.
 
+## Separate printing for moving parts
+
+Rumi requires every moving physical part to be printed separately and assembled afterward. Joint kind still describes movement after assembly: fixed, rotating or sliding. Do not offer print-in-place as an option or ask the user to choose a manufacturing mode. Publish movable assemblies with explicit `mode='separate'`; omitting the mode or using `print-in-place` is rejected. Single-piece static models need no manufacturing choice.
+
+Design the assembly before choosing connectors. Provide accessible insertion paths, an assembly order and separate pins or retainers where needed. Explain it briefly: “The wheels and doors print separately, then attach so they still spin and open.” Consider bed orientation, support removal, joint clearances, materials, strength and repairability. Keep requested movement; never fuse a moving part or change it to a fixed joint to meet the requirement.
+
+Recipes described below or in their cards as print-in-place are legacy geometry references, not supported designs for new movable prints. Do not use their captive defaults or change a manufacturing label to make them appear compatible. Use a separately assembleable variant only when the card identifies one, or design removable connectors with the kit and declare them with `K.joint`. Existing printed-assembled models remain inspectable, but their connectors must be reviewed and redesigned before republishing or arranging for printing. Preserve their previous revisions.
+
+Run the geometry, clearance, collision, retention and movement workflow in [finished-revision validation](../blender-modeling/SKILL.md#validate-a-finished-revision). Describe the assembly order and pass `steps=[dict(part="part_name", path=[[0, 0, 0], [dx, dy, dz], ...]), ...]` to `K.publish` for every nonroot part. Offsets use millimetres and each path starts at zero. Missing paths leave the mechanical result under review and block acceptance, even when motion probes pass. Bullet checks supplied translation paths in reverse; it does not discover them or simulate snapping, flexing or threaded insertion. Missing or unsupported assembly evidence remains unverified even when movement checks pass. The `separate` declaration and plate placement are not proof that assembly is possible.
+
 ## Build order
 
-1. Block out each physical part as a simple solid with its real outer size and position.
+1. Plan assembly after separate printing, then block out each physical part as a simple solid with its real outer size and position.
 2. Choose each joint's pivot and axis from those coordinates.
 3. Call the recipe. It adds and cuts the mating features on both parts and returns the joint record. A recipe raises an error that says what to move when a part does not reach the joint.
 4. Add detail and colour. Build one side and `K.mirror` it for pairs.
 5. `K.publish(...)`, read `RUMI_CHECKS`, then follow `blender-modeling` for `viewer_load` and validation.
 
-## Worked example
+## Publish the assembly
 
-A box kart with four spinning wheels and two opening doors:
-
-```python
-import runpy, types
-K = types.SimpleNamespace(**runpy.run_path(joints_path))
-K.start()
-body = K.box('KartBody', (80, 120, 30), (0, 0, 25))
-K.cut(body, K.box('_cockpit', (68, 50, 30), (0, 0, 32)))
-K.paint(body, (0.85, 0.2, 0.1))
-joints = []
-for sx, side in ((1, 'Right'), (-1, 'Left')):
-    out = '+X' if sx > 0 else '-X'
-    for sy, end in ((1, 'Front'), (-1, 'Rear')):
-        pivot = (sx * 40, sy * 44, 14)                      # on the body's side face
-        wheel = K.wheel(end + side + 'Wheel', pivot, out, diameter=28, width=10, tread=12)
-        K.paint(wheel, (0.1, 0.1, 0.1))
-        joints.append(K.captive_axle(body, wheel, pivot, out, width=10, control=end + ' ' + side.lower() + ' wheel'))
-    door = K.box2(side + 'Door', (40.5, -12, 14), (44.5, 18, 38))   # overlay door, 0.5 mm off the body face
-    if sx < 0:
-        K.mirror(door, 'X')
-    K.paint(door, (0.95, 0.75, 0.35))
-    joints.append(K.barrel_hinge(body, door, (sx * 46.3, -20, 26), 'Z', parent_side='-X' if sx > 0 else '+X',
-                                 child_side='+Y', length=20, limits=(-110, 0) if sx > 0 else (0, 110), control=side + ' door'))
-K.publish('models/kart', body, joints)
-```
+After modeling separately printable parts and their connectors, publish their assembled pose with `K.publish('models/kart', body, joints, mode='separate')`. The viewer uses the joints for motion and creates a separate plate layout for printing. Keep every removable pin, cap and axle as its own physical part. Publishing does not create an insertion path or make a captive connector assembleable.
 
 ## Recipes are starting points
 
@@ -75,8 +61,8 @@ Each recipe was checked alone at its default size on a small sample; your whole 
 
 What the mechanics check needs, whichever way you build:
 
-- Only the root part is held. Every other part must be caught by shape in every direction: a head wider than its bore, a pin fused into both knuckles, a lip over a slider. Friction, press fits, magnets and glue hold nothing in the check.
-- So prefer the captive default of each recipe, which prints assembled. A join held only by friction stays unverified; say so, or fuse the two parts with `K.join` when they need not come apart.
+- Only the root part is held. Every other part must be caught by shape in every direction: an assembled retainer wider than its bore, a removable pin secured by a cap, a lip over an insertable slider. Friction, press fits, magnets and glue hold nothing in the check.
+- Provide retention geometry that can be assembled after separate printing. A join held only by friction stays unverified; report that limitation rather than switching to print-in-place to obtain a pass. Fuse parts with `K.join` only when the design calls for one physical piece.
 - Keep 0.3 mm between different parts. Let flat faces and round pins in round bores carry loads; cone tips, slots and sharp edges in a bearing surface read as `excessive_penetration`.
 - Recipes marked **over limit** below can read 0.16–0.39 mm `excessive_penetration` against the 0.15 mm limit while the part is captive. Do not tighten clearances or redesign repeatedly to chase it; after one repair attempt report the model as built and unverified.
 
@@ -113,4 +99,4 @@ Mechanics column: **passes** means the recipe's sample passed `validation_mechan
 | Crank driving a slider | `K.crank_slider` | unverified: closed loop | `mechanisms.md` |
 | One-piece spring | `K.flexure_spring` | one part, nothing to check | `mechanisms.md` |
 
-Read the card before the first use of a recipe. Each family's file under `references/` beside this skill gives every recipe's call, what the parts must provide, the options worth changing, how it prints, and what validation reported. `wheel`, `captive_axle` and `barrel_hinge` are shown in the worked example above.
+Read the card before the first use of a recipe. Each family's file under `references/` beside this skill gives every recipe's call, what the parts must provide, the options worth changing, how it prints, and what validation reported. A recipe sample passing motion probes does not establish separate assembly feasibility.

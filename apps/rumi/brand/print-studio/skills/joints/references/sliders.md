@@ -1,3 +1,5 @@
+Rumi requires moving parts to print separately. Recipes labeled print-in-place below are legacy geometry references; do not use their captive versions for new movable prints. A separately assembleable variant still requires validation, and deformation or assembly routes outside the checker remain unverified.
+
 ## dovetail_slide
 
 **Use for**: a carriage on a dovetail key in a closed groove; it cannot lift off or leave.

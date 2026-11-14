@@ -14,6 +14,7 @@ import { robotUsd } from './fixtures/robot-usd.js'
 import { parseUsdModel } from '../viewer/viewport/usd.js'
 import { disposeModel } from '../viewer/viewport/model.js'
 import { readMotion } from '../viewer/motion.js'
+import { printParts, arrangePrintParts, layoutIssues } from '../viewer/viewport/print-layout.js'
 import { analyzeMesh } from '../viewer/checks.js'
 
 class LoadReplay extends LlmAdapter {
@@ -74,12 +75,17 @@ it.each(['usd'])('delivers %s load measurements and movement to the next model r
       expect(response.status).toBe(200)
       return response.json()
     }
+    let printPreparation
     const renderer = (async () => {
       await request('events')
       const { scene } = await request('state')
       const source = await routes.get(scene.design.url)!(new Request(`http://fixture${scene.design.url}`))
       const generated = { bytes: await source.arrayBuffer(), parameters: {} }
       const model = await parseUsdModel(generated.bytes)
+      const parts = printParts(model)
+      const layout = arrangePrintParts(parts, { identity: 'recorded-model', volume: { x: 300, y: 320, z: 320 }, gap: 5 })
+      printPreparation = { manufacturingMode: model.robot.assembly.manufacturing.mode,
+        parts: parts.map(part => part.id), layout, issues: layoutIssues(parts, layout) }
       let glbFeedback
       try {
         glbFeedback = { parameters: { ...generated.parameters, ...model.parameters },
@@ -107,7 +113,7 @@ it.each(['usd'])('delivers %s load measurements and movement to the next model r
     expect(events.filter(event => event.type === 'turn/end').map(event => event.data.reason)).toEqual([{ kind: 'completed' }])
     if (format === 'usd') {
       expect({ load: result.load.status, format: result.design.format,
-        motion: result.design.motion, parameters: result.design.parameters }).toMatchSnapshot()
+        motion: result.design.motion, parameters: result.design.parameters, printPreparation }).toMatchSnapshot()
     }
   } finally {
     controller.abort()

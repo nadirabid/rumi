@@ -187,6 +187,7 @@ def publish(model_directory, configure_robot=None, check=True):
     if configure_robot is not None:
         configure_robot(stage)
     metadata = read_robot(stage)
+    _robot['require_separate_moving_parts'](metadata['assembly'])
     stage.GetRootLayer().Save()
     if not 10 <= usd.stat().st_size <= 64 * 1024 * 1024 or '@' in usd.read_text():
         raise ValueError('USD must fit 64 MiB and contain no external assets; use embedded surface colours')

@@ -6,6 +6,7 @@
  * placement only. Nothing here imports three: the viewport is a separate
  * module, and this half never measures or transforms geometry.
  */
+import { createPrintLayoutPanel } from './print-layout/panel.js'
 import { createModelSelector } from './model-selector.js'
 import { createAnalogPanel } from './analog/controls.js'
 import { parseStl } from './stl.js'
@@ -46,6 +47,7 @@ export function installViewer(ctx, React, primitives) {
   const AnalogPanel = createAnalogPanel(React)
   const { PluginArtworkDefault, Button } = primitives
   const ModelSelector = createModelSelector(React, Button)
+  const PrintLayoutPanel = createPrintLayoutPanel(React, Button)
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'print viewer: copy')
   ctx.effect(() => {
@@ -198,12 +200,59 @@ export function installViewer(ctx, React, primitives) {
     const [buildError, setBuildError] = React.useState(null)
     const [cursorMode, setCursorMode] = React.useState('patch')
     const [motion, setMotion] = React.useState(null)
+    const [printState, setPrintState] = React.useState(null)
+    const [printBusy, setPrintBusy] = React.useState(false)
+    const [printMessage, setPrintMessage] = React.useState(null)
+    const printOptions = React.useRef(null), printRequest = React.useRef(null)
+    React.useEffect(() => {
+      setPrintMessage(null); setPrintBusy(false)
+      return () => printRequest.current?.abort()
+    }, [view?.design?.url])
+    async function printAction(action, value) {
+      const owner = viewport.current
+      if (!owner) return
+      setPrintMessage(null)
+      let controller = null
+      try {
+        if (action === 'close') { owner.closePrintLayout(); return }
+        if (action === 'plate') { owner.selectPrintPlate(value); return }
+        if (action === 'select') { owner.selectPrintPart(value); return }
+        if (action === 'edit') { owner.editPrintPart(value); return }
+        if (action === 'undo') { owner.undoPrintLayout(); return }
+        if (action === 'arrange') { owner.rearrangePrintParts(printOptions.current); return }
+        printRequest.current?.abort()
+        controller = new AbortController(); printRequest.current = controller
+        setPrintBusy(true)
+        const query = `sessionId=${encodeURIComponent(view.sessionId)}&sourceHash=${encodeURIComponent(view.design.contentHash)}`
+        if (action === 'open' || action === 'fresh') {
+          await designReady.current
+          const response = await fetch(`${ROUTE}/layout?${query}&fresh=${action === 'fresh' ? '1' : '0'}`, { signal: controller.signal, cache: 'no-store' })
+          if (!response.ok) { const failure = await response.json(); throw new Error(failure.error === 'layoutSeparateRequired' ? failure.error : 'layoutFailed') }
+          const saved = await response.json()
+          if (controller.signal.aborted) return
+          printOptions.current = saved.options
+          owner.openPrintLayout(action === 'fresh' ? null : owner.printLayoutState().layout ?? saved.layout, saved.options)
+          if (saved.stale) setPrintMessage('layoutChanged')
+        } else {
+          const exporting = action === 'export'
+          const response = await fetch(`${ROUTE}/${exporting ? 'open-plate' : 'layout'}?${query}`, {
+            method: 'POST', signal: controller.signal,
+            headers: { 'content-type': exporting ? 'application/octet-stream' : 'application/json' },
+            body: exporting ? owner.exportPrintPlate() : JSON.stringify(owner.printLayoutState().layout),
+          })
+          const result = await response.json()
+          if (!controller.signal.aborted) setPrintMessage(response.ok ? exporting ? 'layoutOpened' : 'layoutSaved'
+            : ['layoutSeparateRequired', 'layoutChanged', 'layoutOutside', 'layoutSlicerMissing', 'layoutOpenFailed'].includes(result.error) ? result.error : 'layoutFailed')
+        }
+      } catch (error) { if (!controller || (!controller.signal.aborted && printRequest.current === controller)) setPrintMessage(error.message === 'layoutSeparateRequired' ? error.message : 'layoutFailed') }
+      finally { if (controller && !controller.signal.aborted && printRequest.current === controller) setPrintBusy(false) }
+    }
     const analogRendered = React.useRef(null), analogInput = React.useRef(0)
     const analogValues = React.useRef(null), analogId = React.useRef(null), analogSequence = React.useRef(0), analogDelivery = React.useRef(Promise.resolve())
     const analogAbort = React.useRef(null)
     React.useEffect(() => {
       try {
-        viewport.current = createViewport(holder.current, () => { viewportError.current = '3D viewer rendering failed'; setFailed(true) }, setCursorMode, artifacts)
+        viewport.current = createViewport(holder.current, () => { viewportError.current = '3D viewer rendering failed'; setFailed(true) }, setCursorMode, artifacts, setPrintState)
         liveViewports.add(viewport.current)
         setFailed(false)
       } catch (error) {
@@ -394,7 +443,9 @@ export function installViewer(ctx, React, primitives) {
       return () => { active = false; clearTimeout(timer); controller.abort() }
     }, [view])
     return h(React.Fragment, null,
-      h('div', { className: 'pv-bottom-controls' },
+      view?.design && h(PrintLayoutPanel, { state: printState, available: !view.design.analog && !failed,
+        busy: printBusy, message: printMessage, t, action: printAction }),
+      !printState?.active && h('div', { className: 'pv-bottom-controls' },
       motion && h('fieldset', { className: 'pv-motion-controls', disabled: Boolean(view?.design?.analog), inert: Boolean(view?.design?.analog), 'aria-label': t('motionControls') },
         h(AnalogPanel, { key: motion.id, spec: { ...motion, label: t('motionControls') }, t,
           onChange: values => {

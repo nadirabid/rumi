@@ -464,7 +464,7 @@ it('highlights the visible moved surface and restores hover after resetting move
     for (const angle of [60, 30, 0, 45, 0]) {
       viewport.updateMotion({ joint0: angle })
       const visible = []
-      rendered().traverseVisible(node => { if (node.isMesh && node.name === 'Door') visible.push(node) })
+      rendered().traverseVisible((node) => { if (node.isMesh && node.name === 'Door') visible.push(node) })
       expect(visible).toHaveLength(1)
       const door = visible[0]
       const camera = state.renderer.render.mock.calls.at(-1)[1]
@@ -481,4 +481,74 @@ it('highlights the visible moved surface and restores hover after resetting move
       if (angle !== 0) expect(viewport.captureCursor()).toEqual({ status: 'viewer_unavailable' })
     }
   } finally { await viewport.dispose() }
+})
+
+it('keeps print layout independent from assembly motion, highlights and source revisions', async () => {
+  const onPrint = vi.fn(), viewport = createViewport(container(), vi.fn(), vi.fn(), undefined, onPrint)
+  const url = 'data:application/octet-stream;base64,' + Buffer.from(robotUsd()).toString('base64')
+  const spec = { format: 'usd', path: '/project/models/robot/model.usda', url, contentHash: 'a', revision: 1,
+    transform: { scale: 1, rotate: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 0 } },
+    highlight: { id: 'region', blobs: [{ center: [0, 0, 0], radii: [10, 10, 10], rotationDegrees: [0, 0, 0] }] } }
+  await viewport.applyDesign(spec, null)
+  const options = { volume: { x: 300, y: 320, z: 320 }, gap: 5 }
+  const first = viewport.openPrintLayout(null, options)
+  expect(first.manufacturingMode).toBe('separate')
+  expect(first.parts).toHaveLength(2)
+  expect(first.active).toBe(true)
+  expect(viewport.captureCursor().status).toBe('viewer_unavailable')
+  expect(viewport.renderedHighlight()).toBeNull()
+  const before = first.layout.parts[0].position
+  viewport.editPrintPart({ move: [1, 0] })
+  expect(viewport.printLayoutState().layout.parts[0].position).toEqual([before[0] + 1, before[1]])
+  viewport.undoPrintLayout()
+  expect(viewport.printLayoutState().layout.parts[0].position).toEqual(before)
+  expect(viewport.exportPrintPlate().byteLength).toBeGreaterThan(84)
+  viewport.closePrintLayout()
+  expect(viewport.printLayoutState().active).toBe(false)
+  expect(viewport.renderedHighlight()).toBe('region')
+  viewport.openPrintLayout(null, options)
+  await viewport.applyDesign({ ...spec, revision: 2, url: url + '#replacement' }, null)
+  expect(viewport.printLayoutState()).toMatchObject({ active: false, layout: null })
+  await viewport.dispose()
+  const notifications = onPrint.mock.calls.length
+  await viewport.dispose()
+  expect(onPrint.mock.calls).toHaveLength(notifications)
+})
+
+it('coalesces print dragging and restores placement when pointer capture is lost', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  const frames = new Map<number, FrameRequestCallback>()
+  let sequence = 0, captured = false
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++sequence, callback); return sequence })
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => { frames.delete(id) })
+  await viewport.applyDesign({ format: 'usd', path: '/project/models/box/model.usda', url: await boxUrl(20, 20, 10),
+    revision: 1, contentHash: 'box', transform: { scale: 1, rotate: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 0 } } }, null)
+  viewport.openPrintLayout(null, { volume: { x: 50, y: 50, z: 50 }, gap: 5 })
+  state.resize()
+  const canvas = state.renderer.domElement
+  canvas.setPointerCapture = () => { captured = true }
+  canvas.hasPointerCapture = () => captured
+  canvas.releasePointerCapture = () => { captured = false }
+  const camera = state.renderer.render.mock.calls.at(-1)[1]
+  camera.position.set(0, 0, 200); camera.up.set(0, 1, 0); camera.lookAt(0, 0, 0); camera.updateMatrixWorld(true)
+  const before = viewport.printLayoutState().layout
+  const [x, y] = before.parts[0].position
+  const point = new THREE.Vector3(x, y, 10).project(camera)
+  const event = { button: 0, pointerId: 1, clientX: (point.x + 1) * 200, clientY: (1 - point.y) * 150,
+    type: 'pointerdown', stopImmediatePropagation: vi.fn() }
+  const listener = (name: string) => canvas.addEventListener.mock.calls.find(
+    ([type, _handler, capture]) => type === name && capture === true)[1]
+  listener('pointerdown')(event)
+  expect(captured).toBe(true)
+  const draws = state.renderer.render.mock.calls.length
+  for (let step = 1; step <= 10; step++) listener('pointermove')({ ...event, clientX: event.clientX + step })
+  expect(frames.size).toBe(1)
+  expect(state.renderer.render.mock.calls).toHaveLength(draws)
+  const callbacks = [...frames.values()]; frames.clear(); callbacks[0](0)
+  expect(state.renderer.render.mock.calls).toHaveLength(draws + 1)
+  expect(viewport.printLayoutState().layout).not.toEqual(before)
+  listener('lostpointercapture')({ ...event, type: 'lostpointercapture' })
+  expect(viewport.printLayoutState().layout).toEqual(before)
+  expect(state.controls.enabled).toBe(true)
+  await viewport.dispose()
 })

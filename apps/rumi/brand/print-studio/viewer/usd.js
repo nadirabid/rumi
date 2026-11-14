@@ -1,3 +1,4 @@
+import { USDAParser } from 'three/addons/loaders/usd/USDAParser.js'
 /** Restrict project USD to a self-contained static layer before any asset resolver runs. */
 export const USD_MAX_BYTES = 64 * 1024 * 1024
 
@@ -14,4 +15,15 @@ export function validateUsd(bytes) {
     throw new Error('Flatten USD into one static layer without asset paths, references, variants or animation')
   }
   return text
+}
+
+/** Inspect legacy manufacturing intent without allocating render geometry.
+ * @param {Uint8Array} bytes Immutable source USD bytes.
+ * @returns {boolean} Whether moving joints require redesign for separate printing.
+ */
+export function usdRequiresSeparatePrint(bytes) {
+  const specs = new USDAParser().parseData(validateUsd(bytes)).specsByPath
+  const root = `/${specs['/']?.fields.defaultPrim}`
+  const moving = Object.values(specs).some(spec => ['PhysicsRevoluteJoint', 'PhysicsPrismaticJoint'].includes(spec.fields.typeName))
+  return moving && specs[`${root}.rumi:manufacturingMode`]?.fields.default !== 'separate'
 }

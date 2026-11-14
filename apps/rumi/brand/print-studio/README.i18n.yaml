@@ -5,6 +5,9 @@
 /print-studio:
   en: 85674279108443f7
   zh: a4c20df31ccaebc7
+/print-studio/print-layout:
+  en: 608925b81a4c8cd8
+  zh: 380184ff4a64cd42
 /print-studio/test-print:
   en: 9a60197d35201e39
   zh: 93cbf14689151364
@@ -30,8 +33,8 @@
   en: 8e5048977798ac92
   zh: 8b1d42a9be9fc67f
 /print-studio/persistent-movement-controls:
-  en: 6b94574196247ecb
-  zh: 5338b565ead0058c
+  en: 039e9108925e19e7
+  zh: 237bf2a73e34e5e6
 /print-studio/editable-three-js-models:
   en: 447cb5175075d011
   zh: 3b071e874b6af7a8
@@ -53,3 +56,6 @@
 /print-studio/model-selection-and-agent-work:
   en: 21b84251009e76da
   zh: 4bdada6a7c56d625
+/print-studio/model-selection-and-agent-work/bambu-app-setup:
+  en: 5304de5ffad3bd2b
+  zh: 260cf95d1023a69d

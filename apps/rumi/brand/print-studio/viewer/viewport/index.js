@@ -1,3 +1,5 @@
+import { printParts, arrangePrintParts, createPrintPreview, layoutIssues } from './print-layout.js'
+import { printLayoutIdentity } from '../print-layout/state.js'
 import { createShapeDeformer } from '../analog/gpu.js'
 import { createParameterPreview } from '../analog/parameters.js'
 import { readMotion } from '../motion.js'
@@ -40,12 +42,13 @@ function token(element, name, fallback) {
  * @param {() => void} onFailure - Called once when the WebGL context is lost.
  * @param {Function} [onCursorMode] Receives cursor selection scope changes.
  * @param {object} [sharedArtifacts] Client-owned saved GLBs shared with validation.
+ * @param {Function} [onPrintLayout] Receives local print placement and issue changes; omitted when no layout UI is mounted.
  * @returns {object} The owned viewport. `apply(view)` reconciles STL objects;
  * `applyDesign(spec, volume)` loads a source revision and resolves to measured
  * geometry. Stale loads resolve to null; build failures reject and retain the
  * previous design. `dispose()` releases the viewport and invalidates imports.
  */
-export function createViewport(element, onFailure, onCursorMode = () => {}, sharedArtifacts) {
+export function createViewport(element, onFailure, onCursorMode = () => {}, sharedArtifacts, onPrintLayout = () => {}) {
   const artifacts = sharedArtifacts ?? createModelArtifacts(), tasks = new Set()
   function track(work) {
     tasks.add(work)
@@ -61,10 +64,38 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   scene.add(designRoot)
   let shapeDeformer = null, shapeId = null, shapeOperation = null, shapeFrame = null, shapeValues = null, inputTime = 0
   let motion = null, motionPreview = null
+  let printPreview = null, printableParts = null, printLayout = null, printPlate = 0, printSelected = null, printDrag = null
+  const printUndo = []
+  let printFrame = null
+  function printSnapshot() {
+    return { active: Boolean(printPreview), manufacturingMode: design?.robot?.assembly?.manufacturing.mode ?? null, layout: printLayout ? structuredClone(printLayout) : null, plate: printPlate, selected: printSelected,
+      parts: printableParts?.map(part => ({ id: part.id, name: part.name })) ?? [],
+      issues: printLayout && printableParts ? layoutIssues(printableParts, printLayout) : [], canUndo: printUndo.length > 0 }
+  }
+  function publishPrint() { onPrintLayout(printSnapshot()) }
+  function clearPrint(forget = false, restore = true) {
+    if (printFrame !== null) cancelAnimationFrame(printFrame)
+    printFrame = null
+    printPreview?.dispose(); printPreview = null; designRoot.visible = true
+    const pointerId = printDrag?.pointerId
+    if (printDrag) printLayout = printDrag.previous
+    printDrag = null
+    if (pointerId !== undefined && renderer.domElement.hasPointerCapture(pointerId)) renderer.domElement.releasePointerCapture(pointerId)
+    if (controls) controls.enabled = true
+    if (forget) { printableParts = null; printLayout = null; printUndo.length = 0; printSelected = null; printPlate = 0 }
+    if (restore) {
+      highlightOverlay?.resume()
+      clearVolume()
+      if (designVolume) buildVolume(designVolume)
+      volumeKey = designVolume ? `${designVolume.x},${designVolume.y},${designVolume.z}` : 'none'
+      publishPrint()
+    }
+  }
+  function drawPrint() { printPreview.apply(printLayout, printPlate, printSelected); render() }
   const poses = new Map()
   function clearMotion() { if (motionPreview) clearHighlight(); motionPreview?.dispose(); motionPreview = null }
   function showMotion() {
-    if (!motion || !design || shapeDeformer) return
+    if (!motion || !design || shapeDeformer || printPreview) return
     if (Object.entries(motion.values).every(([key, value]) => design.parameters[key] === value)) { clearMotion(); return }
     if (!motionPreview) {
       clearHighlight()
@@ -118,7 +149,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   scene.add(camera)
 
   const hover = createHover(renderer.domElement, camera,
-    () => shapeDeformer ? [] : [...objects.values()].map(entry => entry.mesh).concat(design ? [designRoot] : []), render, onCursorMode)
+    () => shapeDeformer || printPreview ? [] : [...objects.values()].map(entry => entry.mesh).concat(design ? [designRoot] : []), render, onCursorMode)
   const cameraChanged = () => { if (!hover.invalidate()) render() }
 
   function clearVolume() {
@@ -152,7 +183,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   function frame() {
     const bounds = new THREE.Box3()
     for (const { mesh } of objects.values()) bounds.expandByObject(mesh)
-    if (design) bounds.expandByObject(designRoot)
+    if (printPreview) { bounds.expandByObject(printPreview.root); if (volumeNodes[0]) bounds.expandByObject(volumeNodes[0]) }
+    else if (design) bounds.expandByObject(designRoot)
     if (bounds.isEmpty()) return
     const { center, radius } = bounds.getBoundingSphere(new THREE.Sphere())
     // The pane is usually taller than wide, so clear the narrower of the two fields.
@@ -186,7 +218,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   }
 
   function syncHighlight() {
-    const highlight = !motionPreview && designUrl === designSpec?.url ? designSpec?.highlight : null
+    if (printPreview) return
+    const highlight = !printPreview && !motionPreview && designUrl === designSpec?.url ? designSpec?.highlight : null
     if (highlightOverlay && highlightId === (highlight?.id ?? null)) return
     if (!design) { clearHighlight(); return }
     if (highlightOverlay) highlightOverlay.update(highlight ?? { blobs: [] })
@@ -231,7 +264,93 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     return measurement.report
   }
 
+
+  const printRay = new THREE.Raycaster(), printPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0)
+  function printPoint(event) {
+    const rect = renderer.domElement.getBoundingClientRect()
+    printRay.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, 1 - (event.clientY - rect.top) / rect.height * 2), camera)
+    return printRay.ray.intersectPlane(printPlane, new THREE.Vector3())
+  }
+  function printDown(event) {
+    if (!printPreview || printDrag || event.button !== 0) return
+    const point = printPoint(event)
+    const hit = printRay.intersectObjects(printPreview.root.children.filter(node => node.visible), true)[0]
+    if (!hit || !point) return
+    let node = hit.object
+    while (node && !node.userData.printPart) node = node.parent
+    if (!node) return
+    printSelected = node.userData.printPart
+    const placement = printLayout.parts.find(part => part.id === printSelected)
+    printDrag = { pointerId: event.pointerId, origin: point, position: [...placement.position], previous: structuredClone(printLayout) }
+    controls.enabled = false
+    renderer.domElement.setPointerCapture(event.pointerId)
+    event.stopImmediatePropagation(); publishPrint()
+  }
+  function printMove(event) {
+    if (!printDrag || event.pointerId !== printDrag.pointerId) return
+    const point = printPoint(event)
+    if (!point) return
+    const placement = printLayout.parts.find(part => part.id === printSelected)
+    placement.position = [printDrag.position[0] + point.x - printDrag.origin.x, printDrag.position[1] + point.y - printDrag.origin.y]
+    if (printFrame === null) printFrame = requestAnimationFrame(() => {
+      printFrame = null
+      if (!closed && printPreview) drawPrint()
+    })
+    event.stopImmediatePropagation()
+  }
+  function printUp(event) {
+    if (!printDrag || event.pointerId !== printDrag.pointerId) return
+    if (printFrame !== null) cancelAnimationFrame(printFrame)
+    printFrame = null
+    if (event.type !== 'pointerup') printLayout = printDrag.previous
+    else { printUndo.push(printDrag.previous); if (printUndo.length > 32) printUndo.shift() }
+    printDrag = null; controls.enabled = true
+    if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId)
+    drawPrint(); publishPrint(); event.stopImmediatePropagation()
+  }
+  const printListeners = [['pointerdown', printDown], ['pointermove', printMove], ['pointerup', printUp], ['pointercancel', printUp], ['lostpointercapture', printUp]]
+  for (const [name, listener] of printListeners) renderer.domElement.addEventListener(name, listener, true)
+
   return {
+    /** Enter a print-only preview; an absent saved layout creates deterministic placement. */
+    openPrintLayout(saved, options) {
+      if (!design || designUrl !== designSpec?.url || shapeDeformer || objects.size) throw new Error('Load a canonical model and finish editing before arranging')
+      clearMotion(); highlightOverlay?.suspend()
+      try {
+        if (!printableParts) printableParts = printParts(design)
+        const identity = printLayoutIdentity(designSpec, options.volume)
+        const candidate = saved ?? printLayout ?? arrangePrintParts(printableParts, { ...options, identity })
+        if (candidate.identity !== identity) throw new Error('Print layout belongs to another model revision')
+        const next = createPrintPreview(printableParts, scene, solidMaterial.color)
+        try { next.apply(candidate, printPlate) } catch (error) { next.dispose(); throw error }
+        printPreview?.dispose(); printPreview = next; printLayout = structuredClone(candidate)
+        printSelected = printLayout.parts[0].id; designRoot.visible = false
+        clearVolume(); buildVolume(options.volume)
+        hover.clear(); cursorAnchors.clear(); frame(); drawPrint(); publishPrint()
+        return printSnapshot()
+      } catch (error) { highlightOverlay?.resume(); showMotion(); syncHighlight(); render(); throw error }
+    },
+    closePrintLayout() { clearPrint(); showMotion(); syncHighlight(); render() },
+    printLayoutState: printSnapshot,
+    selectPrintPart(id) { printSelected = id; printPlate = printLayout.parts.find(part => part.id === id).plate; drawPrint(); publishPrint() },
+    selectPrintPlate(plate) { printPlate = plate; printSelected = printLayout.parts.find(part => part.plate === plate)?.id ?? printSelected; drawPrint(); publishPrint() },
+    editPrintPart(change) {
+      if (!printPreview || !printSelected) return
+      const next = structuredClone(printLayout), part = next.parts.find(part => part.id === printSelected)
+      if (change.move) part.position = part.position.map((n, i) => n + change.move[i])
+      if (change.rotate !== undefined) part.rotation[change.rotate] = (part.rotation[change.rotate] + 90) % 360
+      if (change.plate !== undefined) { part.plate = change.plate; printPlate = change.plate }
+      printPreview.apply(next, printPlate, printSelected)
+      printUndo.push(printLayout); if (printUndo.length > 32) printUndo.shift()
+      printLayout = next; render(); publishPrint()
+    },
+    rearrangePrintParts(options) {
+      const next = arrangePrintParts(printableParts, { ...options, identity: printLayout.identity })
+      printUndo.push(printLayout); if (printUndo.length > 32) printUndo.shift()
+      printLayout = next; printPlate = 0; drawPrint(); publishPrint()
+    },
+    undoPrintLayout() { if (printUndo.length) { printLayout = printUndo.pop(); printPlate = 0; drawPrint(); publishPrint() } },
+    exportPrintPlate() { return printPreview.exportPlate() },
     /** Effective parameters of the successfully loaded model, including defaults. */
     modelParameters() { return { ...design?.parameters } },
     /** Movement is a local pose; it never changes saved parameters or validation inputs. */
@@ -247,6 +366,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       return true
     },
     async applyShape(spec) {
+      if (spec && printPreview) clearPrint()
       if (!spec) { clearShape(); showMotion(); syncHighlight(); render(); return null }
       clearMotion()
       if (!design) throw new Error('Load the model before its shape controls')
@@ -285,11 +405,11 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     shapeMetrics: () => ({ ...shapeMetrics }),
     /** The highlight drawn by the visible viewport, or null when it cannot be acknowledged. */
     renderedHighlight() {
-      return !closed && !document.hidden && highlightVisible && designUrl === designSpec?.url ? highlightId : null
+      return !closed && !printPreview && !document.hidden && highlightVisible && designUrl === designSpec?.url ? highlightId : null
     },
     /** Capture the live cursor region and current camera view; no previous hover is reused. */
     captureCursor(request = {}) {
-      if (closed || document.hidden || shapeDeformer || motionPreview) return { status: 'viewer_unavailable' }
+      if (closed || document.hidden || shapeDeformer || motionPreview || printPreview) return { status: 'viewer_unavailable' }
       if (design && designUrl !== designSpec?.url) return { status: 'stale_view' }
       const anchor = request.anchorId ? cursorAnchors.get(request.anchorId) : null
       const identityKey = JSON.stringify([sceneRevision, designUrl, designSpec?.transform])
@@ -349,7 +469,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     },
     /** Capture a fitted 480 × 320 PNG using the loaded geometry; restore the interactive viewport. */
     thumbnail() {
-      if (closed || shapeDeformer || (objects.size === 0 && !design)) return null
+      if (closed || shapeDeformer || printPreview || (objects.size === 0 && !design)) return null
       const bounds = new THREE.Box3()
       for (const { mesh } of objects.values()) bounds.expandByObject(mesh)
       if (design) bounds.expandByObject(designRoot)
@@ -388,6 +508,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     async applyDesign(spec, volume) {
       if (closed) return null
       if (designUrl !== spec?.url) { hover.clear(); cursorAnchors.clear() }
+      if (printLayout && (!spec || spec.url !== designUrl || printLayout.identity !== printLayoutIdentity(spec, volume ?? printLayout.volume))) clearPrint(true)
       designSpec = spec
       designVolume = volume
       if (!spec) {
@@ -484,7 +605,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
             disposeModel(model.root); geometries.delete(id)
           }
           const key = view.volume === null ? 'none' : `${view.volume.x},${view.volume.y},${view.volume.z}`
-          if (key !== volumeKey) {
+          if (!printPreview && key !== volumeKey) {
             clearVolume()
             if (view.volume !== null) buildVolume(view.volume)
             volumeKey = key
@@ -495,10 +616,11 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       })())
     },
     dispose() {
-      clearShape(); clearMotion(); poses.clear()
       if (closed) return Promise.allSettled([...tasks])
       closed = true
+      clearPrint(true, false); clearShape(); clearMotion(); poses.clear()
       generation++
+      for (const [name, listener] of printListeners) renderer.domElement.removeEventListener(name, listener, true)
       hover.dispose()
       cursorAnchors.clear()
       clearHighlight()

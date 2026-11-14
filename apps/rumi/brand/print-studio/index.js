@@ -75,6 +75,10 @@ export const Config = z.object({
     distortionDegrees: z.number().min(1).max(89).default(45),
     minimumClearanceMm: z.number().min(0).max(2).default(0.2),
   }).default({}),
+  printLayout: z.object({
+    gap: z.number().min(0).max(50).default(5),
+    volume: z.object({ x: z.number().min(1).max(2000).default(300), y: z.number().min(1).max(2000).default(320), z: z.number().min(1).max(2000).default(320) }).default({}),
+  }).default({}),
   viewerLoadTimeoutMs: z.number().step(1).min(1).max(25000).default(8000),
   viewerDiagnosticsDirectory: z.string().default(join(homedir(), '.rumi', 'viewer-logs')),
 })

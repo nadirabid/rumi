@@ -341,10 +341,12 @@ def joint(name, kind, parent, child, axis='Z', pivot=(0, 0, 0), limits=(0, 0), c
     return record
 
 
-def robot(root, joints, mode='print-in-place', sequences=()):
+def robot(root, joints, mode=None, sequences=(), steps=None):
     """Return the `configure_robot` callback for the helper's publish: `root` is held, every other mesh must be a joint child.
 
-    mode is 'print-in-place' (captive parts printed assembled) or 'separate' (printed apart and assembled).
+    Moving assemblies require explicit mode='separate' and connectors that can be assembled after printing.
+    Omitting mode is supported only for static models; legacy print-in-place movement requires redesign.
+    steps lists translation-only removal paths for every nonroot part; omitted paths leave assembly unverified.
     sequences is a list of dict(id=..., waypoints=[{joint_name: value}, ...]) for joints that only move together,
     in degrees or millimetres.
     """
@@ -359,14 +361,19 @@ def robot(root, joints, mode='print-in-place', sequences=()):
     order = [root] + [obj for obj in meshes if obj is not root]
     assembly = dict(version=1, root=root.name, parts=[dict(id=obj.name, mesh=obj.name) for obj in order],
                     connections=flat, sequences=[dict(item) for item in sequences], manufacturing=dict(mode=mode))
-    migrate = runpy.run_path(str(_HERE / 'robot_usd.py'))['migrate_assembly']
+    if steps is not None:
+        assembly['manufacturing']['steps'] = [dict(step) for step in steps]
+    robot_helpers = runpy.run_path(str(_HERE / 'robot_usd.py'))
+    robot_helpers['require_separate_moving_parts'](assembly)
+    assembly['manufacturing']['mode'] = mode or 'separate'
+    migrate = robot_helpers['migrate_assembly']
 
     def configure_robot(stage):
         migrate(stage, assembly)
     return configure_robot
 
 
-def publish(directory, root, joints=(), mode='print-in-place', sequences=()):
+def publish(directory, root, joints=(), mode=None, sequences=(), steps=None):
     """Publish the scene as `directory/model.usda` with its assembly, print `RUMI_CHECKS`, and return the helper's report.
 
     root is the part the checker holds still; joints is the list of records the recipes returned (nested lists are fine).
@@ -375,7 +382,7 @@ def publish(directory, root, joints=(), mode='print-in-place', sequences=()):
     meshes = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH']
     if len(meshes) == 1 and not joints:
         return helper['publish'](directory)
-    return helper['publish'](directory, configure_robot=robot(root, joints, mode, sequences))
+    return helper['publish'](directory, configure_robot=robot(root, joints, mode, sequences, steps))
 
 
 def _load_recipes():

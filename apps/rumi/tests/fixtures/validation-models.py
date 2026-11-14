@@ -1,6 +1,5 @@
-"""Generate small solid and captive-wheel fixtures using the bundled USD publisher."""
+"""Generate small solid and separately assembleable slider fixtures using the bundled USD publisher."""
 import importlib.util
-import math
 from pathlib import Path
 import runpy
 import sys
@@ -12,16 +11,20 @@ fixtures = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixtures)
 publish = runpy.run_path(helper)['publish']
 robot = runpy.run_path(str(Path(helper).with_name('robot_usd.py')))
-wheel = fixtures.wheel(play=.5)
-# Keep tessellated radial clearance above the production 0.2 mm minimum.
-for vertex in wheel['bodies'][0]['vertices']:
-    radius = math.hypot(vertex[0], vertex[1])
-    if abs(radius - 3.8) < .001:
-        vertex[0] *= 3.5 / radius
-        vertex[1] *= 3.5 / radius
-wheel['assembly']['connections'][0]['range'] = [-90, 90]
+slider = fixtures.slider()
+# Separate sliding parts have a clear insertion route and production-sized clearance and walls.
+for vertex in slider['bodies'][0]['vertices']:
+    vertex[0] *= 2
+    for axis in (1, 2):
+        radius = abs(vertex[axis])
+        vertex[axis] *= (5.3 if abs(radius - 2.05) < .001 else 6.8) / radius
+for vertex in slider['bodies'][1]['vertices']:
+    vertex[0] *= 4
+    vertex[1] *= 2.5
+    vertex[2] *= 2.5
+slider['assembly']['manufacturing'] = dict(mode='separate', steps=[dict(part='moving', path=[[0,0,0], [40,0,0]])])
 solid = fixtures.assembly([fixtures.box('block', [0, 0, 10], [10, 10, 10])], 'block', [])
-for name, request in [('solid', solid), ('wheel', wheel)]:
+for name, request in [('solid', solid), ('slider', slider)]:
     bpy.ops.wm.read_factory_settings(use_empty=True)
     for body in request['bodies']:
         mesh = bpy.data.meshes.new(body['id'])

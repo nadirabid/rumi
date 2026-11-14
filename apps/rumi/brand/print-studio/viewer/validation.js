@@ -11,7 +11,7 @@ import { runBullet } from '../bullet/runner.js'
 import { validationState, preserveMovement } from './validation-state.js'
 import { summarizeValidationReport, summarizeValidationState } from './validation-summary.js'
 
-const POLICY_VERSION = 5
+const POLICY_VERSION = 6
 const blocking = report => report.checks.some(check => check.count && check.severity === 'error')
 const passedMechanics = report => report?.status === 'passed' && report.assemblyVerified === true && report.coverage?.complete === true
 

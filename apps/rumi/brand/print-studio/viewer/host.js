@@ -1,3 +1,4 @@
+import { usdRequiresSeparatePrint } from './usd.js'
 /**
  * The mesh preview capability: a session-owned scene, the routes the browser
  * reads it through, and the tools that edit it.
@@ -8,6 +9,7 @@
  * resizing never rewrites a mesh, and the browser renders the same geometry it
  * already fetched.
  */
+import { registerPrintLayout } from './print-layout/host.js'
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
@@ -343,6 +345,16 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       ? { status: 'source_failed', error: record.source.state().error } : undefined)
     record.catalogError = null
   }
+
+  if (validationConfig?.printLayout) registerPrintLayout(ctx, (sessionId, operation) => {
+    const record = recordFor(sessionId)
+    return serialize(record, async () => {
+      await discover(sessionId, record)
+      const design = record.source?.state()
+      if (!design || design.error?.kind === 'source') throw new Error('Load a model before arranging it')
+      return operation({ design, requiresSeparatePrint: usdRequiresSeparatePrint(record.source.snapshotBytes()), cwd: await directoryFor(sessionId, record), model: record.selectedModel, volume: record.history.current().volume })
+    })
+  }, validationConfig.printLayout)
 
   route('/events', async request => {
     const url = new URL(request.url)

@@ -49,6 +49,7 @@ it('documents creating multiple models and bringing a named entry into view', as
     printer: await readFile(new URL('../skills/printer-awareness/SKILL.md', import.meta.url), 'utf8'),
     setup: await readFile(new URL('../skills/print-studio-setup/SKILL.md', import.meta.url), 'utf8'),
     fdm: await readFile(new URL('../skills/fdm-design/SKILL.md', import.meta.url), 'utf8'),
+    joints: await readFile(new URL('../skills/joints/SKILL.md', import.meta.url), 'utf8'),
     blender: await readFile(new URL('../skills/blender-modeling/SKILL.md', import.meta.url), 'utf8'),
     instructions: await readFile(new URL('../AGENTS_TEMPLATE.md', import.meta.url), 'utf8'),
     load: f.raw('viewer_load').description,

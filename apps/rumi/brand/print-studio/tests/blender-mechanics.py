@@ -53,6 +53,7 @@ for variant in ('normal', 'broken', 'blocked', 'point-touching', 'wheel', 'stati
         request['assembly']['parts'].append(dict(id='obstacle', mesh='obstacle'))
         request['assembly']['connections'].append(dict(id='mount_obstacle', parent=request['assembly']['root'], child='obstacle', kind='fixed'))
     description = request['assembly']
+    description['manufacturing']['mode'] = 'separate'
     report = export(output / variant, description)
     description = metadata(report['preview'])
     (output / variant / 'robot.json').write_text(json.dumps(description))

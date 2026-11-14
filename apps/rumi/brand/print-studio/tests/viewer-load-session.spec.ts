@@ -1,4 +1,9 @@
 /** Rendered load feedback reaches the model through the real tool and session pipeline. */
+import * as React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { Button, Menu, IconChevronDownOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { createPrintLayoutPanel } from '../viewer/print-layout/panel.js'
+import { en } from '../viewer/locales.js'
 import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -86,6 +91,15 @@ it.each(['usd'])('delivers %s load measurements and movement to the next model r
       const layout = arrangePrintParts(parts, { identity: 'recorded-model', volume: { x: 300, y: 320, z: 320 }, gap: 5 })
       printPreparation = { manufacturingMode: model.robot.assembly.manufacturing.mode,
         parts: parts.map(part => part.id), layout, issues: layoutIssues(parts, layout) }
+      const Panel = createPrintLayoutPanel(React, { Button, Menu, IconChevronDownOutlineRegular })
+      const controls = renderToStaticMarkup(React.createElement(Panel, {
+        state: { ...printPreparation, active: true, plate: 0, selected: parts[0].id,
+          parts: parts.map(part => ({ id: part.id, name: part.name })), canUndo: false },
+        available: true, busy: false, message: null, action: () => {},
+        t: (key: keyof typeof en, values: Record<string, string | number> = {}) =>
+          en[key].replace(/\{(\w+)\}/g, (_, name: string) => String(values[name])),
+      })).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      printPreparation = { ...printPreparation, controls }
       let glbFeedback
       try {
         glbFeedback = { parameters: { ...generated.parameters, ...model.parameters },

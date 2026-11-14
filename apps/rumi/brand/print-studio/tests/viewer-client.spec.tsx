@@ -3,6 +3,7 @@ import * as React from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
+import { Menu, IconChevronDownOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { installViewer } from '../viewer/client.js'
 import { en, zh } from '../viewer/locales.js'
 import { encodeStl } from '../viewer/stl.js'
@@ -92,7 +93,7 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
         return () => { entries.delete(options.name) }
       },
     },
-  }, React, { PluginArtworkDefault: () => null, Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant: string; size: string }) => React.createElement('button', props) })
+  }, React, { Menu, IconChevronDownOutlineRegular, PluginArtworkDefault: () => null, Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant: string; size: string }) => React.createElement('button', props) })
   return {
     opened, fetch,
     requestCursor: (id: string) => { state.cursorRequest = { id } },
@@ -411,4 +412,27 @@ it('keeps movement controls in their own area across model reloads without openi
   view.setScene({ ...scene([]), design: { ...design, url: '/without-movement.js', revision: 3 } })
   await settle(2000)
   expect(screen.queryByRole('slider', { name: 'Doors' })).toBeNull()
+})
+
+
+it.each([
+  ['changed', 'validationChanged'], ['checking', 'validationChecking'], ['needs_repair', 'validationRepair'],
+  ['review', 'validationReview'], ['unavailable', 'validationUnavailable'], ['passed', 'layoutModelChecked'],
+] as const)('shows the selected model’s %s status during print review', async (status, label) => {
+  const path = 'models/kart/model.usda'
+  const model = { path, status, sourceHash: 'current', fingerprint: 'revision', acceptedFingerprint: 'revision' }
+  const base = { ...scene([]), selectedModel: path, design: { url: '/kart/model.usda', contentHash: 'current', revision: 1 },
+    validation: { models: [{ ...model, path: 'models/other/model.usda', status: 'needs_repair' }, model] } }
+  const view = fixture({ scene: base })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  const publish = viewport.create.mock.calls.at(-1)?.[4]
+  expect(typeof publish).toBe('function')
+  act(() => publish({ active: true, selected: 'body', plate: 0, parts: [{ id: 'body', name: 'Body' }], issues: [],
+    layout: { identity: 'kart', parts: [{ id: 'body', plate: 0 }], volume: { x: 300, y: 320, z: 320 }, gap: 5 } }))
+  fireEvent.click(screen.getByRole('button', { name: en.layoutReview }))
+  expect(screen.getByText(en[label])).toBeTruthy()
+  view.setScene({ ...base, design: { ...base.design, contentHash: 'new' } })
+  await settle(2000)
+  expect(screen.getByText(en[status === 'unavailable' ? 'validationUnavailable' : 'validationChanged'])).toBeTruthy()
 })

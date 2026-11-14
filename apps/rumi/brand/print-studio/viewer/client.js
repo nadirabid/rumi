@@ -47,7 +47,7 @@ export function installViewer(ctx, React, primitives) {
   const AnalogPanel = createAnalogPanel(React)
   const { PluginArtworkDefault, Button } = primitives
   const ModelSelector = createModelSelector(React, Button)
-  const PrintLayoutPanel = createPrintLayoutPanel(React, Button)
+  const PrintLayoutPanel = createPrintLayoutPanel(React, primitives)
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'print viewer: copy')
   ctx.effect(() => {
@@ -191,7 +191,7 @@ export function installViewer(ctx, React, primitives) {
   }, 'print viewer: scene polling')
 
   /** The canvas and its three.js adapter; mounted only while the scene has objects. */
-  function Stage({ view, t }) {
+  function Stage({ view, validation = 'layoutChecksMissing', t }) {
     const holder = React.useRef(null)
     const viewport = React.useRef(null)
     const designReady = React.useRef(Promise.resolve(null))
@@ -444,7 +444,7 @@ export function installViewer(ctx, React, primitives) {
     }, [view])
     return h(React.Fragment, null,
       view?.design && h(PrintLayoutPanel, { state: printState, available: !view.design.analog && !failed,
-        busy: printBusy, message: printMessage, t, action: printAction }),
+        busy: printBusy, message: printMessage, validation, t, action: printAction }),
       !printState?.active && h('div', { className: 'pv-bottom-controls' },
       motion && h('fieldset', { className: 'pv-motion-controls', disabled: Boolean(view?.design?.analog), inert: Boolean(view?.design?.analog), 'aria-label': t('motionControls') },
         h(AnalogPanel, { key: motion.id, spec: { ...motion, label: t('motionControls') }, t,
@@ -473,6 +473,19 @@ export function installViewer(ctx, React, primitives) {
       h('div', { className: 'pv-stage', ref: holder, role: 'img', 'aria-label': t('view'), 'data-testid': 'print-viewport' }),
       buildError && !failed && view?.design?.error?.kind !== 'source'
         ? h('p', { role: 'alert', className: view?.design?.analog ? 'pv-error av-error' : 'pv-error' }, t(buildError)) : null)
+  }
+
+  function printValidationLabel(scene) {
+    const item = scene.validation?.models.find(model => model.path === scene.selectedModel)
+    if (scene.validation?.error || item?.error || item?.status === 'unavailable') return 'validationUnavailable'
+    if (!item) return 'layoutChecksMissing'
+    if (item.status === 'changed' || item.sourceHash !== scene.design?.contentHash) return 'validationChanged'
+    if (item.status === 'checking') return 'validationChecking'
+    if (item.status === 'needs_repair') return 'validationRepair'
+    if (item.report?.mechanics?.status === 'review') return 'validationMechanicsReview'
+    if (item.status === 'review') return 'validationReview'
+    if (item.acceptedFingerprint === item.fingerprint) return 'layoutModelChecked'
+    return 'layoutChecksMissing'
   }
 
   function validationLabel(scene) {
@@ -527,7 +540,7 @@ export function installViewer(ctx, React, primitives) {
         }, scene.failed ? t('previewFailed') : t('loading')))
     }
     return h('section', { className: 'rumi-print-viewer', 'aria-label': t('title') },
-      h(Stage, { key: state.view.sessionId, view: state.view, t }),
+      h(Stage, { key: state.view.sessionId, view: state.view, validation: printValidationLabel(scene), t }),
       scene.design?.error?.kind === 'source' ? h('p', { role: 'alert', className: 'pv-error' }, t('sourceFailed')) : null,
       scene.failed ? h('p', { role: 'alert', className: 'pv-error' }, t('previewFailed')) : null)
   }

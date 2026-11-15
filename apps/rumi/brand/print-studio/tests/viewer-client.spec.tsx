@@ -10,12 +10,13 @@ import { en, zh } from '../viewer/locales.js'
 import { encodeStl } from '../viewer/stl.js'
 
 vi.mock('../viewer/viewer.module.css', () => ({ default: '' }))
-const viewport = vi.hoisted(() => ({ closePrintLayout: vi.fn(), motionControls: vi.fn(), updateMotion: vi.fn(), modelParameters: vi.fn(() => ({ width: 12 })), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
+const viewport = vi.hoisted(() => ({ setActivity: vi.fn(), closePrintLayout: vi.fn(), motionControls: vi.fn(), updateMotion: vi.fn(), modelParameters: vi.fn(() => ({ width: 12 })), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
 vi.mock('../viewer/viewport/index.js', () => ({
   createViewport: (...args: unknown[]) => {
     viewport.create(...args)
     return {
-      closePrintLayout: viewport.closePrintLayout, motionControls: viewport.motionControls, updateMotion: viewport.updateMotion,
+      setActivity: viewport.setActivity, closePrintLayout: viewport.closePrintLayout,
+      motionControls: viewport.motionControls, updateMotion: viewport.updateMotion,
       modelParameters: viewport.modelParameters, renderedHighlight: viewport.renderedHighlight,
       captureCursor: viewport.captureCursor, setHighlightVisible: viewport.setHighlightVisible,
       thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose,
@@ -38,6 +39,7 @@ beforeEach(() => {
   viewport.captureCursor.mockReset().mockReturnValue({ status: 'no_hit' })
   viewport.renderedHighlight.mockReset().mockReturnValue(null)
   viewport.closePrintLayout.mockReset()
+  viewport.setActivity.mockReset()
   viewport.create.mockClear()
   viewport.apply.mockClear()
   viewport.dispose.mockClear()
@@ -420,9 +422,12 @@ it('keeps movement controls in their own area across model reloads without openi
 it.each([
   ['changed', 'validationChanged'], ['checking', 'validationChecking'], ['needs_repair', 'validationRepair'],
   ['review', 'validationReview'], ['unavailable', 'validationUnavailable'], ['passed', 'layoutModelChecked'],
-] as const)('shows the selected model’s %s status during print review', async (status, label) => {
+  ['checked', 'validationChecksPassed'],
+] as const)('shows the selected model’s %s status while arranging for print', async (status, label) => {
   const path = 'models/kart/model.usda'
-  const model = { path, status, sourceHash: 'current', fingerprint: 'revision', acceptedFingerprint: 'revision' }
+  const model = { path, status: status === 'checked' ? 'review' : status, sourceHash: 'current', fingerprint: 'revision',
+    acceptedFingerprint: status === 'checked' ? null : 'revision',
+    ...(status === 'checked' ? { report: { checks: [], mechanics: { status: 'passed', assemblyVerified: true, coverage: { complete: true } } } } : {}) }
   const base = { ...scene([]), selectedModel: path, design: { url: '/kart/model.usda', contentHash: 'current', revision: 1 },
     validation: { models: [{ ...model, path: 'models/other/model.usda', status: 'needs_repair' }, model] } }
   const view = fixture({ scene: base })
@@ -432,11 +437,10 @@ it.each([
   expect(typeof publish).toBe('function')
   act(() => publish({ active: true, selected: 'body', plate: 0, parts: [{ id: 'body', name: 'Body' }], issues: [],
     layout: { identity: 'kart', parts: [{ id: 'body', plate: 0 }], volume: { x: 300, y: 320, z: 320 }, gap: 5 } }))
-  fireEvent.click(screen.getByRole('button', { name: en.layoutReview }))
-  expect(screen.getByText(en[label])).toBeTruthy()
+  expect(status === 'checking' ? screen.getByRole('img', { name: en.activityChecking }) : screen.getByRole('img', { name: en[label] })).toBeTruthy()
   view.setScene({ ...base, design: { ...base.design, contentHash: 'new' } })
   await settle(2000)
-  expect(screen.getByText(en[status === 'unavailable' ? 'validationUnavailable' : 'validationChanged'])).toBeTruthy()
+  expect(status === 'checking' ? screen.getByRole('img', { name: en.activityChecking }) : screen.getByRole('img', { name: en[status === 'unavailable' ? 'validationUnavailable' : 'validationChanged'] })).toBeTruthy()
 })
 
 
@@ -477,4 +481,29 @@ it('autosaves committed placement, deduplicates selection, and exposes retry aft
     await settle()
     expect(viewport.closePrintLayout).toHaveBeenCalledOnce()
   } finally { pending.reject(new Error('test cleanup')); await settle() }
+})
+
+
+it('animates work without visible labels and locks print actions while retaining precise pointing', async () => {
+  const path = 'models/kart/model.usda'
+  const base = { ...scene([]), selectedModel: path, design: { url: '/kart/model.usda', contentHash: 'current', revision: 1 },
+    workingModels: [path], agentRunning: true }
+  const view = fixture({ scene: base })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  expect(viewport.setActivity).toHaveBeenLastCalledWith('building')
+  expect(screen.getByRole('button', { name: en.layoutPrint }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: en.cursor_patch }).hasAttribute('disabled')).toBe(false)
+  expect(screen.queryByText(en.activityBuilding)).toBeNull()
+  view.setScene({ ...base, validation: { models: [{ path, status: 'checking' }] } })
+  await settle(2000)
+  expect(viewport.setActivity).toHaveBeenLastCalledWith('checking')
+  view.setScene({ ...base, validation: { models: [{ path, status: 'valid' }] } })
+  await settle(2000)
+  expect(viewport.setActivity).toHaveBeenLastCalledWith('building')
+  expect(screen.getByRole('button', { name: en.layoutPrint }).hasAttribute('disabled')).toBe(true)
+  view.setScene({ ...base, agentRunning: false, workingModels: [] })
+  await settle(2000)
+  expect(viewport.setActivity).toHaveBeenLastCalledWith('idle')
+  expect(screen.getByRole('button', { name: en.layoutPrint }).hasAttribute('disabled')).toBe(false)
 })

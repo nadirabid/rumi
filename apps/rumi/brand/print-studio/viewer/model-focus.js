@@ -8,7 +8,7 @@ export const MODEL_FOCUS_GUIDANCE = 'Resolve model references before editing. Ex
  * @returns {object} Work declaration and session-level work paths.
  */
 export function createModelFocus(ctx, { read, notify }) {
-  const agents = new Map()
+  const agents = new Map(), running = new Set()
   function state(agent) {
     let value = agents.get(agent)
     if (!value) { value = { pending: new Map(), requests: [], turn: null, working: null }; agents.set(agent, value) }
@@ -37,8 +37,12 @@ export function createModelFocus(ctx, { read, notify }) {
     value.pending.delete(message.id)
   })
   ctx.on('agent/inbox/discarded', ({ agent, message }) => { agents.get(agent)?.pending.delete(message.id) })
-  ctx.on('agent/status', ({ agent, status }) => { if (status === 'idle') clear(agent) })
-  ctx.on('agent/disposed', ({ agent }) => clear(agent, true))
+  ctx.on('agent/status', ({ agent, status }) => {
+    if (status === 'running') running.add(agent); else running.delete(agent)
+    if (status === 'idle') clear(agent)
+    notify(agent.session.id)
+  })
+  ctx.on('agent/disposed', ({ agent }) => { running.delete(agent); clear(agent, true); notify(agent.session.id) })
   ctx.inject(['systemPrompt'], scoped => {
     scoped.effect(() => scoped.systemPrompt.section({
       name: 'rumi:model-reference-policy', order: scoped.systemPrompt.getSectionOrder('TOOL_WORKFLOW'), text: MODEL_FOCUS_GUIDANCE,
@@ -57,8 +61,10 @@ export function createModelFocus(ctx, { read, notify }) {
       },
     }), 'print viewer: model reference context')
   })
-  ctx.effect(() => () => { agents.clear() }, 'print viewer: model focus lifetime')
+  ctx.effect(() => () => { agents.clear(); running.clear() }, 'print viewer: model focus lifetime')
   return {
+    /** Whether any agent in this conversation is actively running. */
+    running(sessionId) { return [...running].some(agent => agent.session.id === sessionId) },
     /** Declare validated work without moving the user selection. */
     set(agent, path) {
       if (agent.status !== 'running') throw new Error('Model work requires a running agent')

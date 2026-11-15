@@ -341,6 +341,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
     }
     await record.source?.poll()
     await validation?.restore(sessionId, cwd, record.selectedModel)
+    void validation?.refresh(sessionId, cwd)
     loads.update(sessionId, loadIdentity(record), record.source?.state().error?.kind === 'source'
       ? { status: 'source_failed', error: record.source.state().error } : undefined)
     record.catalogError = null
@@ -380,7 +381,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       validation: validation?.read(sessionId),
       ...displayed, design: record.source?.state() ?? null,
       models: record.models ?? [], selectedModel: record.selectedModel ?? null,
-      workingModels: focus.paths(sessionId),
+      workingModels: focus.paths(sessionId), agentRunning: focus.running(sessionId),
       catalogFailed: Boolean(record.catalogError),
     } })
   })

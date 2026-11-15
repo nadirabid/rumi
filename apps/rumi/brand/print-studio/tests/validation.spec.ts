@@ -34,9 +34,16 @@ async function fixture() {
     connection: { fetch: { register: () => () => {} } } }
   const run = vi.fn(async (_config, _input, _signal, stage) => ({ ...structuredClone(report),
     ...(stage === 'fit' ? { preparedGeometry: { bodies: [], assembly: intent.assembly } } : {}) }))
-  const bullet = vi.fn(async () => structuredClone(mechanics))
+  const bullet = vi.fn(async (_config: object, _geometry: object, _signal: AbortSignal) => structuredClone(mechanics))
   const config = { validation: {}, mechanics: {}, validationTimeoutMs: 1000, mechanicsTimeoutMs: 1000, validationStateDirectory: join(root, 'validation-state') }
-  const options = { run, bullet, notify: () => {}, view: () => ({ selectedModel: null, volume: null, meshes: [] }) }
+  const scene: {
+    selectedModel: string | null
+    sourceHash?: string
+    transform: ReturnType<typeof normalizePlacement>
+    volume: { x: number; y: number; z: number } | null
+    meshes: never[]
+  } = { selectedModel: null, transform: normalizePlacement(), volume: null, meshes: [] }
+  const options = { run, bullet, notify: () => {}, view: () => scene }
   const validation = createValidation(ctx, config, options)
   cleanup.push(() => validation.dispose())
   await mkdir(join(root, 'models/car'), { recursive: true })
@@ -48,7 +55,7 @@ async function fixture() {
     const { path: modelPath, fingerprint } = validation.read('a').models[0]
     return { path: modelPath, fingerprint }
   }
-  return { root, ctx, config, options, validation, run, bullet, call, receipt, listeners }
+  return { root, ctx, config, options, validation, run, bullet, call, receipt, listeners, scene }
 }
 
 it('never starts checks or repairs on project open or turn completion', async () => {
@@ -136,7 +143,7 @@ it('rejects stale results when source changes while a check runs', async () => {
 
 it('cancels active work on disposal and waits for its settlement', async () => {
   const f = await fixture()
-  f.run.mockImplementation((_config, _input, signal) => new Promise((_resolve, reject) => {
+  f.run.mockImplementation((_config, _input, signal) => new Promise<typeof mechanics>((_resolve, reject) => {
     signal.addEventListener('abort', () => reject(new Error('Cancelled')), { once: true })
   }))
   const pending = f.call('mechanics')
@@ -298,4 +305,69 @@ it('compacts successful probes without losing failures, coverage, policy or diag
   }
   expect(full.mechanics.connections[0].probes).toHaveLength(1002)
   expect(JSON.stringify(summary).length).toBeLessThan(JSON.stringify(state).length / 10)
+})
+
+
+it('automatically checks the visible revision once and refreshes changed printer settings', async () => {
+  const f = await fixture()
+  await f.receipt()
+  Object.assign(f.scene, { selectedModel: path, sourceHash: f.validation.read('a').models[0].sourceHash })
+  await f.validation.refresh('a', f.root)
+  expect(f.bullet).toHaveBeenCalledTimes(1)
+  expect(f.validation.read('a').models[0].completedStages).toEqual(['assembly', 'geometry', 'fit', 'mechanics'])
+  expect(f.validation.read('a').models[0].acceptedFingerprint).toBeNull()
+  await f.validation.refresh('a', f.root)
+  expect(f.run).toHaveBeenCalledTimes(3)
+  f.scene.volume = { x: 100, y: 100, z: 100 }
+  await f.validation.refresh('a', f.root)
+  expect(f.bullet).toHaveBeenCalledTimes(2)
+})
+
+it('cancels superseded background checks and checks the latest revision after draining', async () => {
+  const f = await fixture(), started = Promise.withResolvers<void>()
+  await f.receipt()
+  Object.assign(f.scene, { selectedModel: path, sourceHash: f.validation.read('a').models[0].sourceHash })
+  f.bullet.mockImplementationOnce((_config, _geometry, signal) => new Promise<typeof mechanics>((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    started.resolve()
+  }))
+  const old = f.validation.refresh('a', f.root)
+  await started.promise
+  f.scene.volume = { x: 200, y: 200, z: 200 }
+  await f.validation.refresh('a', f.root)
+  await old
+  expect(f.validation.read('a').models[0].report).toBeNull()
+  await f.validation.refresh('a', f.root)
+  expect(f.bullet).toHaveBeenCalledTimes(2)
+  expect(f.validation.read('a').models[0].report.mechanics.status).toBe('passed')
+})
+
+it('keeps background failures visible without retrying on every viewer poll', async () => {
+  const f = await fixture()
+  await f.receipt()
+  Object.assign(f.scene, { selectedModel: path, sourceHash: f.validation.read('a').models[0].sourceHash })
+  f.bullet.mockRejectedValueOnce(new Error('checker unavailable'))
+  await f.validation.refresh('a', f.root)
+  expect(f.validation.read('a').models[0].status).toBe('unavailable')
+  await f.validation.refresh('a', f.root)
+  expect(f.bullet).toHaveBeenCalledTimes(1)
+  await f.call('mechanics')
+  expect(f.validation.read('a').error).toBeNull()
+  expect(f.bullet).toHaveBeenCalledTimes(2)
+})
+
+
+it('shares background results with explicit mechanics calls without duplicate work', async () => {
+  const f = await fixture(), started = Promise.withResolvers<void>(), finish = Promise.withResolvers<typeof mechanics>()
+  await f.receipt()
+  Object.assign(f.scene, { selectedModel: path, sourceHash: f.validation.read('a').models[0].sourceHash })
+  f.bullet.mockImplementationOnce(async () => { started.resolve(); return finish.promise })
+  const background = f.validation.refresh('a', f.root)
+  try {
+    await started.promise
+    const explicit = f.call('mechanics')
+    finish.resolve(structuredClone(mechanics))
+    expect(await explicit).toMatchObject({ status: 'passed', cached: true })
+    expect(f.bullet).toHaveBeenCalledTimes(1)
+  } finally { finish.resolve(structuredClone(mechanics)); await background }
 })

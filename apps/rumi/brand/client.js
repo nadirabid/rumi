@@ -45,20 +45,13 @@ window.__ModuleLoader__.load({
       return null;
     }
 
-    /**
-     * Rumi's conversation chrome is the chat and nothing else. The row under
-     * the composer reports turn and step counts, output speed, token totals,
-     * cache hit, and context occupancy; the header carries Chat/Trajectory
-     * View tabs for a second view Rumi never uses. Both are hidden in place:
-     * the composer row is the margin under the message box, and the tab strip
-     * is what gives the header its taller two-row layout. The header keeps the
-     * shorter single-row height once the strip is gone.
-     */
+    /** Keep the stock speed statistics visible while hiding the other developer chrome. */
     const HIDDEN_CHROME = 'rumi-hidden-chrome';
 
     /** Rules removing developer chrome while preserving the layout it defined. */
     const HIDDEN_CHROME_RULES = [
       '[data-composer-dock] { visibility: hidden !important; }',
+      '[data-composer-stat="activity"] { visibility: visible !important; }',
       '[data-conversation-tabs] { display: none !important; }',
       'header div:has(> [data-conversation-tabs]) { display: none !important; }',
       'header:has([data-conversation-tabs]) { min-height: 0 !important; padding-bottom: 10px !important; }',
@@ -75,7 +68,7 @@ window.__ModuleLoader__.load({
       'div:has(> [data-slot="conversation.input.activity"]:only-child:empty) { display: none; }',
     ].join('\n');
 
-    /** Hide composer and header chrome; the disposer removes the rules again. */
+    /** Filter composer and header chrome; the disposer removes the rules again. */
     function hideChrome() {
       if (document.getElementById(HIDDEN_CHROME) !== null) return () => {};
       const style = document.createElement('style');

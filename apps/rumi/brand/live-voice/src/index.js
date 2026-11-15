@@ -58,6 +58,8 @@ export const Config = z.object({
   contextMaxCharacters: z.natural().min(1).max(64_000).default(16_000),
   /** Hard cap on one live session, in minutes. */
   maxSessionMinutes: z.number(),
+  /** Close voice after this many minutes without speech or agent work. */
+  idleTimeoutMinutes: z.number().min(1).max(60).default(4),
   /** Maximum wait for words following an early delegation. */
   transcriptWaitMs: z.natural().min(1).default(5000),
   /** Maximum time to resolve the agent and prepare reference context before submission. */
@@ -159,7 +161,7 @@ export function apply(ctx, config) {
       const instructions = await compose(sessionId);
       lifetime.signal.throwIfAborted();
       const liveId = randomUUID();
-      const entry = await createEntry({ ctx, registry, config, logger, apiKey, sessionId, liveId, instructions, session, signal: lifetime.signal, onClosed: () => stop(liveId) });
+      const entry = await createEntry({ ctx, registry, config, logger, apiKey, sessionId, liveId, instructions, session, agent: resolved.agent, signal: lifetime.signal, onClosed: () => stop(liveId) });
       if (lifetime.signal.aborted || entry.closed) {
         await entry.close();
         return json({ error: 'live voice: stopped' }, 503);
@@ -263,7 +265,7 @@ function narrate(ctx, sessionId, note) {
  * One live session: the GPT-Live socket, the bridge, and the event queue the
  * browser polls.
  */
-async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, liveId, instructions, session, signal, onClosed }) {
+async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, liveId, instructions, session, agent, signal, onClosed }) {
   const journal = createVoiceJournal(expandHome(config.diagnosticsDirectory ?? join(homedir(), '.rumi', 'voice-logs')), { sessionId, liveId }, error => {
     push({ type: 'error', message: `Voice diagnostics could not be saved: ${error.message}` });
     end('diagnostics_failed');
@@ -273,6 +275,9 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, l
   let isClosed = false;
   let muted = false;
   let cap;
+  let idleTimer;
+  let agentRunning = agent.status === 'running';
+  let stopStatus = () => {};
   const turns = new Set();
   /** Stop the session-event narration; runs before the socket closes. */
   let stopNarration = () => {};
@@ -285,9 +290,18 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, l
     waiter = null;
   };
 
+  /** Silent microphone frames and polling do not extend the idle deadline. */
+  const resetIdle = () => {
+    clearTimeout(idleTimer);
+    if (isClosed || agentRunning || turns.size > 0 || bridge.busy || bridge.snapshot().waitingForTranscript) return;
+    idleTimer = setTimeout(() => end('idle_timeout'), (config.idleTimeoutMinutes ?? 4) * 60_000);
+    idleTimer.unref?.();
+  };
+
   const handoff = (delegationId, state, detail = null) => {
     journal.record('handoff', { delegationId, state, detail });
     if (!isClosed) push({ type: 'handoff', delegationId, state });
+    resetIdle();
   };
   let speechContext = null;
   let speechText = '';
@@ -316,7 +330,8 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, l
     speechText = '';
     const turn = submit({ ...task, content });
     turns.add(turn);
-    void turn.then(() => turns.delete(turn));
+    resetIdle();
+    void turn.then(() => { turns.delete(turn); resetIdle(); });
   };
   const bridge = new LiveBridge({
     dispatch, steer: dispatch,
@@ -326,6 +341,7 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, l
       journal.record('host.commentary', { delegationId, content });
       live.send({ type: 'session.commentary.append', event_id: randomUUID(), delegation_id: delegationId, content });
       push({ type: 'transcript', role: 'assistant', text: content });
+      resetIdle();
     },
     thinking: (delegationId, content) => {
       journal.record('host.thinking', { delegationId, content });
@@ -342,6 +358,8 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, l
     acknowledgementDelayMs: config.acknowledgementDelayMs ?? 800,
     instructions: `${instructions}\n\n${conversationContext(session, config.contextMaxCharacters ?? 16_000)}`,
     onEvent: (event) => {
+      if (['session.input_transcript.delta', 'session.output_transcript.delta', 'session.output_audio.delta'].includes(event.type)
+        && typeof event.delta === 'string' && event.delta.trim() !== '') resetIdle();
       if (event.type === 'session.input_transcript.delta' || event.type === 'session.output_transcript.delta') {
         journal.record(event.type, { delta: event.delta, start_ms: event.start_ms ?? null, end_ms: event.end_ms ?? null });
       } else if (event.type === 'session.delegation.created') {
@@ -392,6 +410,7 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, l
         push({ type: 'error', message: event.error?.message ?? 'live error' });
       }
       bridge.handleLiveEvent(event);
+      if (event.type === 'session.delegation.created') resetIdle();
     },
     onClose: (detail) => {
       end('socket_closed');
@@ -410,6 +429,8 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, l
     speechLifetime.abort();
     stopNarration();
     stopContext();
+    stopStatus();
+    clearTimeout(idleTimer);
     pendingContext.length = 0;
     clearTimeout(cap);
     signal.removeEventListener('abort', abort);
@@ -425,11 +446,17 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, l
     const message = event.type === 'user/message' ? event.data
       : event.type === 'assistant/message' ? event.data.message : null;
     if (message === null) return;
+    resetIdle();
     for (const content of contextChunks(conversationText(message))) {
       const frame = { type: 'session.thinking.append', delegation_id: null, content };
       if (live.open) live.send(frame);
       else pendingContext.push(frame);
     }
+  });
+  stopStatus = ctx.on('api-session/status', (changedId, running) => {
+    if (changedId !== sessionId || isClosed) return;
+    agentRunning = running;
+    resetIdle();
   });
   signal.addEventListener('abort', abort, { once: true });
   try {
@@ -466,6 +493,7 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sessionId, l
 
   cap = setTimeout(() => end('max_session_minutes'), (config.maxSessionMinutes ?? 60) * 60_000);
   cap.unref?.();
+  resetIdle();
 
   return {
     sessionId,

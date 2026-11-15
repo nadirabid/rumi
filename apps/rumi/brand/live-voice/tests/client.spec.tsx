@@ -218,3 +218,23 @@ it.each([['dispatching', 'Sending request…'], ['accepted', 'Request accepted']
   f.switchSession('other')
   expect(screen.queryByRole('status')).toBeNull()
 })
+
+
+it('releases the microphone and resets the control when the host closes idle voice', async () => {
+  const f = fixture()
+  f.begin()
+  await act(async () => {
+    f.started.resolve(new Response(JSON.stringify({ liveId: 'live' })))
+    await f.acquiring.promise
+    f.microphone.resolve({ getTracks: () => [{ stop: f.stopTrack }] } as MediaStream)
+  })
+  await act(async () => {
+    f.ready.resolve(new Response(JSON.stringify({ events: [{ type: 'closed', reason: 'idle_timeout' }], closed: true })))
+    await f.closing.promise
+  })
+  expect(f.stopTrack).toHaveBeenCalledOnce()
+  expect(f.closeAudio).toHaveBeenCalledOnce()
+  expect(screen.getByRole('button', { name: 'Start live voice session' }).getAttribute('aria-pressed')).toBe('false')
+  expect(screen.queryByRole('button', { name: 'Mute microphone' })).toBeNull()
+  f.closed.resolve(new Response(null, { status: 204 }))
+})

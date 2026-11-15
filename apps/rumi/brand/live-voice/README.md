@@ -18,6 +18,8 @@ The voice control stays beside Send while the microphone mute control appears to
 
 While connecting, the control shows a dashed loading ring and remains cancellable. The enabled colors and mute control appear after the host reports readiness and local audio setup finishes.
 
+Voice closes automatically after four minutes without speech or agent work, including while muted. `idleTimeoutMinutes` configures this interval from 1 to 60 minutes. Recognized user speech, voice output, and conversation messages restart the countdown; silent microphone frames and polling do not. Running agent work and pending voice handoffs keep voice open, and a full idle interval begins after work settles. The existing `maxSessionMinutes` hard cap still applies. Click the voice control to start again.
+
 Closing voice discards unsubmitted delegations and stops local capture immediately. Work already submitted to the harness may finish; plugin disposal waits for its session flush and transport shutdown. Pending starts cannot publish a session after disposal, and overlapping starts for the same conversation are rejected.
 
 Delegations preserve the buffered request, including single-word and Chinese commands. The transcript buffer retains up to 4,000 characters. Duplicate delegation IDs are ignored; repeating the same words in a new delegation is allowed.

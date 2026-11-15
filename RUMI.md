@@ -104,6 +104,8 @@ It moves the profile, Sessions, storages, and Print Studio state, copies the cre
 
 ## Bundled plugins
 
+The composer shows the stock activity statistics, including output speed in tokens per second when timing data is available. The Performance and usage setting controls compact versus detailed statistics; other composer statistics remain hidden.
+
 Rumi derives its standard, PTC, and Cordis presets from the shipped definitions with the questionnaire tool removed. Clarification stays in the conversation for text and voice. The question-card UI is disabled; the underlying question service remains available for compatibility with other consumers.
 
 Rumi's active presets compact at 30% of the routed model's context window, subject to the harness's lower input-budget safety limit. Configure `compactionThresholdRatio` on the `rumi-presets` row; the stock `preset-standard`, `preset-ptc`, and `preset-cordis` rows are disabled and do not control resumed Rumi sessions.

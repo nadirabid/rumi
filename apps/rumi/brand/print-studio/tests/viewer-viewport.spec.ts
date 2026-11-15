@@ -56,9 +56,10 @@ afterEach(() => {
 })
 
 function container() {
-  vi.stubGlobal('window', { devicePixelRatio: 1, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+  vi.stubGlobal('window', { matchMedia: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }), devicePixelRatio: 1, addEventListener: vi.fn(), removeEventListener: vi.fn() })
   vi.stubGlobal('document', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
   vi.stubGlobal('getComputedStyle', () => ({ getPropertyValue: () => '#888888' }))
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
   vi.stubGlobal('ResizeObserver', class {
     constructor(callback: () => void) { this.disconnect = vi.fn(); state.resize = callback }
     observe() {}
@@ -551,4 +552,28 @@ it('coalesces print dragging and restores placement when pointer capture is lost
   expect(viewport.printLayoutState().layout).toEqual(before)
   expect(state.controls.enabled).toBe(true)
   await viewport.dispose()
+})
+
+
+it('changes activity uniforms without replacing geometry and excludes work effects from covers', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  try {
+    await viewport.applyDesign({ format: 'usd', url: await boxUrl(10, 20, 30, 'work-subject'), transform: {} }, null)
+    const model = rendered().getObjectByName('work-subject'), geometry = model.geometry, material = model.material
+    const shader = { uniforms: {}, vertexShader: '#include <begin_vertex>', fragmentShader: '#include <opaque_fragment>' }
+    material.onBeforeCompile(shader, state.renderer)
+    viewport.setActivity('building')
+    expect(shader.uniforms.rumiActivity.value.x).toBe(1)
+    viewport.setActivity('checking')
+    expect(shader.uniforms.rumiActivity.value.x).toBe(2)
+    expect(model.geometry).toBe(geometry)
+    expect(model.material).toBe(material)
+    expect(state.controls.enabled).not.toBe(false)
+    const modes: number[] = []
+    state.renderer.render.mockImplementation(() => modes.push(shader.uniforms.rumiActivity.value.x))
+    viewport.thumbnail()
+    expect(modes).toEqual([0, 2])
+    viewport.setActivity('idle')
+    expect(shader.uniforms.rumiActivity.value.x).toBe(0)
+  } finally { await viewport.dispose() }
 })

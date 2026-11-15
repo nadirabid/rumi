@@ -82,3 +82,19 @@ it('does not substitute current selection for recovered or discarded input', asy
     expect(() => f.focus.set({ session: { id: 'one' }, status: 'idle' }, 'models/cup/model.glb')).toThrow(/running/u)
   } finally { await f.owner.fiber.dispose() }
 })
+
+
+it('tracks running agents by conversation and clears activity on idle and disposal', async () => {
+  const f = await fixture()
+  try {
+    expect(f.focus.running('one')).toBe(false)
+    f.emit('agent/status', { status: 'running' })
+    expect(f.focus.running('one')).toBe(true)
+    expect(f.focus.running('two')).toBe(false)
+    f.emit('agent/status', { status: 'idle' })
+    expect(f.focus.running('one')).toBe(false)
+    f.emit('agent/status', { status: 'running' })
+    f.emit('agent/disposed', {})
+    expect(f.focus.running('one')).toBe(false)
+  } finally { await f.owner.fiber.dispose() }
+})

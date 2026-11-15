@@ -10,7 +10,7 @@ const Button = ({ children, variant: _variant, size: _size, ...props }: React.Co
 const Panel = createPrintLayoutPanel(React, { Button, Menu, IconChevronDownOutlineRegular })
 afterEach(cleanup)
 
-it.each(['en', 'zh'] as const)('exposes keyboard placement, undo and handoff actions in %s', (locale) => {
+it.each(['en', 'zh'] as const)('exposes plate selection, undo and handoff without an adjustment menu in %s', (locale) => {
   const dictionary = locale === 'en' ? en : zh
   const t = (key: keyof typeof en, values: Record<string, string | number> = {}) =>
     dictionary[key].replace(/\{(\w+)\}/g, (_, key: string) => String(values[key]))
@@ -22,14 +22,11 @@ it.each(['en', 'zh'] as const)('exposes keyboard placement, undo and handoff act
   expect(screen.queryByText(dictionary.layoutSeparate)).toBeNull()
   expect(screen.queryByRole('button', { name: dictionary.layoutMore })).toBeNull()
   expect(screen.queryByRole('button', { name: dictionary.layoutSave })).toBeNull()
-  expect(screen.queryByRole('button', { name: dictionary.layoutOpen })).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: t('layoutSelectedPart', { name: 'Door' }) }))
-  fireEvent.click(screen.getByRole('menuitem', { name: dictionary.layoutRotateZ }))
-  expect(action).toHaveBeenLastCalledWith('edit', { rotate: 2 })
-  fireEvent.click(screen.getByRole('button', { name: dictionary.layoutReview }))
-  expect(screen.getByText(dictionary.layoutChecksMissing)).toBeTruthy()
-  expect(screen.getByText(dictionary.layoutPlacementFits)).toBeTruthy()
-  fireEvent.click(screen.getByRole('button', { name: dictionary.layoutContinue }))
+  expect(screen.queryByRole('button', { name: dictionary.layoutReview })).toBeNull()
+  expect(screen.queryByRole('button', { name: t('layoutSelectedPart', { name: 'Door' }) })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: dictionary.layoutUndo }))
+  expect(action).toHaveBeenLastCalledWith('undo')
+  expect(screen.queryByText(dictionary.layoutChecksMissing)).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: dictionary.layoutOpen }))
   expect(action).toHaveBeenLastCalledWith('export')
   result.rerender(<Panel state={{ ...state, issues: ['layoutOverlap'] }}
@@ -38,8 +35,8 @@ it.each(['en', 'zh'] as const)('exposes keyboard placement, undo and handoff act
   expect(screen.getByRole('alert').textContent).toBe(dictionary.layoutOverlap)
   result.rerender(<Panel state={{ ...state, layout: { ...state.layout, gap: 6 } }}
     available busy={false} message={null} t={t} action={action} />)
-  expect(screen.getByRole('button', { name: dictionary.layoutReview })).toBeTruthy()
-  expect(screen.queryByRole('button', { name: dictionary.layoutOpen })).toBeNull()
+  expect(screen.getByRole('button', { name: dictionary.layoutOpen }).hasAttribute('disabled')).toBe(false)
+  expect(screen.queryByRole('button', { name: dictionary.layoutReview })).toBeNull()
 })
 
 it('offers a new unsaved layout when saved state cannot be read', () => {

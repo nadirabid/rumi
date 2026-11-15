@@ -1,5 +1,7 @@
 /** Copy shared by the mesh preview tab and the STL document preview. */
 export const en = {
+  activityBuilding: 'Rumi is working on the model',
+  activityChecking: 'Rumi is checking the model',
   layoutSaveFailed: 'Changes have not been saved. Keep this project open and retry.',
   layoutRetrySave: 'Retry saving',
   layoutWorkflow: "Print preparation",
@@ -61,7 +63,8 @@ export const en = {
   layoutOpenFailed: 'The plate was saved, but Bambu Studio did not confirm opening. Try opening it again.',
 
   motionControls: 'Movement',
-  validationChanged: 'Geometry changed — checked after Rumi finishes editing.',
+  validationChanged: 'Model changed. Checks are updating…',
+  validationChecksPassed: 'Model checks passed. Review supports and slicing in Bambu Studio.',
   validationChecking: 'Checking the model…',
   validationRepair: 'Unresolved print geometry or movement errors.',
   validationMechanicsReview: 'Movement checks need review.',
@@ -91,6 +94,8 @@ export const en = {
 }
 
 export const zh = {
+  activityBuilding: 'Rumi 正在处理模型',
+  activityChecking: 'Rumi 正在检查模型',
   layoutSaveFailed: '更改尚未保存。请保持项目打开并重试',
   layoutRetrySave: '重试保存',
   layoutWorkflow: "打印准备",
@@ -152,7 +157,8 @@ export const zh = {
   layoutOpenFailed: '打印板已保存，但 Bambu Studio 未确认打开。请重试。',
 
   motionControls: '活动部件',
-  validationChanged: '几何已更改，将在 Rumi 完成编辑后检查。',
+  validationChanged: '模型已更改，正在更新检查…',
+  validationChecksPassed: '模型检查通过。请在 Bambu Studio 中检查支撑和切片',
   validationChecking: '正在检查模型…',
   validationRepair: '打印几何或运动仍有未解决的错误。',
   validationMechanicsReview: '运动检查需要复核。',

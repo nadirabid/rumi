@@ -7,9 +7,13 @@ import { createSurfaceIndex, partPath } from './surfaces.js'
  * @param {THREE.Object3D} root - Displayed design hierarchy; original resources are retained for restoration.
  * @param {object} highlight - Validated model-local Gaussian regions.
  * @param {object | null} hover - Shared world-space sphere uniform; null disables cursor reveal.
+ * @param {object | null} activity Shared mode/phase uniform; null disables activity treatment.
  * @returns {object} Visibility, suspend/resume controls retaining prepared display resources, and a disposer restoring originals.
  */
-export function createHighlight(root, highlight, hover = null) {
+export function createHighlight(root, highlight, hover = null, activity = null) {
+  const activityUniform = activity ?? { value: new THREE.Vector2() }
+  const activityBounds = { value: new THREE.Vector2() }
+  let low = Infinity, high = -Infinity
   const enabled = { value: 1 }
   const entries = []
   const hoverSphere = hover?.sphere ?? hover ?? { value: new THREE.Vector4() }
@@ -66,6 +70,7 @@ export function createHighlight(root, highlight, hover = null) {
       for (let i = 0; i < position.count; i++) {
         bary[i * 3 + i % 3] = 1
         point.fromBufferAttribute(position, i).applyMatrix4(matrix).toArray(local, i * 3)
+        low = Math.min(low, point.z); high = Math.max(high, point.z)
       }
       copy.setAttribute('rumiBarycentric', new THREE.BufferAttribute(bary, 3))
       copy.setAttribute('rumiLocalPoint', new THREE.BufferAttribute(local, 3))
@@ -75,6 +80,8 @@ export function createHighlight(root, highlight, hover = null) {
         const clone = original.clone()
         clone.onBeforeCompile = (shader, renderer) => {
           original.onBeforeCompile(shader, renderer)
+          shader.uniforms.rumiActivity = activityUniform
+          shader.uniforms.rumiActivityBounds = activityBounds
           shader.uniforms.rumiRegions = { value: inverses }
           shader.uniforms.rumiRegionCount = count
           shader.uniforms.rumiHover = hoverSphere
@@ -88,7 +95,7 @@ export function createHighlight(root, highlight, hover = null) {
           shader.uniforms.rumiAgentMode = entry.agentMode
           shader.vertexShader = 'attribute float rumiSurface; attribute vec3 rumiBoundary; varying float rumiSurfaceId; varying vec3 rumiBorder; attribute vec3 rumiBarycentric; attribute vec3 rumiLocalPoint; varying vec3 rumiBary; varying vec3 rumiPoint; varying vec3 rumiWorldPoint;\n' + shader.vertexShader
           shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nrumiSurfaceId = rumiSurface; rumiBorder = rumiBoundary; rumiBary = rumiBarycentric; rumiPoint = rumiLocalPoint; rumiWorldPoint = (modelMatrix * vec4(position, 1.0)).xyz;')
-          shader.fragmentShader = `uniform float rumiCursorMesh, rumiCursorSurface, rumiCursorMode, rumiMeshId, rumiAgentMesh, rumiAgentSurface, rumiAgentMode; varying float rumiSurfaceId; varying vec3 rumiBorder; uniform mat4 rumiRegions[8]; uniform int rumiRegionCount; uniform float rumiReveal; uniform vec4 rumiHover; varying vec3 rumiBary; varying vec3 rumiPoint; varying vec3 rumiWorldPoint;\n` + shader.fragmentShader
+          shader.fragmentShader = `uniform vec2 rumiActivity, rumiActivityBounds; uniform float rumiCursorMesh, rumiCursorSurface, rumiCursorMode, rumiMeshId, rumiAgentMesh, rumiAgentSurface, rumiAgentMode; varying float rumiSurfaceId; varying vec3 rumiBorder; uniform mat4 rumiRegions[8]; uniform int rumiRegionCount; uniform float rumiReveal; uniform vec4 rumiHover; varying vec3 rumiBary; varying vec3 rumiPoint; varying vec3 rumiWorldPoint;\n` + shader.fragmentShader
           shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
             float field = 0.0;
             for (int i = 0; i < 8; i++) {
@@ -120,16 +127,30 @@ export function createHighlight(root, highlight, hover = null) {
             // Linear-light colors belong to this viewer effect, independent of the app theme.
             vec3 underlying = mix(vec3(0.18, 0.40, 0.37), vec3(0.008, 0.05, 0.045), edge);
             outgoingLight = mix(outgoingLight, underlying, amount);
+            if (rumiActivity.x > 0.5) {
+              float phase = rumiActivity.y * 6.2831853;
+              float level = clamp((rumiPoint.z - rumiActivityBounds.x) / max(rumiActivityBounds.y, 0.001), 0.0, 1.0);
+              float wave = 0.5 + 0.5 * sin(level * 6.2831853 - phase);
+              float scanCenter = 0.5 - 0.5 * cos(phase);
+              float scan = 1.0 - smoothstep(0.035, 0.18, abs(level - scanCenter));
+              vec3 faceNormal = normalize(cross(dFdx(rumiWorldPoint), dFdy(rumiWorldPoint)));
+              float rim = pow(1.0 - abs(dot(faceNormal, normalize(cameraPosition - rumiWorldPoint))), 3.0);
+              float activityAmount = rumiActivity.x < 1.5
+                ? 0.12 + 0.30 * wave * wave + 0.18 * rim
+                : 0.12 + scan * 0.55 + 0.12 * rim;
+              outgoingLight = mix(outgoingLight, vec3(0.12, 0.72, 0.60), activityAmount);
+            }
             vec3 cursorColor = mix(vec3(0.12, 0.32, 0.75), vec3(0.005, 0.025, 0.12), edge);
             outgoingLight = mix(outgoingLight, cursorColor, cursorAmount * (1.0 - step(0.01, amount)));
             #include <opaque_fragment>`)
         }
-        clone.customProgramCacheKey = () => `${original.customProgramCacheKey()}:rumi-highlight:surfaces-1`
+        clone.customProgramCacheKey = () => `${original.customProgramCacheKey()}:rumi-highlight:activity-2`
         return clone
       })
       node.geometry = copy
       node.material = Array.isArray(material) ? entry.materials : entry.materials[0]
     })
+    activityBounds.value.set(low, Math.max(high - low, 0.001))
     update(highlight)
   } catch (error) {
     dispose()

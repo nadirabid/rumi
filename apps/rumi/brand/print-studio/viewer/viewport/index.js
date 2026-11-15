@@ -15,6 +15,7 @@ import { generateStl } from '../generation/export.js'
  * viewport retains camera state and the last successfully built design.
  */
 import * as THREE from 'three'
+import { createActivity } from './activity.js'
 import { createHover } from './hover.js'
 import { createHighlight } from './highlight.js'
 import { disposeModel } from './model.js'
@@ -84,7 +85,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     if (controls) controls.enabled = true
     if (forget) { printableParts = null; printLayout = null; printUndo.length = 0; printSelected = null; printPlate = 0 }
     if (restore) {
-      highlightOverlay?.resume()
+      highlightOverlay?.resume(); highlightOverlay?.setVisible(highlightVisible)
       clearVolume()
       if (designVolume) buildVolume(designVolume)
       volumeKey = designVolume ? `${designVolume.x},${designVolume.y},${designVolume.z}` : 'none'
@@ -121,7 +122,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     roughness: 0.65, metalness: 0.05, side: THREE.DoubleSide,
   })
   let renderer, controls, observer, volumeNodes = [], volumeKey = 'none', framed = false, closed = false
-  const lost = (event) => { event.preventDefault(); onFailure() }
+  const lost = (event) => { event.preventDefault(); activity.dispose(); onFailure() }
   const render = () => { if (!closed) renderer.render(scene, camera) }
 
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true })
@@ -132,6 +133,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   camera.up.set(0, 0, 1)
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = false
+  const activity = createActivity(element, render)
   // Image-based light from every direction shades all faces at any orbit angle.
   // RoomEnvironment is Y up; the rotation puts its ceiling at the scene's +Z.
   const pmrem = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment()
@@ -223,7 +225,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     if (highlightOverlay && highlightId === (highlight?.id ?? null)) return
     if (!design) { clearHighlight(); return }
     if (highlightOverlay) highlightOverlay.update(highlight ?? { blobs: [] })
-    else highlightOverlay = createHighlight(motionPreview?.root ?? design.root, highlight ?? { blobs: [] }, hover)
+    else highlightOverlay = createHighlight(motionPreview?.root ?? design.root, highlight ?? { blobs: [] }, hover, activity.uniform)
     highlightOverlay.setVisible(highlightVisible)
     highlightId = highlight?.id ?? null
   }
@@ -272,7 +274,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     return printRay.ray.intersectPlane(printPlane, new THREE.Vector3())
   }
   function printDown(event) {
-    if (!printPreview || printDrag || event.button !== 0) return
+    if (activity.mode !== 'idle' || !printPreview || printDrag || event.button !== 0) return
     const point = printPoint(event)
     const hit = printRay.intersectObjects(printPreview.root.children.filter(node => node.visible), true)[0]
     if (!hit || !point) return
@@ -312,10 +314,15 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   for (const [name, listener] of printListeners) renderer.domElement.addEventListener(name, listener, true)
 
   return {
+    /** Set the visible work phase and stop any in-flight placement drag before locking edits. */
+    setActivity(mode) {
+      if (mode !== 'idle' && printDrag) printUp({ type: 'pointercancel', pointerId: printDrag.pointerId, stopImmediatePropagation() {} })
+      activity.setMode(mode)
+    },
     /** Enter a print-only preview; an absent saved layout creates deterministic placement. */
     openPrintLayout(saved, options) {
-      if (!design || designUrl !== designSpec?.url || shapeDeformer || objects.size) throw new Error('Load a canonical model and finish editing before arranging')
-      clearMotion(); highlightOverlay?.suspend()
+      if (activity.mode !== 'idle' || !design || designUrl !== designSpec?.url || shapeDeformer || objects.size) throw new Error('Load a canonical model and finish editing before arranging')
+      clearMotion(); syncHighlight(); highlightOverlay?.setVisible(false)
       try {
         if (!printableParts) printableParts = printParts(design)
         const identity = printLayoutIdentity(designSpec, options.volume)
@@ -335,7 +342,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     selectPrintPart(id) { printSelected = id; printPlate = printLayout.parts.find(part => part.id === id).plate; drawPrint(); publishPrint() },
     selectPrintPlate(plate) { printPlate = plate; printSelected = printLayout.parts.find(part => part.plate === plate)?.id ?? printSelected; drawPrint(); publishPrint() },
     editPrintPart(change) {
-      if (!printPreview || !printSelected) return
+      if (activity.mode !== 'idle' || !printPreview || !printSelected) return
       const next = structuredClone(printLayout), part = next.parts.find(part => part.id === printSelected)
       if (change.move) part.position = part.position.map((n, i) => n + change.move[i])
       if (change.rotate !== undefined) part.rotation[change.rotate] = (part.rotation[change.rotate] + 90) % 360
@@ -345,17 +352,19 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       printLayout = next; render(); publishPrint()
     },
     rearrangePrintParts(options) {
+      if (activity.mode !== 'idle') return
       const next = arrangePrintParts(printableParts, { ...options, identity: printLayout.identity })
       printUndo.push(printLayout); if (printUndo.length > 32) printUndo.shift()
       printLayout = next; printPlate = 0; drawPrint(); publishPrint()
     },
-    undoPrintLayout() { if (printUndo.length) { printLayout = printUndo.pop(); printPlate = 0; drawPrint(); publishPrint() } },
-    exportPrintPlate() { return printPreview.exportPlate() },
+    undoPrintLayout() { if (activity.mode === 'idle' && printUndo.length) { printLayout = printUndo.pop(); printPlate = 0; drawPrint(); publishPrint() } },
+    exportPrintPlate() { if (activity.mode !== 'idle') throw new Error('Model work is in progress'); return printPreview.exportPlate() },
     /** Effective parameters of the successfully loaded model, including defaults. */
     modelParameters() { return { ...design?.parameters } },
     /** Movement is a local pose; it never changes saved parameters or validation inputs. */
     motionControls() { return motion ? { ...motion, id: designUrl } : null },
     updateMotion(values) {
+      if (activity.mode !== 'idle') return false
       if (!motion || shapeDeformer) return false
       const next = controlValues(motion, values), previous = motion.values
       motion.values = next
@@ -384,6 +393,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       return document.hidden ? null : shapeId
     },
     updateShape(values) {
+      if (activity.mode !== 'idle') return false
       if (!shapeDeformer) return
       if (shapeOperation === 'parameters') {
         const owner = shapeDeformer
@@ -486,10 +496,12 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       const size = renderer.getSize(new THREE.Vector2())
       const ratio = renderer.getPixelRatio()
       const overlayVisible = highlightVisible
+      const activityMode = activity.uniform.value.x
       const hoverRadius = hover.sphere.value.w
       const visibility = volumeNodes.map(node => node.visible)
       try {
         hover.sphere.value.w = 0
+        activity.uniform.value.x = 0
         if (highlightOverlay) highlightOverlay.setVisible(false)
         for (const node of volumeNodes) node.visible = false
         renderer.setPixelRatio(1)
@@ -497,6 +509,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         renderer.render(scene, coverCamera)
         return renderer.domElement.toDataURL('image/png')
       } finally {
+        activity.uniform.value.x = activityMode
         hover.sphere.value.w = hoverRadius
         if (highlightOverlay) highlightOverlay.setVisible(overlayVisible)
         volumeNodes.forEach((node, index) => { node.visible = visibility[index] })
@@ -593,7 +606,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
               entry.sourceMaterial = material
             }
             entry.mesh.matrix.fromArray(spec.matrix); entry.mesh.updateMatrixWorld(true)
-            if (rebuildOverlay) entry.overlay = createHighlight(entry.mesh, { blobs: [] }, hover)
+            if (rebuildOverlay) entry.overlay = createHighlight(entry.mesh, { blobs: [] }, hover, activity.uniform)
           }
           for (const [id, entry] of objects) {
             if (live.has(id)) continue
@@ -618,6 +631,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     dispose() {
       if (closed) return Promise.allSettled([...tasks])
       closed = true
+      activity.dispose()
       clearPrint(true, false); clearShape(); clearMotion(); poses.clear()
       generation++
       for (const [name, listener] of printListeners) renderer.domElement.removeEventListener(name, listener, true)

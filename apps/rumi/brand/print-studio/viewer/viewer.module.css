@@ -52,7 +52,7 @@
   font-weight: 500;
   transition: background-color 120ms ease, box-shadow 120ms ease, color 120ms ease;
 }
-.rumi-print-viewer .pv-cursor-controls button[aria-pressed='true'],.rumi-print-viewer .pv-print-steps button[aria-current='step'] {
+.rumi-print-viewer .pv-cursor-controls button[aria-pressed='true'] {
   color: var(--dsw-alias-label-primary);
   border-color: var(--dsw-alias-border-l2);
   background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, var(--dsw-alias-bg-layer-2));
@@ -238,7 +238,7 @@
 .rumi-print-viewer .pv-print-top {
   display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 8px;
 }
-.rumi-print-viewer .pv-print-back,.rumi-print-viewer .pv-print-steps,.rumi-print-viewer .pv-print-toolbar,.rumi-print-viewer .pv-print-selected {
+.rumi-print-viewer .pv-print-back,.rumi-print-viewer .pv-print-toolbar,.rumi-print-viewer .pv-print-selected {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 3px; max-width: 100%;
 }
 .rumi-print-viewer .pv-print-flow button {
@@ -250,8 +250,6 @@
   min-height: 32px; padding: 0 14px; border: 0; font-size: 12px; font-weight: 400;
 }
 
-.rumi-print-viewer .pv-print-steps { margin-inline: auto; }
-.rumi-print-viewer .pv-print-step-number { margin-inline-end: 4px; }
 .rumi-print-viewer .pv-print-flow .pv-print-primary {
   background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground);
 }
@@ -265,18 +263,13 @@
 .rumi-print-viewer .pv-print-selected { align-self: end; }
 .rumi-print-viewer .pv-print-choice { display: inline-flex; align-items: center; gap: 8px; }
 .rumi-print-viewer .pv-print-chevron { flex-shrink: 0; }
-.rumi-print-viewer .pv-print-review,.rumi-print-viewer .pv-print-notice {
+.rumi-print-viewer .pv-print-notice {
   width: 440px; max-width: 100%; margin: 0; padding: 14px 16px;
   font-size: 12px; line-height: 18px; overflow-wrap: anywhere;
   border-radius: 24px; color: var(--dsw-alias-label-primary);
 }
-.rumi-print-viewer .pv-print-review h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; }
-.rumi-print-viewer .pv-print-review p,.rumi-print-viewer .pv-print-notice p { margin: 0; }
-.rumi-print-viewer .pv-print-review p { color: var(--dsw-alias-label-secondary); }
-.rumi-print-viewer .pv-print-check-row {
-  display: grid; grid-template-columns: minmax(80px,1fr) minmax(0,2fr); gap: 12px; padding-block: 10px;
-  border-block-end: 1px solid var(--dsw-alias-border-l2); margin-block-end: 8px;
-}
+.rumi-print-viewer .pv-print-notice p { margin: 0; }
+
 .rumi-print-viewer .pv-print-drag-hint { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
 .rumi-print-viewer .pv-print-flow button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
 @media (hover:hover) {
@@ -292,3 +285,4 @@
 .rumi-print-viewer .pv-print-back button:focus-visible,.rumi-print-viewer .pv-print-selected button:focus-visible { outline: none; }
 .rumi-print-viewer .pv-print-back:has(button:disabled),.rumi-print-viewer .pv-print-selected:has(button:disabled) { opacity: .4; }
 .rumi-print-viewer .pv-print-back button:disabled,.rumi-print-viewer .pv-print-selected button:disabled { opacity: 1; }
+.rumi-print-viewer .pv-analog-lock { border: 0; margin: 0; padding: 0; min-width: 0; }

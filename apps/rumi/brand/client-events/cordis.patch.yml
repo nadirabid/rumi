@@ -1,0 +1,7 @@
+- id: client-hmr
+  disabled: true
+- insert:
+    - id: rumi-client-events
+      name: '@rumi/client-events'
+      config: !!js |
+        ({ watchBundles: process.env.RUMI_DEVELOPMENT === '1', pollIntervalMs: 500 })

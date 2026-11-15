@@ -5,6 +5,20 @@ import { createHighlight } from '../viewer/viewport/highlight.js'
 const fixture = process.argv.includes('--small') ? 'small' : process.argv.includes('--flat') ? 'flat' : 'large'
 const geometry = fixture === 'small' ? new THREE.SphereGeometry(100, 32, 16)
   : fixture === 'flat' ? new THREE.PlaneGeometry(200, 200, 300, 300) : new THREE.SphereGeometry(100, 450, 220)
+const shuffled = process.argv.includes('--shuffled')
+if (shuffled) {
+  const index = geometry.index!
+  let seed = 0x92d68ca2
+  for (let face = index.count / 3 - 1; face > 0; face--) {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5
+    const other = (seed >>> 0) % (face + 1)
+    for (let corner = 0; corner < 3; corner++) {
+      const value = index.getX(face * 3 + corner)
+      index.setX(face * 3 + corner, index.getX(other * 3 + corner))
+      index.setX(other * 3 + corner, value)
+    }
+  }
+}
 const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial())
 const triangles = (geometry.index?.count ?? geometry.getAttribute('position').count) / 3
 mesh.updateMatrixWorld(true)
@@ -27,7 +41,7 @@ for (let i = 0; i < 140; i++) {
 samples.sort((a, b) => a - b)
 global.gc?.()
 console.log(JSON.stringify({
-  fixture, hover, accelerated, prepareMs, triangles, samplesMs: samples, before,
+  fixture, shuffled, hover, accelerated, prepareMs, triangles, samplesMs: samples, before,
   medianMs: samples[60], p95Ms: samples[114],
   memory: process.memoryUsage(), peakRssKiB: process.resourceUsage().maxRSS,
 }))

@@ -16,6 +16,7 @@ it('retains shared resources and question dependencies for existing sessions', (
     const scopeDir = join(profileDir, 'node_modules', '@rumi')
     mkdirSync(scopeDir, { recursive: true })
     symlinkSync(fileURLToPath(new URL('../brand', import.meta.url)), join(scopeDir, 'brand'))
+    symlinkSync(fileURLToPath(new URL('../brand/client-events', import.meta.url)), join(scopeDir, 'client-events'))
     const installAnchor = fileURLToPath(new URL('../../cli/package.json', import.meta.url))
     const profile = loadProfileDirectory('dsh desktop', profileDir, installAnchor)
     const warnings: string[] = []
@@ -40,6 +41,8 @@ it('retains shared resources and question dependencies for existing sessions', (
     expect(rows.find(row => row.id === 'rumi-presets')).toMatchObject({
       name: '@rumi/brand/preset', config: { compactionThresholdRatio: 0.3 },
     })
+    expect(rows.find(row => row.id === 'client-hmr')?.disabled).toBe(true)
+    expect(rows.find(row => row.id === 'rumi-client-events')).toMatchObject({ name: '@rumi/client-events' })
     expect(warnings).toEqual([])
   } finally {
     rmSync(home, { recursive: true, force: true })

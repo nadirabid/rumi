@@ -15,7 +15,7 @@ const renderer = vi.hoisted(() => ({ fail: false }))
 vi.mock('../brand/print-studio/viewer/viewer.module.css', () => ({ default: '' }))
 vi.mock('../brand/print-studio/viewer/viewport/index.js', () => ({
   createViewport: () => ({
-    apply() {}, dispose() {}, shapeMetrics: () => ({}), modelParameters: () => ({}), motionControls: () => null,
+    apply() {}, dispose() {}, setActivity() {}, shapeMetrics: () => ({}), modelParameters: () => ({}), motionControls: () => null,
     applyDesign: async () => ({ status: 'ok' }),
     applyShape: (spec: { id: string } | null) => {
       if (renderer.fail && spec) throw new Error('Controls must bind declared model parameters')
@@ -56,7 +56,7 @@ it.each(['hidden', 'render error', 'delivery error'])('reports and recovers from
       installViewer({
         effect: (fn: () => (() => void) | undefined) => { const dispose = fn(); if (dispose) cleanup.push(dispose) },
         locale: { bind: () => (key: string) => key, register: () => () => {} },
-        sidebarRight: { mounted: { getSnapshot: () => 'test' }, openTabIn() {} },
+        sidebarRight: { mounted: { getSnapshot: () => 'test', subscribe: () => () => {} }, openTabIn() {} },
         sidebarRightTabs: { register: () => () => {} }, documentPreviews: { register: () => () => {} },
         slots: { inject: (_key: string, fn: () => void) => { fn() },
           register: (spec: PaneRegistration, component: React.ComponentType<PaneProps>) => {

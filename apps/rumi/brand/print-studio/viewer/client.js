@@ -184,15 +184,20 @@ export function installViewer(ctx, React, primitives) {
         const current = sessionId === undefined ? undefined : snapshots.get(sessionId)
         if (current?.scene) publish(sessionId, { scene: { ...current.scene, failed: true }, view: current.view })
       }).finally(() => {
-        if (!stopped() && pending === task) timer = setTimeout(run, POLL_MS)
+        if (!stopped() && pending === task && !document.hidden && ctx.sidebarRight.mounted.getSnapshot() !== undefined) timer = setTimeout(run, POLL_MS)
       })
       pending = task
       return task
     }
     refreshScene = run
+    const unsubscribe = ctx.sidebarRight.mounted.subscribe(() => { void run() })
+    const visible = () => { void run() }
+    document.addEventListener('visibilitychange', visible)
     run()
     return async () => {
       controller.abort()
+      unsubscribe()
+      document.removeEventListener('visibilitychange', visible)
       clearTimeout(timer)
       await pending
       captures.clear()
@@ -284,7 +289,8 @@ export function installViewer(ctx, React, primitives) {
       viewport.current?.setActivity(activity)
       if (working) { printRequest.current?.abort(); setPrintBusy(false) }
     }, [activity])
-    React.useEffect(() => {
+    // OrbitControls must disconnect from its original root before the canvas detaches.
+    React.useLayoutEffect(() => {
       try {
         viewport.current = createViewport(holder.current, () => { viewportError.current = '3D viewer rendering failed'; setFailed(true) }, setCursorMode, artifacts, receivePrintState)
         viewport.current.setActivity(activity)

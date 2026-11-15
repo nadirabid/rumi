@@ -17,6 +17,7 @@ export interface AppBundleSource {
  */
 export const RUMI_APP_BUNDLES: readonly AppBundleSource[] = [
   { name: '@rumi/brand', directory: 'brand' },
+  { name: '@rumi/client-events', directory: join('brand', 'client-events') },
   { name: '@rumi/settings', directory: join('brand', 'settings') },
   { name: '@rumi/live-voice', directory: join('brand', 'live-voice') },
   { name: '@rumi/print-studio', directory: join('brand', 'print-studio') },

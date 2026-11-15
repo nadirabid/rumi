@@ -1,6 +1,8 @@
 /** Source snapshots remain consistent across edits and disappear on disposal. */
 import { Context } from '@deepseek-ai/cordis'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
+import fsPromises from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -141,4 +143,71 @@ it('pins an accepted snapshot across cache eviction and releases its routes afte
   expect(f.routes.has(initial.url)).toBe(true)
   await release(); await release()
   expect(f.routes.has(initial.url)).toBe(false)
+})
+
+
+it('reuses unchanged USD bytes but rereads them for explicit validation', async () => {
+  const f = await fixture(), path = join(f.directory, 'model.usda')
+  await writeFile(path, '#usda 1.0\n# revision 0\n')
+  const source = await createSource(f.ctx, path, f.root)
+  cleanup.push(() => source.dispose())
+  const read = vi.spyOn(fsPromises, 'readFile')
+  syncBuiltinESMExports()
+  try {
+    await source.poll(); await source.poll()
+    expect(read).not.toHaveBeenCalled()
+    await source.poll({ force: true })
+    expect(read).toHaveBeenCalledTimes(1)
+    await writeFile(path, '#usda 1.0\n# revision 1\n')
+    const before = source.state()
+    await source.poll()
+    expect(source.state().url).toBe(before.url)
+    await source.poll()
+    expect(source.state().revision).toBe(before.revision + 1)
+    expect(read).toHaveBeenCalledTimes(2)
+  } finally { read.mockRestore(); syncBuiltinESMExports() }
+})
+
+it('reports invalid or escaped USD changes instead of serving a cached success', async () => {
+  const f = await fixture(), path = join(f.directory, 'model.usda')
+  await writeFile(path, '#usda 1.0\n# revision 0\n')
+  const source = await createSource(f.ctx, path, f.root)
+  cleanup.push(() => source.dispose())
+  const original = source.state()
+  await writeFile(path, 'invalid')
+  await source.poll()
+  expect(source.state()).toMatchObject({ url: original.url, error: { kind: 'source' } })
+  await rm(path)
+  await writeFile(join(f.root, 'outside.usda'), '#usda 1.0\n')
+  await symlink(join(f.root, 'outside.usda'), path)
+  await source.poll()
+  expect(source.state().error).toMatchObject({ kind: 'source', message: expect.stringContaining('inside its model folder') })
+})
+
+
+it('forces a byte read when another ordinary poll takes over during pending cleanup', async () => {
+  const f = await fixture(), path = join(f.directory, 'model.usda')
+  await writeFile(path, '#usda 1.0\n')
+  const source = await createSource(f.ctx, path, f.root)
+  cleanup.push(() => source.dispose())
+  const read = vi.spyOn(fsPromises, 'readFile')
+  syncBuiltinESMExports()
+  const originalFinally = Promise.prototype.finally
+  let reentrant: Promise<void> | undefined
+  // Admit another poll exactly after the old owner clears pending, before its waiters resume.
+  const handoff = vi.spyOn(Promise.prototype, 'finally').mockImplementationOnce(function (onFinally) {
+    return originalFinally.call(this, () => {
+      const result = onFinally?.()
+      reentrant = source.poll()
+      return result
+    })
+  })
+  try {
+    let ordinary: Promise<void>
+    try { ordinary = source.poll() } finally { handoff.mockRestore() }
+    const forced = source.poll({ force: true })
+    await Promise.all([ordinary, forced])
+    await reentrant
+    expect(read).toHaveBeenCalledTimes(1)
+  } finally { handoff.mockRestore(); read.mockRestore(); syncBuiltinESMExports() }
 })

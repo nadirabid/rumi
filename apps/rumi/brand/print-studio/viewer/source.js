@@ -78,7 +78,7 @@ export async function createSource(ctx, path, workspace) {
   let root, entryName
   const format = ['.usda', '.usd'].includes(extname(path).toLowerCase()) ? 'usd' : 'javascript'
   let closed = false
-  let pending, hash, candidate, snapshotFiles
+  let pending, hash, candidate, snapshotFiles, scannedUsd
   let sourceError = null
   let buildError = null
   const snapshots = []
@@ -93,7 +93,9 @@ export async function createSource(ctx, path, workspace) {
   }
   const state = { path, format, revision: 0, url: null, transform: normalizePlacement(), report: null, camera: null, highlight: null, analog: null, contentHash: null, parameters: {} }
 
-  async function scan() {
+  const signature = value => [value.dev, value.ino, value.size, value.mtimeNs, value.ctimeNs].join(':')
+
+  async function scan(force = false) {
     const files = new Map()
     let bytes = 0, entries = 0
     async function visit(directory) {
@@ -115,10 +117,18 @@ export async function createSource(ctx, path, workspace) {
     if (format === 'usd') {
       const file = resolve(root, entryName)
       if (!inside(root, await realpath(file))) throw new Error('USD must remain inside its model folder')
-      if ((await stat(file)).size > USD_MAX_BYTES) throw new Error('USD exceeds 64 MiB')
+      const before = await stat(file, { bigint: true })
+      if (before.size > BigInt(USD_MAX_BYTES)) throw new Error('USD exceeds 64 MiB')
+      const key = signature(before)
+      if (!force && scannedUsd?.key === key) return scannedUsd.value
       const content = await readFile(file)
       validateUsd(content)
       files.set(entryName, content)
+      const digest = createHash('sha256').update(entryName).update('\0').update(content).update('\0').digest('hex')
+      const value = { files, hash: digest, parameters: {} }
+      // A concurrent write must be observed again before these bytes can be reused.
+      scannedUsd = signature(await stat(file, { bigint: true })) === key ? { key, value } : undefined
+      return value
     } else await visit(root)
     if (!files.has(entryName)) throw new Error('The model entry file is missing')
     const digest = createHash('sha256')
@@ -135,9 +145,9 @@ export async function createSource(ctx, path, workspace) {
     return { files, hash: digest.digest('hex'), parameters }
   }
 
-  async function update(initial) {
+  async function update(initial, force = false) {
     try {
-      const next = await scan()
+      const next = await scan(force)
       if (closed) return
       if (next.hash === hash) {
         candidate = null
@@ -218,9 +228,14 @@ export async function createSource(ctx, path, workspace) {
     /** Copy the current immutable files for validation-owned recovery storage. */
     snapshot: () => ({ entry: entryName, format, files: [...snapshotFiles].map(([name, bytes]) => [name, bytes.slice()]) }),
     snapshotBytes: () => format === 'usd' ? snapshotFiles.get(entryName).slice() : null,
-    poll() {
-      if (closed) return Promise.resolve()
-      if (!pending) pending = update(false).finally(() => { pending = undefined })
+    /** Observe file identity changes; force rereads bytes for validation and acceptance. */
+    async poll({ force = false } = {}) {
+      if (closed) return
+      while (pending) {
+        await pending
+        if (!force || closed) return
+      }
+      pending = update(false, force).finally(() => { pending = undefined })
       return pending
     },
     transform(value) {

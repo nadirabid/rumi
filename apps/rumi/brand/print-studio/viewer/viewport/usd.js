@@ -1,11 +1,11 @@
 /** Load the canonical USD robot into Three.js and project its joints into preview controls. */
 import * as THREE from 'three'
-import { USDLoader } from 'three/addons/loaders/USDLoader.js'
-import { USDAParser } from 'three/addons/loaders/usd/USDAParser.js'
+import { USDComposer } from 'three/addons/loaders/usd/USDComposer.js'
 import { validateUsd } from '../usd.js'
 import { validateRobotAssembly } from '../mechanics.js'
 import { buildModel } from './model.js'
 import { robotMotion } from './assembly-motion.js'
+import { parseUsdData } from './usd-parser.js'
 
 function robotDescription(specs, objects) {
   const fields = specs['/']?.fields
@@ -104,8 +104,9 @@ function robotDescription(specs, objects) {
  */
 export async function parseUsdModel(buffer) {
   const text = validateUsd(new Uint8Array(buffer))
-  const specs = new USDAParser().parseData(text).specsByPath
-  const scene = new USDLoader().parse(text)
+  const data = parseUsdData(text)
+  const specs = data.specsByPath
+  const scene = new USDComposer(THREE.DefaultLoadingManager).compose(data, {}, {}, '')
   scene.userData.rumiCoordinateFrame = true
   const root = new THREE.Group()
   root.userData.rumiCoordinateFrame = true

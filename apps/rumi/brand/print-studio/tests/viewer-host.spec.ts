@@ -797,3 +797,23 @@ it('shows imported STL objects before validation completes', async () => {
     expect((await f.meshState()).objects).toHaveLength(1)
   } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
 })
+
+it('evicts accepted validation snapshots together with inactive preview scenes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-scene-eviction-'))
+  const directory = join(root, 'validation-state')
+  const f = fixture(undefined, root, 1000, { validationStateDirectory: directory })
+  try {
+    const path = join(root, 'models/car/model.usda')
+    await mkdir(join(root, 'models/car'), { recursive: true })
+    await writeFile(path, '#usda 1.0\n')
+    const source = await createSource(f.ctx, path, root)
+    try {
+      const storage = validationState(directory, root, 'models/car/model.usda')
+      await storage.write({ movements: [] }, { fingerprint: 'a'.repeat(64), state: source.state(), volume: null, source: source.snapshot() })
+    } finally { await source.dispose() }
+    for (let index = 0; index < 9; index++) await f.state(`session-${index}`)
+    await expect.poll(() => [...f.routes.keys()].filter(path => path.startsWith('/api/print-studio/viewer/source/')).length).toBe(16)
+    expect((await f.meshState('session-0')).validation.models).toEqual([])
+    expect((await f.meshState('session-8')).validation.models[0].acceptedFingerprint).toBe('a'.repeat(64))
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})

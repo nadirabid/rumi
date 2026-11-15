@@ -1,6 +1,6 @@
 /** Voice transports and pending starts belong to the plugin's Cordis lifetime. */
 import { Context } from '@deepseek-ai/cordis'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { once } from 'node:events'
 import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises'
@@ -17,9 +17,12 @@ function deferred<T>() {
 }
 
 const cleanups: (() => Promise<unknown>)[] = []
-afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
+afterEach(async () => {
+  try { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() }
+  finally { vi.useRealTimers() }
+})
 
-async function fixture(acknowledge = true) {
+async function fixture(acknowledge = true, config = {}, initiallyRunning = false) {
   const diagnosticsDirectory = await mkdtemp(join(tmpdir(), 'rumi-voice-journal-'))
   cleanups.push(() => rm(diagnosticsDirectory, { recursive: true, force: true }))
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
@@ -70,12 +73,12 @@ async function fixture(acknowledge = true) {
       set: async (_ref: string, value: string) => { key = value },
     },
     sessionController: { resolveAgent: async (id: string) => ({ agent: {
-      session: id === 'other' ? other : session, inject: (message: object) => injected.push(message), steer: (message: object) => { steered.push(message); entered.resolve(undefined) }, whenIdle: () => idle.promise,
+      status: initiallyRunning ? 'running' : 'idle', session: id === 'other' ? other : session, inject: (message: object) => injected.push(message), steer: (message: object) => { steered.push(message); entered.resolve(undefined) }, whenIdle: () => idle.promise,
     } }) },
     sessions: { flush: async () => { flushed = true } },
   }
   // The JavaScript plugin consumes only these service methods; Cordis owns the effects.
-  apply(ctx as Context, { diagnosticsDirectory, endpoint: `ws://127.0.0.1:${address.port}` })
+  apply(ctx as Context, { ...config, diagnosticsDirectory, endpoint: `ws://127.0.0.1:${address.port}` })
   const request = (path: string, body?: object) => routes.get(`/api/live-voice${path}`)!(new Request(`http://rumi${path}`, {
     method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined,
   }))
@@ -241,3 +244,107 @@ it.each(['Probably just the back, let’s see', 'Yes, do it', 'Leave the crown a
     expect(JSON.stringify(f.steered)).toContain(text)
   },
 )
+
+
+it('closes after four quiet minutes despite microphone frames and polling', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+  const f = await fixture()
+  const { liveId } = await (await f.request('/session', { sessionId: 's' })).json()
+  const socket = await f.started.promise
+  await f.request('/poll', { liveId })
+  await vi.advanceTimersByTimeAsync(239_999)
+  expect(socket.readyState).toBe(1)
+  await f.request('/audio', { liveId, data: 'AAAA' })
+  const closed = once(socket, 'close')
+  const poll = f.request('/poll', { liveId })
+  await vi.advanceTimersByTimeAsync(1)
+  const result = await (await poll).json()
+  expect(result).toMatchInlineSnapshot(`
+    {
+      "closed": true,
+      "events": [
+        {
+          "reason": "idle_timeout",
+          "type": "closed",
+        },
+      ],
+    }
+  `)
+  await closed
+  expect(socket.readyState).toBe(3)
+})
+
+it.each(['session.input_transcript.delta', 'session.output_transcript.delta', 'session.output_audio.delta'])(
+  'restarts the configured idle interval on %s', async (type) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const f = await fixture(true, { idleTimeoutMinutes: 3 })
+    const { liveId } = await (await f.request('/session', { sessionId: 's' })).json()
+    const socket = await f.started.promise
+    await f.request('/poll', { liveId })
+    await vi.advanceTimersByTimeAsync(179_999)
+    const event = f.request('/poll', { liveId })
+    socket.send(JSON.stringify({ type, delta: type.endsWith('audio.delta') ? 'AAAA' : 'Hello' }))
+    await event
+    await vi.advanceTimersByTimeAsync(179_999)
+    expect(socket.readyState).toBe(1)
+    const closed = once(socket, 'close')
+    await vi.advanceTimersByTimeAsync(1)
+    await closed
+  },
+)
+
+it('waits for an already-running agent and ignores another conversation’s status', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+  const f = await fixture(true, {}, true)
+  await f.request('/session', { sessionId: 's' })
+  const socket = await f.started.promise
+  f.owner.emit('api-session/status', SessionId('other'), false)
+  await vi.advanceTimersByTimeAsync(10 * 60_000)
+  expect(socket.readyState).toBe(1)
+  f.owner.emit('api-session/status', SessionId('s'), false)
+  await vi.advanceTimersByTimeAsync(239_999)
+  expect(socket.readyState).toBe(1)
+  const closed = once(socket, 'close')
+  await vi.advanceTimersByTimeAsync(1)
+  await closed
+})
+
+it('keeps a delegated task open and starts a full idle interval after it settles', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+  const f = await fixture()
+  const { liveId } = await (await f.request('/session', { sessionId: 's' })).json()
+  const socket = await f.started.promise
+  socket.send(JSON.stringify({ type: 'session.input_transcript.delta', delta: 'Make a cube' }))
+  socket.send(JSON.stringify({ type: 'session.delegation.created', delegation: { id: 'task' } }))
+  await f.entered.promise
+  await vi.advanceTimersByTimeAsync(10 * 60_000)
+  expect(socket.readyState).toBe(1)
+  await f.request('/poll', { liveId })
+  const finished = f.request('/poll', { liveId })
+  f.idle.resolve(undefined)
+  await finished
+  await vi.advanceTimersByTimeAsync(239_999)
+  expect(socket.readyState).toBe(1)
+  const closed = once(socket, 'close')
+  await vi.advanceTimersByTimeAsync(1)
+  await closed
+})
+
+
+it('suspends an idle countdown when typed work starts and removes timers on close', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+  const f = await fixture()
+  const { liveId } = await (await f.request('/session', { sessionId: 's' })).json()
+  const socket = await f.started.promise
+  await vi.advanceTimersByTimeAsync(239_999)
+  f.owner.emit('api-session/status', SessionId('s'), true)
+  await vi.advanceTimersByTimeAsync(10 * 60_000)
+  expect(socket.readyState).toBe(1)
+  f.owner.emit('api-session/status', SessionId('s'), false)
+  const closed = once(socket, 'close')
+  await f.request('/close', { liveId })
+  await closed
+  expect(vi.getTimerCount()).toBe(0)
+  f.owner.emit('api-session/status', SessionId('s'), false)
+  expect(vi.getTimerCount()).toBe(0)
+})

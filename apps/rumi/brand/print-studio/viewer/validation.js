@@ -17,14 +17,14 @@ const passedMechanics = report => report?.status === 'passed' && report.assembly
 
 /**
  * Own snapshots, per-stage results, durable movement requirements and cancellation.
- * Viewer refreshes check the selected saved revision without starting agent turns.
+ * Viewer refreshes restore accepted history; only explicit tools execute checks.
  * @param {object} ctx Plugin context for snapshot routes and session disposal.
  * @param {object} config Resolved validator policy and private storage directory.
  * @param {object} options Scene lookup, notifications and optional test runners.
  * @returns {object} Tool execution, viewer reports and quiescent disposal.
  */
 export function createValidation(ctx, config, { view, notify, run = runValidationStage, bullet = runBullet }) {
-  const sessions = new Map(), jobs = new Map(), disposed = new Set(), controllers = new Set()
+  const sessions = new Map(), jobs = new Map(), disposed = new Set(), controllers = new Set(), releases = new Set()
   let closed = false
   function sessionFor(id) {
     if (!sessions.has(id)) sessions.set(id, { models: new Map(), busy: false, error: null })
@@ -74,7 +74,7 @@ export function createValidation(ctx, config, { view, notify, run = runValidatio
       seen.add(model.path)
       if (item.error && !item.source) throw new Error(item.error)
       item.source ??= await createSource(ctx, resolve(cwd, model.path), cwd)
-      await item.source.poll(); await item.source.poll()
+      await item.source.poll({ force: true }); await item.source.poll({ force: true })
       const state = item.source.state()
       if (state.error) throw new Error(state.error.message)
       const transform = scene.selectedModel === model.path ? scene.transform : normalizePlacement()
@@ -227,7 +227,6 @@ export function createValidation(ctx, config, { view, notify, run = runValidatio
   ctx.on('session/disposed', async session => {
     disposed.add(session.id)
     for (const controller of controllers) if (controller.sessionId === session.id) controller.abort()
-    await sessions.get(session.id)?.automatic?.job
     await Promise.allSettled([...jobs].filter(([, id]) => id === session.id).map(([job]) => job))
     const record = sessions.get(session.id)
     sessions.delete(session.id)
@@ -235,41 +234,29 @@ export function createValidation(ctx, config, { view, notify, run = runValidatio
   })
   const api = {
     read,
-    /** Refresh the selected saved revision once; superseded checks drain before the next refresh starts. */
+    /** Restore the selected saved revision without starting validation subprocesses. */
     refresh(id, cwd) {
-      if (closed || disposed.has(id)) return Promise.resolve()
-      const scene = view(id), session = sessionFor(id)
-      const key = scene.selectedModel && scene.sourceHash && !scene.analog
-        ? JSON.stringify([scene.selectedModel, fingerprint(scene.sourceHash, scene.transform, scene.volume)]) : null
-      if (session.automatic && session.automatic.key !== key) session.automatic.controller.abort()
-      if (!key || session.busy || session.automatic || session.checkedKey === key) return session.automatic?.job ?? Promise.resolve()
-      const controller = new AbortController(), automatic = { key, controller, job: null }
-      session.checkedKey = key
-      session.automatic = automatic
-      automatic.job = api.execute(id, cwd, 'mechanics', { path: scene.selectedModel }, controller.signal)
-        .catch(_error => { /* execute owns the visible failure; retry only after a revision change or explicit tool call. */ })
-        .finally(() => {
-          session.automatic = null
-          if (controller.signal.aborted) session.checkedKey = null
-          if (!closed && !disposed.has(id)) notify(id)
-        })
-      return automatic.job
+      return api.restore(id, cwd, view(id).selectedModel)
+    },
+    busy(id) { return Boolean(sessions.get(id)?.busy) },
+    /** Release an inactive scene's validation snapshots; active tool calls retain their resources. */
+    release(id) {
+      const session = sessions.get(id)
+      if (!session || session.busy) return Promise.resolve()
+      sessions.delete(id)
+      const work = (async () => {
+        await Promise.allSettled([...session.models.values()].map(item => item.preparing))
+        for (const item of session.models.values()) { await item.accepted?.release?.(); await item.source?.dispose() }
+      })()
+      releases.add(work)
+      void work.then(() => releases.delete(work), () => releases.delete(work))
+      return work
     },
     /** Execute an exclusive, cancellable stage; findings return, infrastructure failures reject. */
     async execute(id, cwd, stage, args, signal) {
       if (closed || disposed.has(id)) throw new Error('Validation is closed')
       if (!['mechanics', 'accept'].includes(stage)) throw new Error('Unknown validation stage')
       const session = sessionFor(id)
-      if (session.automatic?.job) {
-        signal.throwIfAborted()
-        await new Promise((resolveWait, rejectWait) => {
-          const abortWait = () => rejectWait(signal.reason)
-          signal.addEventListener('abort', abortWait, { once: true })
-          session.automatic.job.then(() => { signal.removeEventListener('abort', abortWait); resolveWait() })
-        })
-        signal.throwIfAborted()
-        if (closed || disposed.has(id)) throw new Error('Validation is closed')
-      }
       if (session.busy) return failure('validation_busy', 'Wait for this project’s current validation tool to finish.')
       session.busy = true
       const controller = new AbortController()
@@ -287,9 +274,9 @@ export function createValidation(ctx, config, { view, notify, run = runValidatio
     /** Restore accepted history without launching validation. */
     async restore(id, cwd, path) {
       if (closed || disposed.has(id) || !path) return
-      const job = prepare(id, cwd, path)
+      const session = sessionFor(id), job = prepare(id, cwd, path)
       jobs.set(job, id)
-      try { await job } catch (error) { sessionFor(id).error = String(error.message ?? error) }
+      try { await job } catch (error) { if (sessions.get(id) === session) session.error = String(error.message ?? error) }
       finally { jobs.delete(job) }
     },
     presentation(id, path) { return sessions.get(id)?.models.get(path)?.accepted?.presentation?.state() ?? null },
@@ -309,7 +296,7 @@ export function createValidation(ctx, config, { view, notify, run = runValidatio
     async dispose() {
       closed = true
       for (const controller of controllers) controller.abort()
-      await Promise.allSettled([...jobs.keys(), ...[...sessions.values()].map(session => session.automatic?.job)])
+      await Promise.allSettled([...jobs.keys(), ...releases])
       for (const session of sessions.values()) for (const item of session.models.values()) { await item.accepted?.release?.(); await item.source?.dispose() }
       sessions.clear()
     },

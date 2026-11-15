@@ -29,9 +29,13 @@ async function fixture() {
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   const owner = new Context()
   cleanup.push(() => owner.fiber.dispose())
-  const listeners = new Map<string, Function>()
+  const listeners = new Map<string, Function>(), routes = new Set<string>()
+  const releaseRoute = vi.fn(async (_path: string) => {})
   const ctx = { effect: owner.effect.bind(owner), on: (name: string, fn: Function) => listeners.set(name, fn),
-    connection: { fetch: { register: () => () => {} } } }
+    connection: { fetch: { register: (route: { path: string }) => {
+      routes.add(route.path)
+      return async () => { await releaseRoute(route.path); routes.delete(route.path) }
+    } } } }
   const run = vi.fn(async (_config, _input, _signal, stage) => ({ ...structuredClone(report),
     ...(stage === 'fit' ? { preparedGeometry: { bodies: [], assembly: intent.assembly } } : {}) }))
   const bullet = vi.fn(async (_config: object, _geometry: object, _signal: AbortSignal) => structuredClone(mechanics))
@@ -55,7 +59,7 @@ async function fixture() {
     const { path: modelPath, fingerprint } = validation.read('a').models[0]
     return { path: modelPath, fingerprint }
   }
-  return { root, ctx, config, options, validation, run, bullet, call, receipt, listeners, scene }
+  return { root, ctx, config, options, validation, run, bullet, call, receipt, listeners, scene, routes, releaseRoute }
 }
 
 it('never starts checks or repairs on project open or turn completion', async () => {
@@ -308,46 +312,33 @@ it('compacts successful probes without losing failures, coverage, policy or diag
 })
 
 
-it('automatically checks the visible revision once and refreshes changed printer settings', async () => {
+it('keeps viewer refreshes read-only across revisions and printer settings', async () => {
   const f = await fixture()
   await f.receipt()
   Object.assign(f.scene, { selectedModel: path, sourceHash: f.validation.read('a').models[0].sourceHash })
   await f.validation.refresh('a', f.root)
-  expect(f.bullet).toHaveBeenCalledTimes(1)
-  expect(f.validation.read('a').models[0].completedStages).toEqual(['assembly', 'geometry', 'fit', 'mechanics'])
-  expect(f.validation.read('a').models[0].acceptedFingerprint).toBeNull()
   await f.validation.refresh('a', f.root)
-  expect(f.run).toHaveBeenCalledTimes(3)
   f.scene.volume = { x: 100, y: 100, z: 100 }
   await f.validation.refresh('a', f.root)
-  expect(f.bullet).toHaveBeenCalledTimes(2)
+  expect(f.run).not.toHaveBeenCalled()
+  expect(f.bullet).not.toHaveBeenCalled()
+  const { status, completedStages, report, acceptedFingerprint } = f.validation.read('a').models[0]
+  expect({ status, completedStages, report, acceptedFingerprint }).toMatchInlineSnapshot(`
+    {
+      "acceptedFingerprint": null,
+      "completedStages": [],
+      "report": null,
+      "status": "changed",
+    }
+  `)
 })
 
-it('cancels superseded background checks and checks the latest revision after draining', async () => {
-  const f = await fixture(), started = Promise.withResolvers<void>()
-  await f.receipt()
-  Object.assign(f.scene, { selectedModel: path, sourceHash: f.validation.read('a').models[0].sourceHash })
-  f.bullet.mockImplementationOnce((_config, _geometry, signal) => new Promise<typeof mechanics>((_resolve, reject) => {
-    signal.addEventListener('abort', () => reject(signal.reason), { once: true })
-    started.resolve()
-  }))
-  const old = f.validation.refresh('a', f.root)
-  await started.promise
-  f.scene.volume = { x: 200, y: 200, z: 200 }
-  await f.validation.refresh('a', f.root)
-  await old
-  expect(f.validation.read('a').models[0].report).toBeNull()
-  await f.validation.refresh('a', f.root)
-  expect(f.bullet).toHaveBeenCalledTimes(2)
-  expect(f.validation.read('a').models[0].report.mechanics.status).toBe('passed')
-})
-
-it('keeps background failures visible without retrying on every viewer poll', async () => {
+it('keeps explicit failures visible without retrying on viewer refresh', async () => {
   const f = await fixture()
   await f.receipt()
   Object.assign(f.scene, { selectedModel: path, sourceHash: f.validation.read('a').models[0].sourceHash })
   f.bullet.mockRejectedValueOnce(new Error('checker unavailable'))
-  await f.validation.refresh('a', f.root)
+  await expect(f.call('mechanics')).rejects.toThrow('checker unavailable')
   expect(f.validation.read('a').models[0].status).toBe('unavailable')
   await f.validation.refresh('a', f.root)
   expect(f.bullet).toHaveBeenCalledTimes(1)
@@ -356,18 +347,71 @@ it('keeps background failures visible without retrying on every viewer poll', as
   expect(f.bullet).toHaveBeenCalledTimes(2)
 })
 
+it('releases inactive validation routes and restores durable acceptance on reopening', async () => {
+  const f = await fixture()
+  const result = await f.call('mechanics')
+  await f.call('accept', { path, fingerprint: result.fingerprint })
+  expect(f.routes.size).toBeGreaterThan(0)
+  await f.validation.release('a')
+  expect(f.routes.size).toBe(0)
+  expect(f.validation.read('a').models).toEqual([])
+  await f.validation.restore('a', f.root, path)
+  expect(f.validation.read('a').models[0].acceptedFingerprint).toBe(result.fingerprint)
+  expect(f.run).toHaveBeenCalledTimes(3)
+  expect(f.bullet).toHaveBeenCalledTimes(1)
+})
 
-it('shares background results with explicit mechanics calls without duplicate work', async () => {
+it('retains active explicit validation until it settles before eviction', async () => {
   const f = await fixture(), started = Promise.withResolvers<void>(), finish = Promise.withResolvers<typeof mechanics>()
-  await f.receipt()
-  Object.assign(f.scene, { selectedModel: path, sourceHash: f.validation.read('a').models[0].sourceHash })
   f.bullet.mockImplementationOnce(async () => { started.resolve(); return finish.promise })
-  const background = f.validation.refresh('a', f.root)
+  const work = f.call('mechanics')
   try {
     await started.promise
-    const explicit = f.call('mechanics')
+    expect(f.validation.busy('a')).toBe(true)
+    await f.validation.release('a')
+    expect(f.validation.read('a').models).toHaveLength(1)
+    expect(f.routes.size).toBeGreaterThan(0)
     finish.resolve(structuredClone(mechanics))
-    expect(await explicit).toMatchObject({ status: 'passed', cached: true })
-    expect(f.bullet).toHaveBeenCalledTimes(1)
-  } finally { finish.resolve(structuredClone(mechanics)); await background }
+    expect(await work).toMatchObject({ status: 'passed' })
+    expect(f.validation.busy('a')).toBe(false)
+    await f.validation.release('a')
+    expect(f.routes.size).toBe(0)
+  } finally { finish.resolve(structuredClone(mechanics)); await work }
+})
+
+
+it('does not resurrect an evicted model when its pending restore fails', async () => {
+  const f = await fixture()
+  await f.call('mechanics')
+  await f.validation.release('a')
+  const [key] = await readdir(f.config.validationStateDirectory)
+  await writeFile(join(f.config.validationStateDirectory, key, 'state.json'), 'invalid')
+  const restoring = f.validation.restore('a', f.root, path)
+  const releasing = f.validation.release('a')
+  await Promise.all([restoring, releasing])
+  expect(f.validation.read('a').models).toEqual([])
+  expect(f.validation.read('a').error).toBeNull()
+})
+
+it('keeps reopened state separate from an evicted restore and drains route releases on shutdown', async () => {
+  const f = await fixture()
+  const result = await f.call('mechanics')
+  await f.call('accept', { path, fingerprint: result.fingerprint })
+  await f.validation.release('a')
+  const started = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>()
+  f.releaseRoute.mockImplementation(async () => { started.resolve(); await finish.promise })
+  const oldRestore = f.validation.restore('a', f.root, path)
+  const releasing = f.validation.release('a')
+  const reopened = f.validation.restore('a', f.root, path)
+  let stopped = false
+  try {
+    await Promise.all([oldRestore, reopened, started.promise])
+    expect(f.validation.read('a').models[0].acceptedFingerprint).toBe(result.fingerprint)
+    const stopping = f.validation.dispose().then(() => { stopped = true })
+    await Promise.resolve()
+    expect(stopped).toBe(false)
+    finish.resolve()
+    await Promise.all([releasing, stopping])
+    expect(f.routes.size).toBe(0)
+  } finally { finish.resolve(); await releasing }
 })

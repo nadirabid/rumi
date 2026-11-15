@@ -216,7 +216,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   const displaySource = record => record.source
   const displayIdentity = record => cursorIdentity({ ...record, source: displaySource(record) })
   const cursors = createCursorRequests(sessionId => events.notify(sessionId))
-  const captureJobs = new Set()
+  const captureJobs = new Set(), evictions = new Set()
   ctx.inject(['systemPrompt'], scoped => {
     scoped.effect(() => scoped.systemPrompt.context({
       name: 'rumi:mesh-state', order: scoped.systemPrompt.getContextOrder('WEB_SURFACE'), interpolate: false, required: true,
@@ -241,6 +241,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   ctx.effect(() => async () => {
     closed = true
     await validation?.dispose()
+    await Promise.allSettled([...evictions])
     loads.dispose()
     receipts.dispose()
     events.dispose()
@@ -270,10 +271,15 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
     const record = { sessionId, history: createHistory(), datablocks: new Map(), byPath: new Map(), measurements: new Map(), pending: Promise.resolve() }
     sessions.set(sessionId, record)
     while (sessions.size > MAX_SESSIONS) {
-      const key = [...sessions.keys()].find(id => id !== sessionId && !sessions.get(id).busy && focus.paths(id).length === 0)
+      const key = [...sessions.keys()].find(id => id !== sessionId && !sessions.get(id).busy && !validation?.busy(id) && focus.paths(id).length === 0)
       if (key === undefined) break
       const source = sessions.get(key).source
-      if (source) ctx.effect(async () => { await source.dispose(); return () => {} }, 'print viewer: evict source')
+      const eviction = Promise.all([validation?.release(key), source?.dispose()])
+      evictions.add(eviction)
+      void eviction.then(() => evictions.delete(eviction), error => {
+        evictions.delete(eviction)
+        ctx.logger.warn('Failed to release an inactive model preview', error)
+      })
       loads.cancel(key)
       receipts.cancel(key)
       events.forget(key)
@@ -340,8 +346,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       if (path) await loadSource(record, cwd, path, saved?.volume)
     }
     await record.source?.poll()
-    await validation?.restore(sessionId, cwd, record.selectedModel)
-    void validation?.refresh(sessionId, cwd)
+    await validation?.refresh(sessionId, cwd)
     loads.update(sessionId, loadIdentity(record), record.source?.state().error?.kind === 'source'
       ? { status: 'source_failed', error: record.source.state().error } : undefined)
     record.catalogError = null

@@ -1,5 +1,7 @@
 /** The pane follows the host's scene: geometry loads once, placement updates reuse the viewport. */
 import * as React from 'react'
+import { PerspectiveCamera } from 'three'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
@@ -40,9 +42,9 @@ beforeEach(() => {
   viewport.renderedHighlight.mockReset().mockReturnValue(null)
   viewport.closePrintLayout.mockReset()
   viewport.setActivity.mockReset()
-  viewport.create.mockClear()
+  viewport.create.mockReset()
   viewport.apply.mockClear()
-  viewport.dispose.mockClear()
+  viewport.dispose.mockReset()
   viewport.thumbnail.mockClear()
 })
 afterEach(async () => {
@@ -78,6 +80,8 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
   const entries = new Map<string, Entry>()
   const register = () => () => {}
   const opened = vi.fn()
+  let mounted: string | undefined = 'session-a'
+  const mountedListeners = new Set<() => void>()
   const state = { scene: host.scene ?? null, modelOk: host.modelOk ?? true, cursorRequest: null as { id: string } | null }
   const fetch = vi.fn(async (url: string | URL, _init?: RequestInit) => {
     if (String(url).includes('/state')) return { ok: true, json: async () => ({ scene: state.scene, cursorRequest: state.cursorRequest }) }
@@ -88,7 +92,13 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
   installViewer({
     locale: { bind: () => t, register },
     effect: (effect: () => (() => void | Promise<void>)) => { const dispose = effect(); disposers.push(dispose); return dispose },
-    sidebarRight: { mounted: { getSnapshot: () => 'session-a' }, openTabIn: opened },
+    sidebarRight: {
+      mounted: {
+        getSnapshot: () => mounted,
+        subscribe: (listener: () => void) => { mountedListeners.add(listener); return () => mountedListeners.delete(listener) },
+      },
+      openTabIn: opened,
+    },
     sidebarRightTabs: { register }, documentPreviews: { register },
     slots: {
       inject: (_name: string, registerEntry: () => (() => void)) => registerEntry(),
@@ -100,6 +110,7 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
   }, React, { Menu, IconChevronDownOutlineRegular, PluginArtworkDefault: () => null, Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant: string; size: string }) => React.createElement('button', props) })
   return {
     opened, fetch,
+    mount: (id: string | undefined) => { mounted = id; for (const listener of mountedListeners) listener() },
     requestCursor: (id: string) => { state.cursorRequest = { id } },
     setScene: (next: object | null) => { state.scene = next },
     view: (name: string, owner: Record<string, unknown> = {}) => {
@@ -506,4 +517,69 @@ it('animates work without visible labels and locks print actions while retaining
   await settle(2000)
   expect(viewport.setActivity).toHaveBeenLastCalledWith('idle')
   expect(screen.getByRole('button', { name: en.layoutPrint }).hasAttribute('disabled')).toBe(false)
+})
+
+
+it('disconnects real orbit controls from the document before detaching each viewer', async () => {
+  const registered = vi.spyOn(document, 'addEventListener')
+  const removed = vi.spyOn(document, 'removeEventListener')
+  const controls: OrbitControls[] = []
+  viewport.create.mockImplementation((holder: HTMLElement) => {
+    const canvas = document.createElement('canvas')
+    holder.appendChild(canvas)
+    const control = new OrbitControls(new PerspectiveCamera(), canvas)
+    controls.push(control)
+    viewport.dispose.mockImplementation(() => { expect(canvas.isConnected).toBe(true); control.dispose(); canvas.remove() })
+  })
+  const view = fixture({ scene: scene([object()]) })
+  try {
+    for (let index = 0; index < 3; index++) {
+      const rendered = render(view.view('sidebar.right.pane.tab'))
+      await settle()
+      rendered.unmount()
+    }
+    const handlers = registered.mock.calls.filter(([type, , options]) => type === 'keydown' && typeof options === 'object' && options.capture)
+    expect(handlers).toHaveLength(3)
+    for (const [, handler] of handlers) {
+      expect(removed).toHaveBeenCalledWith('keydown', handler, { capture: true })
+    }
+  } finally {
+    for (const [type, handler, options] of registered.mock.calls) {
+      if (type === 'keydown' && typeof options === 'object' && options.capture) document.removeEventListener(type, handler, options)
+    }
+    for (const control of controls) control.dispose()
+    registered.mockRestore(); removed.mockRestore()
+  }
+})
+
+it('reads a newly mounted project immediately and stops polling in the gallery', async () => {
+  const view = fixture()
+  await settle()
+  view.mount(undefined)
+  await settle()
+  view.fetch.mockClear()
+  await settle(6000)
+  expect(view.fetch).not.toHaveBeenCalled()
+  view.mount('session-b')
+  await settle()
+  expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/state?sessionId=session-b', expect.anything())
+})
+
+
+it('pauses scene polls while hidden and refreshes immediately on return', async () => {
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+  try {
+    const view = fixture()
+    await settle()
+    hidden.mockReturnValue(true)
+    fireEvent(document, new Event('visibilitychange'))
+    await settle()
+    view.fetch.mockClear()
+    await settle(6000)
+    expect(view.fetch).not.toHaveBeenCalled()
+    hidden.mockReturnValue(false)
+    fireEvent(document, new Event('visibilitychange'))
+    await settle()
+    expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/state?sessionId=session-a', expect.anything())
+  } finally { hidden.mockRestore() }
 })

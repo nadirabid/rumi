@@ -44,6 +44,29 @@ it('keeps material seams separate even on coplanar triangles', () => {
   geometry.dispose()
 })
 
+it('selects the nearest visible indexed triangle using its material group and side', () => {
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    0, 0, 0, 1, 0, 0, 0, 1, 0,
+    0, 0, 1, 1, 0, 1, 0, 1, 1,
+  ], 3))
+  geometry.setIndex([0, 1, 2, 3, 4, 5])
+  geometry.addGroup(0, 3, 0); geometry.addGroup(3, 3, 1)
+  const materials = [new THREE.MeshStandardMaterial(), new THREE.MeshStandardMaterial()]
+  try {
+    const surfaces = createSurfaceIndex(geometry)
+    const ray = new THREE.Ray(new THREE.Vector3(.2, .2, 2), new THREE.Vector3(0, 0, -1))
+    expect(surfaces.pick(ray, materials).faceIndex).toBe(1)
+    materials[1]!.visible = false
+    expect(surfaces.pick(ray, materials).faceIndex).toBe(0)
+    materials[1]!.visible = true
+    materials[1]!.side = THREE.BackSide
+    expect(surfaces.pick(ray, materials).faceIndex).toBe(0)
+    materials[1]!.side = THREE.DoubleSide
+    expect(surfaces.pick(ray, materials).faceIndex).toBe(1)
+  } finally { geometry.dispose(); materials.forEach(material => material.dispose()) }
+})
+
 it('recognizes only short selection requests, never embedded geometry edits or negations', () => {
   expect(cursorCommand('Whole panel.')).toBe('surface')
   expect(cursorCommand('just the edge')).toBe('edge')
@@ -59,8 +82,15 @@ it('retains a captured selection for exact agent confirmation and rejects malfor
   expect(() => normalizeHighlight({ label: '', blobs: [], selection: { ...selection, surfaceId: -1 } })).toThrow()
 })
 
-it.each(['curved', 'flat'])('matches native picking across a subdivided %s mesh', (kind) => {
-  const geometry = kind === 'curved' ? new THREE.SphereGeometry(5, 64, 32) : new THREE.PlaneGeometry(10, 10, 32, 32)
+it.each(['curved', 'flat', 'shuffled'])('matches native picking across a subdivided %s mesh', (kind) => {
+  const geometry = kind === 'flat' ? new THREE.PlaneGeometry(10, 10, 32, 32) : new THREE.SphereGeometry(5, 64, 32)
+  if (kind === 'shuffled') {
+    const original = geometry.index!.array.slice(), faces = original.length / 3
+    for (let face = 0; face < faces; face++) {
+      const source = (face * 193) % faces
+      for (let corner = 0; corner < 3; corner++) geometry.index!.setX(face * 3 + corner, original[source * 3 + corner]!)
+    }
+  }
   const material = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide })
   const mesh = new THREE.Mesh(geometry, material)
   const surfaces = createSurfaceIndex(geometry)
@@ -79,6 +109,22 @@ it.each(['curved', 'flat'])('matches native picking across a subdivided %s mesh'
       }
     }
   } finally { geometry.dispose(); material.dispose() }
+})
+
+it('keeps a non-manifold edge open on every participating triangle', () => {
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    0, 0, 0, 1, 0, 0, 0, 1, 0,
+    1, 0, 0, 0, 0, 0, 0, -1, 0,
+    0, 0, 0, 1, 0, 0, 1, 1, 0,
+  ], 3))
+  try {
+    const surfaces = createSurfaceIndex(geometry)
+    expect(new Set(surfaces.ids).size).toBe(3)
+    for (let face = 0; face < 3; face++) {
+      for (let vertex = 0; vertex < 3; vertex++) expect(surfaces.boundary[face * 9 + vertex * 3 + 2]).toBe(1)
+    }
+  } finally { geometry.dispose() }
 })
 
 it.each(['suspended', 'resumed'])('retains prepared highlight resources across suspension and releases from %s state', (state) => {

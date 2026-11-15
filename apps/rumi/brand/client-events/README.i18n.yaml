@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/rumi/brand/client-events/README.md
+/:
+  en: 3f998327f228f835
+  zh: 3e292591dc310ac5
+/rumi-client-events:
+  en: 94411f92478eae0d
+  zh: 272ac20ee17fed5d
+/rumi-client-events/summary:
+  en: 5758a25d4711418d
+  zh: 5b80ca2428a538e3
+/rumi-client-events/table-of-contents:
+  en: 4f7989bbc91f582a
+  zh: b8df1ba8a20fee49
+/rumi-client-events/use-this-bundle:
+  en: f60b55e266cf74fb
+  zh: fc8f799cbaf1662c
+/rumi-client-events/configuration:
+  en: 4cf7d274b36a9312
+  zh: 31d96a51e5fece4d
+/rumi-client-events/implementation:
+  en: a7e7e09afec461b3
+  zh: 1b40b70923058a79
+/rumi-client-events/dev-note:
+  en: b21c42c67d689a6d
+  zh: 88850fe8f22529bf

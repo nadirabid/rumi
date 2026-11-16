@@ -128,7 +128,8 @@ it.skipIf(process.platform !== 'darwin')('keeps concurrent sessions bound to the
 
 it.skipIf(process.platform !== 'darwin')('logs only the owning project instructions and rejects an external instruction link', async () => {
   const f = await fixture()
-  await writeFile(join(f.root, 'AGENTS.md'), 'Use blue wheels in this project.')
+  const template = await readFile(new URL('../brand/projects/AGENTS_TEMPLATE.md', import.meta.url), 'utf8')
+  await writeFile(join(f.root, 'AGENTS.md'), `${template}\nUse blue wheels in this project.\n`)
   await writeFile(join(f.workspace, 'AGENTS.md'), 'Private parent instructions.')
   f.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Read the project file.' }] }))
   await f.agent.whenIdle()

@@ -23,6 +23,8 @@ Both apps run at the same time and share nothing: separate bundle ids, single-in
 
 Project agents are confined to their own project directory for reads and writes, with read-only runtime exceptions. See [project isolation](apps/rumi/brand/projects/README.md#project-isolation) for enforcement, restrictions and upgrade behavior.
 
+Rumi reports failed foreground Bash commands as structured tool errors while preserving stdout, stderr, and exit diagnostics. Successful commands and background acknowledgements retain their existing behavior.
+
 ## Build
 
 ```sh

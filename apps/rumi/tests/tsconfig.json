@@ -9,7 +9,8 @@
   },
   "include": [
     "project-isolation*.spec.ts",
-    "project-manager.spec.ts"
+    "project-manager.spec.ts",
+    "shell-errors.spec.ts"
   ],
   "references": [
     {

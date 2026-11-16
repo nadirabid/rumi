@@ -235,9 +235,11 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       },
     }), 'print viewer: live mesh context')
     scoped.effect(() => scoped.systemPrompt.context({
-      name: 'rumi:active-shape', order: scoped.systemPrompt.getContextOrder('WEB_SURFACE'), interpolate: false,
+      name: 'rumi:active-shape', order: scoped.systemPrompt.getContextOrder('WEB_SURFACE'), interpolate: false, required: true,
       text: context => {
         const shape = sessions.get(context.agent?.session.id)?.source?.state().analog
+        const review = sessions.get(context.agent?.session.id)?.source?.controlReview.state()
+        if (review) return `Pending mesh control review: ${JSON.stringify(review)}. Do not claim controls are ready before presenting reviewed controls. Validation renders are evidence, not an automatic quality pass. Inspect every comparison for the expected effect, unwanted movement, pinching, intersections, and part fit.`
         if (!shape) return ''
         return `Unresolved model edit: ${JSON.stringify({ id: shape.id, label: shape.label, operation: shape.operation, controls: shape.controls, values: shape.values, frozen: shape.frozen, finish: shape.finish, original: shape.original, edit: shape.edit })}. Keep controls open while the person explores. Satisfaction or moving to another task resolves the current edit first: freeze the latest visible values, then ${shape.operation === 'parameters' && shape.finish !== 'blender' ? 'call viewer_controls save with the frozen id' : 'apply the captured recipe in Blender, publish and load the revision'}. If already frozen, finish saving. Explicit cancel uses close. Read mesh-edit-controls; do not require a special phrase.`
       },
@@ -388,7 +390,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
     })
     if (receipts.has(sessionId)) diagnostics.record(sessionId, 'viewer.state_delivered', { highlightId: displaySource(record)?.state().highlight?.id ?? null })
     const displayed = sceneState(record)
-    return json({ validationRequests: validation?.requests(sessionId) ?? [], cursorRequest: cursors.read(sessionId), scene: {
+    return json({ controlValidationRequest: record.source?.controlReview.request() ?? null, validationRequests: validation?.requests(sessionId) ?? [], cursorRequest: cursors.read(sessionId), scene: {
       validation: validation?.read(sessionId),
       ...displayed, design: record.source?.state() ?? null,
       models: record.models ?? [], selectedModel: record.selectedModel ?? null,
@@ -782,12 +784,31 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
     },
   }), 'print viewer: shape feedback')
 
+  ctx.effect(() => ctx.connection.fetch.register({
+    path: `${ROUTE}/control-evidence`, methods: ['POST'], requestBody: 'buffered',
+    fetch: async request => {
+      const sessionId = new URL(request.url).searchParams.get('sessionId')
+      const record = sessions.get(sessionId)
+      try {
+        const value = await request.json()
+        await record?.source?.poll({ force: true })
+        if (!record?.source?.controlReview.deliver(value.id, value.result)) return json({ error: 'stale_control_evidence' }, 409)
+        events.notify(sessionId)
+        return json({ ok: true })
+      } catch (error) { return json({ error: String(error.message ?? error) }, 400) }
+    },
+  }), 'print viewer: control comparison evidence')
+
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_controls',
-    description: 'Open temporary edit sliders, pads, or curves after reading mesh-edit-controls and designing bindings from the requested geometric variation and preserved features. Generate model-specific fields when a built-in operation is unsuitable; prepared presets are not required. For persistent doors and wheels, use USD assembly joints; read mesh-edit-controls. Movement controls remain at the bottom-right independently of edits. Supply labeled controls and initial values for the selected operation. Read analog-shaping for geometry and Blender save rules. Executable JavaScript parameter previews are disabled by project isolation. Keep controls open while the person explores; freeze the latest values before applying and publishing the edit in Blender.',
+    description: 'Prepare, validate, review, and present temporary mesh edit controls. prepare (or open) stages controls without showing them and requires an expected effect and preserved features for every axis. validate generates actual-mesh before/after and displacement-overlay images for endpoints and combinations. Inspect every image, then review each axis and combined effects using the evidenceId; accept only useful, well-behaved edits, otherwise revise and prepare again. present requires accepted current evidence. Changes to the model, fields, parts or ranges require new validation. Pending work is reminded in context. Freeze the latest visible values before saving in Blender; close cancels. Read mesh-edit-controls for intent and quality guidance. Persistent joint controls are authored in USD, independently of this workflow.',
     parameters: {
-      action: { type: 'string', required: true, enum: ['open', 'freeze', 'save', 'close'] },
-      id: { type: 'string', description: 'Current design.analog.id for freeze or close.' },
+      action: { type: 'string', required: true, enum: ['prepare', 'open', 'validate', 'review', 'present', 'freeze', 'save', 'close'] },
+      id: { type: 'string', description: 'Prepared control review id for validate/review/present, or active analog id for freeze/close.' },
+      evidenceId: { type: 'string', description: 'Exact evidenceId returned by validation; required for review.' },
+      expectations: { type: 'array', description: 'Required for prepare: expected geometric effect and features to preserve for every axis.', items: { type: 'object', additionalProperties: false, properties: { key: { type: 'string', required: true }, effect: { type: 'string', required: true }, preserve: { type: 'string', required: true } } } },
+      assessments: { type: 'array', description: 'Required for review: observations from the images and measurements, for every axis.', items: { type: 'object', additionalProperties: false, properties: { key: { type: 'string', required: true }, decision: { type: 'string', enum: ['accept', 'revise'], required: true }, observation: { type: 'string', required: true } } } },
+      combined: { type: 'object', description: 'Required for review: assessment of combined extremes.', additionalProperties: false, properties: { decision: { type: 'string', enum: ['accept', 'revise'], required: true }, observation: { type: 'string', required: true } } },
       path: { type: 'string', description: 'Current design.path for open, absolute or project-relative.' },
       revision: { type: 'integer', description: 'Exact design.revision for open.' },
       url: { type: 'string', description: 'Exact design.url for open.' },
@@ -815,23 +836,55 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         },
       } },
     },
-    output: { schema: { type: 'string' }, render: (_args,value) => [{ type: 'text', text: value }] },
+    output: { schema: { type: 'string' }, render: (_args, value) => {
+      const result = JSON.parse(value)
+      return [{ type: 'text', text: value }, ...(result.images ?? []).map(image => ({ type: 'image', attachment: image }))]
+    } },
     presentCall: args => ({ card: 'generic', title: args.action === 'open' ? 'Shape controls' : 'Update shape controls', kind: 'write' }),
-    isConcurrencySafe: () => false, timeoutMs: 15_000,
+    isConcurrencySafe: () => false, timeoutMs: (validationConfig?.validationTimeoutMs ?? loadTimeoutMs) + 15_000,
     async execute(args, exec) {
       const sessionId = exec.agent.session.id, record = sessions.get(sessionId)
       if (!record?.source) throw new Error('Load a model first')
+      if (args.action === 'prepare') args = { ...args, action: 'open' }
       if (args.action === 'open' && !args.controls) throw new Error('Declare the labeled controls and their bindings before opening')
       focus.assertSelected(exec.agent, record.selectedModel)
-      if (args.action === 'close') { record.source.clearShape(args.id); events.notify(sessionId); return JSON.stringify({ status: 'closed' }) }
+      if (args.action === 'close') { if (record.source.controlReview.state()?.id === args.id) record.source.controlReview.clear(args.id); else record.source.clearShape(args.id); events.notify(sessionId); return JSON.stringify({ status: 'closed' }) }
       const operation = (async () => {
+        const identity = () => { const state = record.source.state(); return { path: state.path, revision: state.revision, url: state.url, contentHash: state.contentHash } }
+        await record.source.poll({ force: true })
+        if (args.action === 'validate') {
+          const release = record.source.retainSnapshot()
+          try {
+            const work = record.source.controlReview.validate(args.id, exec.signal, validationConfig?.validationTimeoutMs ?? loadTimeoutMs)
+            events.notify(sessionId)
+            const result = await work
+            exec.signal.throwIfAborted()
+            if (result.status !== 'complete') throw new Error(result.message ?? 'Control validation was cancelled')
+            const images = [], report = []
+            for (const item of result.cases) {
+              const { image, ...measurements } = item
+              const attachment = await ctx.attachments.saveImage({ data: Buffer.from(image.slice('data:image/png;base64,'.length), 'base64'), mediaType: 'image/png', name: `${item.id}.png` })
+              images.push(attachment); report.push({ ...measurements, image: attachment })
+            }
+            await record.source.poll({ force: true })
+            exec.signal.throwIfAborted()
+            const review = record.source.controlReview.evidence(args.id, report)
+            events.notify(sessionId)
+            return JSON.stringify({ ...review, images, message: 'Inspect all attached comparisons. Record an assessment for every axis and the combined extremes before presenting.' })
+          } catch (error) { record.source.controlReview.fail(args.id); throw error }
+          finally { await release() }
+        }
+        if (args.action === 'review') {
+          const review = record.source.controlReview.review(args.id, args.evidenceId, args.assessments, args.combined)
+          events.notify(sessionId); return JSON.stringify(review)
+        }
         if (args.action === 'save') return serialize(record, async () => {
           await record.source.poll()
           const saved = await record.source.saveParameters(args.id)
           events.notify(sessionId)
           return JSON.stringify({ status: 'saved', ...saved })
         })
-        const { shape, receipt } = await serialize(record, async () => {
+        const preparedOrActive = await serialize(record, async () => {
           await record.source.poll()
           if (args.action === 'freeze') record.source.requestShapeFreeze(args.id)
           let fields = args.fields
@@ -866,13 +919,24 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
             if (!inside || inside === '..' || inside.startsWith(`..${sep}`)) throw new Error('Preserved original must be a file inside the project')
             originalHash = createHash('sha256').update(await readFile(original)).digest('hex')
           }
-          const shape = args.action === 'open'
-            ? record.source.shape({ ...args, fields, finish, edit, original, originalHash, path: await realpath(resolve(record.cwd, args.path)) })
+          if (args.action === 'open') {
+            const current = identity(), path = await realpath(resolve(record.cwd, args.path))
+            if (path !== current.path || args.revision !== current.revision || args.url !== current.url || record.source.state().error) throw new Error('Model changed; read current meshState before preparing controls')
+            const review = record.source.controlReview.prepare({ ...args, fields, finish, edit, original, originalHash }, current)
+            events.notify(sessionId)
+            return { prepared: review }
+          }
+          const shape = args.action === 'present'
+            ? record.source.shape(record.source.controlReview.present(args.id, identity()))
             : record.source.state().analog
+          if (!shape) throw new Error('No active controls; prepare, validate, review and present first')
+          if (args.action === 'present') record.source.controlReview.clear(args.id)
           const receipt = receipts.wait(sessionId, args.action === 'freeze' ? `${shape.id}:freeze` : shape.id, exec.signal)
           events.notify(sessionId)
           return { shape, receipt }
         })
+        if (preparedOrActive.prepared) return JSON.stringify(preparedOrActive.prepared)
+        const { shape, receipt } = preparedOrActive
         const status = await receipt
         exec.signal.throwIfAborted()
         if (status !== 'rendered') return JSON.stringify({ status: 'not_rendered', reason: status, id: shape.id,

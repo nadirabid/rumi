@@ -1,3 +1,4 @@
+import { createControlReview } from './analog/review.js'
 /** Versioned local model modules. Source is served as data; only the renderer executes it. */
 import { readdir, readFile, realpath, stat, writeFile, rename, rm } from 'node:fs/promises'
 import { dirname, extname, relative, resolve, sep } from 'node:path'
@@ -91,6 +92,7 @@ export async function createSource(ctx, path, workspace) {
       await snapshot.dispose()
     }
   }
+  const controlReview = createControlReview()
   const state = { path, format, revision: 0, url: null, transform: normalizePlacement(), report: null, camera: null, highlight: null, analog: null, contentHash: null, parameters: {} }
 
   const signature = value => [value.dev, value.ino, value.size, value.mtimeNs, value.ctimeNs].join(':')
@@ -179,6 +181,7 @@ export async function createSource(ctx, path, workspace) {
       state.revision++
       state.highlight = null
       state.analog = null
+      controlReview.reset()
       delete state.motion
       state.contentHash = format === 'usd' ? createHash('sha256').update(next.files.get(entryName)).digest('hex') : next.hash
       state.parameters = next.parameters
@@ -196,6 +199,7 @@ export async function createSource(ctx, path, workspace) {
   const dispose = ctx.effect(async function* () {
     yield async () => {
       closed = true
+      controlReview.dispose()
       await pending
       await Promise.all(snapshots.splice(0).map(snapshot => snapshot.dispose()))
     }
@@ -211,7 +215,8 @@ export async function createSource(ctx, path, workspace) {
   }, 'print viewer: source lifetime')
   await dispose
   return {
-    state: () => ({ ...state, error: sourceError ?? buildError }),
+    state: () => ({ ...state, controlReview: controlReview.state(), error: sourceError ?? buildError }),
+    controlReview,
     /** Retain the current immutable routes until the returned release operation settles. */
     retainSnapshot() {
       if (closed || !currentSnapshot) throw new Error('Model source is closed')

@@ -25,11 +25,11 @@ Check existing field files against the current revision and request before reusi
 
 ## Verify and present
 
-Test the actual sampled deformation on temporary copies: neutral, each axis’s extremes, and useful or large-displacement combinations. For fields, use the Blender helper’s sibling `fields.py`. Compare the requested profile or dimensions and protected features with the original. Check continuity, pinching, intersections, separation, and both sides of shells. Neutral must reproduce the current geometry. Do not publish changes merely to test controls.
+State the expected geometric effect and preserved features for each axis. Prepare the controls through `viewer_controls`; preparation stages them without changing the person's preview. Validate the prepared controls to generate actual-mesh endpoint and combination comparisons. Inspect every before/after image, displacement overlay, and measurement against the expected effects. Check useful movement, direction, continuity, pinching, intersections, part fit, and both sides of shells. A completed render is evidence, not a quality pass.
 
-Every axis must change its intended feature in the stated direction. Revise ineffective, redundant, or disruptive bindings. Narrow the range or explain approximations where the deformation cannot reproduce the intended construction faithfully.
+Record an assessment for each axis and the combinations. Revise ineffective, redundant, or disruptive bindings, then prepare and validate again. Present controls only after accepting the current evidence. The tool tracks pending work and invalidates evidence when the model or bindings change; do not substitute formula samples or self-authored tests for its comparisons.
 
-Read [interactive-controls](../interactive-controls/SKILL.md) to choose widgets and labels. Call `viewer_controls` with explicit `controls`, `values`, and the current model’s exact `path`, `revision`, and `url`. Field values start at zero. For built-in deformations, amount .5 leaves the geometry unchanged; choose the other starting values as described in `analog-shaping`. Briefly explain what changes and what stays fixed.
+Read [interactive-controls](../interactive-controls/SKILL.md) to choose widgets and labels. Field values start at zero. For built-in deformations, amount .5 leaves the geometry unchanged; choose the other starting values as described in `analog-shaping`. Briefly explain what changes and what stays fixed.
 
 Only `rendered` confirms visibility. For `viewer_hidden`, bring the window forward; the viewer retries. For `render_failed`, fix the reported binding or model error. A timeout does not establish that the requested edit is unsupported.
 

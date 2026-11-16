@@ -232,6 +232,7 @@
     "gen-provider-data": "tsx packages/llm/llm-pi-ai/scripts/gen-provider-data.ts",
     "verify-provider-data": "tsx packages/llm/llm-pi-ai/scripts/gen-provider-data.ts --check",
     "verify-product-use": "tsx scripts/verify-product-use.ts",
+    "test:controls:rumi": "vitest run --config apps/rumi/vitest.studio.config.ts apps/rumi/brand/print-studio/tests/control-review.spec.ts apps/rumi/brand/print-studio/tests/viewer-host.spec.ts apps/rumi/brand/print-studio/tests/analog.spec.ts apps/rumi/brand/print-studio/tests/fields.spec.ts",
     "build:rumi": "pnpm --filter dsh-rumi run build",
     "dev:rumi": "pnpm --filter dsh-rumi run dev",
     "package:rumi": "pnpm --filter dsh-rumi run package",

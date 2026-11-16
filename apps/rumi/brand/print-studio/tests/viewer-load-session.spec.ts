@@ -90,8 +90,10 @@ it.each(['usd'])('delivers %s load measurements and movement to the next model r
       while (!controller.signal.aborted) {
         await request('events')
         const { scene } = await request('state')
-        if (!scene.design || delivered === scene.design.url) continue
-        delivered = scene.design.url
+        if (!scene.design) continue
+        const identity = JSON.stringify([scene.design.url, scene.design.renderRequest])
+        if (delivered === identity) continue
+        delivered = identity
         const source = await routes.get(scene.design.url)!(new Request(`http://fixture${scene.design.url}`))
         const generated = { bytes: await source.arrayBuffer(), parameters: {} }
         const model = await parseUsdModel(generated.bytes)
@@ -114,7 +116,8 @@ it.each(['usd'])('delivers %s load measurements and movement to the next model r
             motion: readMotion(model.motionDefinitions, model.parameters), report: analyzeMesh(model.positions) }
         } finally { disposeModel(model.root) }
         await request('feedback', {
-          revision: scene.design.revision, url: scene.design.url, transform: scene.design.transform,
+          revision: scene.design.revision, url: scene.design.url, renderRequest: scene.design.renderRequest,
+          transform: scene.design.transform,
           volume: scene.volume, loadStatus: 'ready', parameters: { width: 12, angle: 0 },
           motion: { values: { angle: 0 }, controls: [{ kind: 'slider', label: 'Door', axes: [{ key: 'angle', min: 0, max: 90, step: 1, reset: 0 }] }] },
           report: { status: 'ok', dimensions: { x: 12, y: 12, z: 2 }, checks: [] },

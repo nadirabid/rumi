@@ -577,3 +577,15 @@ it('changes activity uniforms without replacing geometry and excludes work effec
     expect(shader.uniforms.rumiActivity.value.x).toBe(0)
   } finally { await viewport.dispose() }
 })
+
+it('retries a failed load when an explicit reload keeps the same URL', async () => {
+  const fetch = vi.fn().mockRejectedValueOnce(new Error('Connection interrupted')).mockResolvedValueOnce(new Response(robotUsd()))
+  vi.stubGlobal('fetch', fetch)
+  const viewport = createViewport(container(), vi.fn())
+  const spec = { format: 'usd', url: '/retry.usda', transform: {} }
+  try {
+    await expect(viewport.applyDesign(spec, null)).rejects.toThrow('Connection interrupted')
+    await expect(viewport.applyDesign({ ...spec, renderRequest: 'retry' }, null)).resolves.toBeTruthy()
+    expect(fetch).toHaveBeenCalledTimes(2)
+  } finally { viewport.dispose() }
+})

@@ -583,3 +583,18 @@ it('pauses scene polls while hidden and refreshes immediately on return', async 
     expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/state?sessionId=session-a', expect.anything())
   } finally { hidden.mockRestore() }
 })
+
+
+it('acknowledges an explicit reload without a new source URL', async () => {
+  const design = { url: '/source/one/model.usda', revision: 1, transform: { scale: 1 } }
+  viewport.applyDesign.mockResolvedValue({ status: 'ok', dimensions: { x: 1, y: 1, z: 1 }, checks: [] })
+  const view = fixture({ scene: { ...scene([]), design } })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  const applications = viewport.applyDesign.mock.calls.length
+  view.setScene({ ...scene([]), design: { ...design, renderRequest: 'reload-request' } })
+  await settle(2000)
+  expect(viewport.applyDesign.mock.calls.length).toBeGreaterThan(applications)
+  const feedback = view.fetch.mock.calls.filter(([url]) => String(url).includes('/feedback?')).map(([, init]) => JSON.parse(String(init?.body)))
+  expect(feedback.at(-1)).toMatchObject({ url: design.url, revision: 1, renderRequest: 'reload-request', loadStatus: 'ready' })
+})

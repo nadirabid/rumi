@@ -29,7 +29,7 @@ export async function renderControlEvidence(bytes, request, signal) {
       signal.throwIfAborted()
       const measured = measureControlCase(model.root, request.spec, test)
       for (const mesh of measured.meshes) for (const point of mesh.points) bounds.expandByPoint(new THREE.Vector3(...point))
-      await new Promise(resolve => setTimeout(resolve, 0))
+      await scheduler.yield()
     }
     const sphere = bounds.getBoundingSphere(new THREE.Sphere()), extent = Math.max(sphere.radius * 1.12, 1)
     const camera = new THREE.OrthographicCamera(-extent, extent, extent, -extent, .01, extent * 10)
@@ -89,8 +89,8 @@ export async function renderControlEvidence(bytes, request, signal) {
         for (const item of owned) { item.node.geometry = item.geometry; item.node.material = item.material; item.nextGeometry.dispose(); item.nextMaterial.dispose() }
       }
       results.push({ id: test.id, ...measured.metrics, image: canvas.toDataURL('image/png') })
-      // Yield between complete cases so cancellation and viewer work can proceed.
-      await new Promise(resolve => setTimeout(resolve, 0))
+      // Task continuations allow cancellation without waiting for throttled background timers.
+      await scheduler.yield()
     }
     signal.throwIfAborted()
     return { status: 'complete', neutralMaxDisplacementMm: neutral?.maxDisplacementMm ?? null, cases: results }

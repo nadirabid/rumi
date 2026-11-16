@@ -92,9 +92,11 @@ function robotDescription(specs, objects) {
     }
   })
   const steps = attribute(root, 'rumi:disassembly')
+  const controls = attribute(root, 'rumi:motionControls')
   return { assembly: { version: 1, root: name(links[0]), parts: links.map(path => ({ id: name(path), mesh: name(path) })),
     connections, sequences: JSON.parse(attribute(root, 'rumi:sequences', '[]')),
     manufacturing: { mode: attribute(root, 'rumi:manufacturingMode', 'print-in-place'), ...(steps === undefined ? {} : { steps: JSON.parse(steps) }) } },
+  presentation: controls === undefined ? undefined : { controls: JSON.parse(controls), joints: new Map(joints.map(path => [path, name(path)])) },
   nodes: meshes.map((path, mesh) => ({ name: name(path), mesh })) }
 }
 
@@ -133,7 +135,7 @@ export async function parseUsdModel(buffer) {
       const path = [...objects.keys()].find(path => objects.get(path).isMesh && objects.get(path).name === node.name)
       return [objects.get(path), index]
     }))
-    return { ...model, robot: metadata, ...robotMotion(metadata, description.nodes, root, nodeIndices) }
+    return { ...model, robot: metadata, ...robotMotion(metadata, description.nodes, root, nodeIndices, undefined, description.presentation) }
   } catch (error) {
     if (model) return { ...model, motionIssue: error.message }
     throw error

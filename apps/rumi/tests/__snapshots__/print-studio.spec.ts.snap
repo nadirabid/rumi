@@ -2,7 +2,7 @@
 
 exports[`documents creating multiple models and bringing a named entry into view 1`] = `
 {
-  "analog": "Open temporary edit sliders, pads, or curves for supported USD deformation operations. For persistent doors and wheels, use USD assembly joints; read interactive-controls. Movement controls remain at the bottom-right independently of edits. Supply labeled controls and initial values for the selected operation. Read analog-shaping for geometry and Blender save rules. Executable JavaScript parameter previews are disabled by project isolation. Keep controls open while the person explores; freeze the latest values before applying and publishing the edit in Blender.",
+  "analog": "Open temporary edit sliders, pads, or curves after reading mesh-edit-controls and designing bindings from the requested geometric variation and preserved features. Generate model-specific fields when a built-in operation is unsuitable; prepared presets are not required. For persistent doors and wheels, use USD assembly joints; read mesh-edit-controls. Movement controls remain at the bottom-right independently of edits. Supply labeled controls and initial values for the selected operation. Read analog-shaping for geometry and Blender save rules. Executable JavaScript parameter previews are disabled by project isolation. Keep controls open while the person explores; freeze the latest values before applying and publishing the edit in Blender.",
   "blender": "---
 name: blender-modeling
 description: Create, import, or edit Rumi meshes using background Blender Python scripts, then inspect and iterate in the Three.js viewer. Use for model creation and geometry edits.
@@ -68,7 +68,30 @@ This example assumes both mesh transforms are identity and requires actual conne
 
 The helper retains the native USD description in the editable \`.blend\`. Later \`publish\` calls preserve it; supply \`configure_robot\` when changing the robot. USD is the authoritative geometry and joint format, while \`.blend\` retains editable modifiers. Use one self-contained ASCII layer, metres/Z up, with no external textures, references, variants or animation. Use surface colours for the preview. Each exported physical link must be one uniquely named mesh.
 
-Rumi-specific attributes cover information the robot schema does not define: \`rumi:control\` on a joint labels its slider; \`rumi:manufacturingMode\` on the root must be \`separate\` for moving assemblies. Legacy \`print-in-place\` models remain viewable but require connector redesign before publishing or print preparation. Optional root strings \`rumi:sequences\` and \`rumi:disassembly\` encode JSON movement waypoints and translation-only reverse-assembly paths. Waypoints name joint prims and use degrees or millimetres; disassembly paths name link prims and use millimetre offsets. These are checking instructions, not a second body/joint description. Unsupported coupling and incomplete coverage remain unverified. Read \`interactive-controls\` for persistent movement controls.
+Rumi-specific attributes cover information the robot schema does not define: \`rumi:control\` on a joint labels its slider; \`rumi:manufacturingMode\` on the root must be \`separate\` for moving assemblies. Legacy \`print-in-place\` models remain viewable but require connector redesign before publishing or print preparation. Optional root strings \`rumi:sequences\` and \`rumi:disassembly\` encode JSON movement waypoints and translation-only reverse-assembly paths. Waypoints name joint prims and use degrees or millimetres; disassembly paths name link prims and use millimetre offsets. These are checking instructions, not a second body/joint description. Unsupported coupling and incomplete coverage remain unverified. See [movement controls](#movement-controls) for viewer widgets.
+
+## Movement controls
+
+Use [interactive-controls](../interactive-controls/SKILL.md) to choose widgets and labels. Publish control layout changes in a model revision. Operating those controls afterward changes only the local preview pose, not saved geometry or validation input; pose changes need no freeze or save. Keep physical joint declarations and connectors intact when editing the UI.
+
+Without UI declarations, revolute and prismatic joints generate sliders labeled by \`rumi:control\` or the child mesh name. To choose widgets, set the default prim’s string attribute \`rumi:motionControls\` to a JSON array. Each item has \`kind\`, \`label\`, and \`axes\`; each axis references an absolute joint prim path and may set \`step\`. For example:
+
+\`\`\`python
+controls = [dict(kind="pad", label="Aim", axes=[
+    dict(joint="/Model/Joints/Pan", step=1),
+    dict(joint="/Model/Joints/Tilt", step=1),
+])]
+K.publish("models/turret", root=base, joints=joints, mode="separate",
+          steps=steps, controls=controls)
+\`\`\`
+
+The kit writes joints under \`/Model/Joints/<USD identifier of joint id>\`. Use the actual exported paths. For direct USD authoring, set \`root.CreateAttribute("rumi:motionControls", Sdf.ValueTypeNames.String, custom=False).Set(json.dumps(controls))\` inside \`configure_robot\`.
+
+A slider or curve references one movable joint; a pad references two independent movements, horizontal then vertical. Joint limits supply axis ranges; reset returns to the saved pose at zero. Steps use degrees for rotation and millimetres for translation; defaults are 1 degree or 0.1 mm, capped to the range width. UI declarations cannot override limits or reset. Unspecified movements retain automatic sliders.
+
+Joints sharing \`rumi:control\` share one value and must use matching units and overlapping limits. Reference that group once through any member joint. Repeated bindings, missing or fixed joints, unsupported widgets, and invalid steps withhold movement controls with a viewer diagnostic; geometry stays visible. The preview supports trees with up to 12 independent movements and preserves fixed descendants. Closed loops remain unsupported.
+
+After publishing, inspect \`viewer_load\` feedback under \`design.motion\` and exercise each axis and reset. Invalid UI metadata does not change the physical validation result. Preview movement does not establish mechanical feasibility. Temporary mesh edits disable movement controls while keeping the panel visible. Reset the pose before source-bound cursor edits. Compatible pose values survive revisions and model switching while the viewer remains mounted; reopening starts at the saved pose.
 
 ## Clearances and retention
 
@@ -123,7 +146,7 @@ Ask one short question in the conversation about the uncertainty that matters, t
 
 When the person corrects the region, stop work based on the previous region, replace the complete blob list, and clarify any remaining ambiguity. Keep their requested change in context. Do not make unrelated improvements while waiting. Hiding the highlight is a viewing preference, not approval. Confirmation of a region is not authorization for an unrelated change or a print.
 
-When the requested change is clear, edit the model source and inspect the resulting preview and measurements. Clear an obsolete reference with \`blobs: []\`, using the current model identity and an empty label. Explain changes using the person's feature names rather than coordinates or triangle indices. Only refer to labels or viewer controls that actually exist; do not invent hover labels.
+When the requested change is clear, follow \`mesh-edit-controls\` if the person wants to adjust it themselves; prepare a faithful live binding without applying their edit first. For a direct edit, change the model source and inspect the resulting preview and measurements. Clear an obsolete reference with \`blobs: []\`, using the current model identity and an empty label. Explain changes using the person's feature names rather than coordinates or triangle indices. Only refer to labels or viewer controls that actually exist; do not invent hover labels.
 
 Cursor driven mesh highlighting uses local patch, connected surface, whole part, and boundary edge scopes. A captured \`region.selection\` identifies the exact part path and geometric surface for this source revision; copy it with \`modelLocalBlob\` for teal confirmation. Surface boundaries follow creases, material seams, and disconnected pieces, not inferred anatomical names. Short voice phrases such as “whole panel”, “whole part”, “just the edge”, “larger selection”, and “smaller selection” refine the original pointing reference locally. Use the refined attached snapshot; never substitute a later hover. For bilateral changes, inspect the model’s actual symmetry and highlight both intended regions; do not assume its symmetry axis or silently treat one side as both. Selection phrases change presentation only and never authorize an unrelated geometry edit.
 ",
@@ -164,7 +187,7 @@ The plugin provides the ability to prep and print the mesh to the user's persona
 
 ### Editable designs
 
-Use background Blender Python scripts for saved mesh assets and Three.js for viewing or parameterized interactive models. When someone asks to adjust a model themselves, read \`interactive-controls\` and open labeled controls bound to real parameters before making the adjustment. Call \`blender_status\`, then read the \`blender-modeling\` skill. Keep editable \`.blend\` originals and immutable revisions under \`models/<name>/revisions/\`; publish \`models/<name>/model.usda\` with the provided helper. Create a separate model only after an explicit user request or agreement; otherwise edit the existing model and keep its revisions in the same model folder. Preserve existing models when adding an authorized model. The viewer discovers model folders and reloads completed USD exports automatically.
+Use background Blender Python scripts for saved mesh assets and Three.js for viewing or parameterized interactive models. When someone asks to adjust a model themselves, read \`mesh-edit-controls\`, infer the desired geometric variation and preserved features, and choose or construct faithful bindings before exposing controls. Generate model-specific fields when appropriate; do not depend on prepared presets or silently substitute a completed edit. Call \`blender_status\`, then read the \`blender-modeling\` skill. Keep editable \`.blend\` originals and immutable revisions under \`models/<name>/revisions/\`; publish \`models/<name>/model.usda\` with the provided helper. Create a separate model only after an explicit user request or agreement; otherwise edit the existing model and keep its revisions in the same model folder. Preserve existing models when adding an authorized model. The viewer discovers model folders and reloads completed USD exports automatically.
 
 Blender works in metres, Z up. Standard USD files use metres, Z up; the viewer converts them to millimetres, Z up. Cursor and highlight regions are model-local millimetres before viewer placement: divide by 1,000 for Blender and respect object transforms. Keep named parts and modifiers. Use the existing shell tool to execute scripts with Blender's \`--background --python-exit-code 1 --python\` options; no Blender window is needed.
 
@@ -184,47 +207,30 @@ The viewer renders every source through USD in Three.js. Keep editable originals
 ",
   "interactive": "---
 name: interactive-controls
-description: Open labeled sliders, two-axis pads, and curves when someone wants to adjust a model themselves, such as changing a width, an angle, or a position, exploring a bulge, or positioning a cut. Structure the model so control values drive how the geometry is built, and preserve the user's latest preview when saving.
+description: Choose and describe Rumi’s sliders, two-axis pads, and scalar curve widgets for mesh edits or joint movement.
 ---
 
-# Interactive model controls
+# Interactive controls
 
-“Let me adjust/tilt/change it”, “give me a slider”, and “can I try different shapes?” request controls, not an edit made on the person's behalf. Read the current \`meshState\` and the model source, identify the intended model, and declare work with \`viewer_working_model\`. Direct instructions such as “make it 20 mm wide” do not require opening controls unless the person also asks to explore.
+Choose a widget after identifying what the person should be able to vary. Use [mesh-edit-controls](../mesh-edit-controls/SKILL.md) to design geometric edits and [blender-modeling](../blender-modeling/SKILL.md#movement-controls) to bind joint movement.
 
-Use \`viewer_controls\` with explicit \`controls\`, \`values\`, and the current design's exact \`path\`, \`revision\`, and \`url\`. Choose short labels in the person's language. Initial values must reproduce the current model; \`reset\` is the meaningful neutral or saved starting value. The tool returns \`rendered\` only after the visible viewer acknowledges the preview. Do not say controls are ready after \`not_rendered\` or a failed build. A \`viewer_hidden\` reason means the window must be brought forward; the viewer retries the same controls when visible. A \`render_failed\` reason includes the actual binding or model error. A timeout alone does not establish that parameter controls are unsupported; do not replace requested controls with static alternatives on that evidence.
+## Choose the widget
 
-## Persistent movement controls
+- \`slider\`: one independent numeric value.
+- \`pad\`: two related spatial directions; the first axis is horizontal and the second vertical.
+- \`curve\`: one numeric value adjusted by dragging the curve’s centered handle up or down. It does not provide draggable profile points or change the underlying mapping.
 
-Doors, wheels, hinges, and other movable features use model-owned movement controls instead of a temporary \`viewer_controls\` edit. Preserve the USD assembly declarations and their bindings when repairing the model. Remove a declaration only when its movable feature is removed. Include every separate axle, pin and retaining cap, with real connector geometry. Read [physical movement declarations](../blender-modeling/SKILL.md#declare-physical-movement) for the assembly contract. Executable JavaScript previews and \`operation: parameters\` are unavailable under project isolation.
+Prefer a slider unless the other gesture helps express the task. Name controls after their visible effect, using the person’s language. Expose implementation settings only when they help the person make the intended change. Labels do not create bindings. Do not promise numeric entry or units the widget and binding do not support.
 
-Movement changes only the local preview pose, never saved parameters or validation input, and needs no freeze/save/close. Controls remain visible but disabled while a temporary edit owns the preview. Compatible pose values survive revisions and switching between recent models while the viewer is mounted; reopening starts from saved values. Reset movement before requesting source-bound cursor edits. \`viewer_load\` feedback exposes rendered declarations under \`design.motion\`; inspect this feedback before claiming controls are visible. Validation tests the saved physical assembly through Blender and Bullet. Animation and simulation do not certify material strength or print readiness.
+## Declarations
 
-Publish USD Physics joints with the Isaac robot annotations described in \`blender-modeling\`; the viewer generates sliders from revolute and prismatic joints. Use the joint’s \`rumi:control\` string for a short label in the person’s language, or omit it to use the child mesh name. Author local joint frames in metres/Z up, with rotation limits in degrees. The viewer moves descendants with their parents and preserves fixed attachments. It supports trees with up to 12 independent controls; unsupported bindings remain visible as geometry with a diagnostic in the viewer report. Do not create a separate JavaScript model just to animate a USD. These sliders preview declared motion, not verified physical feasibility.
+A control has \`kind\`, \`label\`, and \`axes\`. Labels are nonempty and at most 80 characters. A slider or curve has one axis; a pad has two. A panel supports 1–12 controls. Bind each numeric value at most once.
 
-## Declare controls
+The renderer’s axes have \`key\`, \`min\`, \`max\`, \`step\`, and \`reset\`. Values and ranges must be finite, \`min < max\`, and \`0 < step <= max - min\`. Initial and reset values must lie in range. Choose a useful range and a step small enough for deliberate adjustment. Reset restores the meaningful starting value.
 
-Each declaration has \`kind\`, \`label\`, and \`axes\`. A slider or curve has one axis; a pad has horizontal and vertical axes. Each axis has \`key\`, \`min\`, \`max\`, \`step\`, and \`reset\`. Keys bind entries in \`values\`. Labels are presentation, not behavior. A curve adjusts one bounded scalar with a curve-shaped gesture; it is not arbitrary curve geometry unless the model binds that scalar to its geometry.
+Mesh-edit tools receive these axes directly. USD movement declarations instead reference joints; the viewer derives keys, limits, and reset values from those joints. Follow the relevant skill for the declaration format, delivery feedback, and save behavior.
 
-Use the supported USD operations below. Before opening controls, check the lowest, reset, and highest values: the intended feature changes and unrelated features stay intact. Keep the editable Blender original. If an operation cannot represent the requested edit, explain that limitation and make the edit in Blender; do not create executable preview code.
-
-## Bind existing USD operations
-
-Read \`analog-shaping\` for frame, region, part selection, highlighting, and Blender save rules. These operations still execute their existing geometry math; their UI is supplied by the declarations. Their six \`values\` are normalized 0..1, with neutral values .5. All declared axes must use min 0 and max 1.
-
-Examples:
-
-- **“Let me move the bottom cut up and tilt it.”** Use \`operation: cut\`; declare sliders “Cut height” → \`amount\`, “Front-to-back tilt” → \`angle\`, and “Side tilt” → \`spread\`, each step .001 and reset .5. The automatic cut guide replaces Gaussian highlights. Do not cut first.
-- **“Let me change how round the back is.”** Highlight the region and use \`operation: bulge\`; declare “Roundness” → \`amount\`, “Area” → \`spread\`, a pad “Position” → \`peakX\`/\`peakY\`, and a curve “Softness” → \`falloff\`. Add direction tilt → \`angle\` only when useful. Supply all six initial values even when some are not exposed.
-
-## Finish, save, or cancel
-
-Keep the controls open while the person explores. Satisfaction or moving to another task resolves the latest visible edit first; no special confirmation phrase is required. Do not rebuild from the initial tool arguments: release feedback and freeze capture the user's newer values.
-
-1. Call \`viewer_controls\` with \`action: freeze\` and the current control \`id\`. This captures the visible values, locks the controls, and returns a source-bound recipe. A failed freeze is not permission to save stale values.
-2. Apply the frozen USD recipe with the Blender helper described in \`analog-shaping\`, publish, and \`viewer_load\` the result. Preserve unrelated features and verify the new preview before reporting it saved.
-3. Explicit cancel/revert uses \`action: close\` with the current \`id\`. It restores the saved preview. Source changes invalidate controls; re-read state and reopen rather than reusing an old id.
-
-Report build/save failures plainly. Failed previews preserve the last successful geometry and values. Never claim an edit is saved while controls remain unresolved.
+Controls support keyboard input and per-control reset. Verify that each axis changes the intended feature and that reset restores its starting state. A rendered acknowledgment confirms delivery, not the quality of the interaction.
 ",
   "joints": "---
 name: joints
@@ -257,7 +263,7 @@ Use the kit and a recipe before designing a connector yourself. Working out rete
 | \`K.paint(obj, (r, g, b))\` | One surface colour. |
 | \`K.bounds(obj)\`, \`K.solids(obj)\` | Corner coordinates; the number of disconnected pieces (a printable part has one). |
 | \`K.joint(name, kind, parent, child, axis, pivot, limits, control)\` | A joint record for a connector you modelled yourself. |
-| \`K.publish(directory, root, joints, mode=...)\` | Publishes \`model.usda\`, writes the whole USD assembly from the joint records, and prints \`RUMI_CHECKS\`. It replaces \`helper["publish"]\` and \`configure_robot\`. |
+| \`K.publish(directory, root, joints, mode=..., controls=...)\` | Publishes \`model.usda\`, writes the whole USD assembly from the joint records, and prints \`RUMI_CHECKS\`. It replaces \`helper["publish"]\` and \`configure_robot\`. |
 
 Axes are \`'X'\`, \`'-Y'\`, \`'+Z'\` or a vector. Give tools and helper solids names starting with \`_\`; never leave one in the scene, because every visible mesh is published as a part. Overlap pieces you fuse by at least 0.5 mm and run cutters past the surface.
 
@@ -278,6 +284,8 @@ Run the geometry, clearance, collision, retention and movement workflow in [fini
 3. Call the recipe. It adds and cuts the mating features on both parts and returns the joint record. A recipe raises an error that says what to move when a part does not reach the joint.
 4. Add detail and colour. Build one side and \`K.mirror\` it for pairs.
 5. \`K.publish(...)\`, read \`RUMI_CHECKS\`, then follow \`blender-modeling\` for \`viewer_load\` and validation.
+
+Choose movement widgets through [blender-modeling](../blender-modeling/SKILL.md#movement-controls). Pass their declarations as \`controls\` to \`K.publish\`; joint geometry and limits remain the movement definition.
 
 ## Publish the assembly
 
@@ -330,6 +338,57 @@ Mechanics column: **passes** means the recipe's sample passed \`validation_mecha
 Read the card before the first use of a recipe. Each family's file under \`references/\` beside this skill gives every recipe's call, what the parts must provide, the options worth changing, how it prints, and what validation reported. A recipe sample passing motion probes does not establish separate assembly feasibility.
 ",
   "load": "Select a Blender-exported USD in the Three.js viewer. Use models/<name>/model.usda; the viewer discovers these entries and reloads completed exports automatically. USD uses metres and Z up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Executable .js/.mjs previews are disabled by project isolation; export USD instead. Saved models display immediately; use validation_mechanics then validation_accept before claiming acceptance. Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.",
+  "meshEdits": "---
+name: mesh-edit-controls
+description: Turn a request to adjust a mesh into useful live controls. Choose the editable features, construct their deformations, verify the preview, and save or cancel the edit.
+---
+
+# Mesh edit controls
+
+Use this skill when someone wants to adjust a shape themselves. A direct instruction such as “make it 20 mm wide” can be a source edit; a request to explore needs controls before applying the change. For existing joint movement, follow [blender-modeling](../blender-modeling/SKILL.md#movement-controls).
+
+## Understand the edit
+
+Read the current \`meshState\`, identify the intended model, and call \`viewer_working_model\`. Inspect the displayed revision’s source, dimensions, part positions, and construction. A named feature may be a region within one mesh or span several parts. Use [clarify-mesh-changes](../clarify-mesh-changes/SKILL.md) to ground the request visually. Ask one concrete question only when materially different interpretations remain.
+
+Identify what should vary and what must stay fixed: openings, mating surfaces, wall surfaces, symmetry, connectors, and adjacent parts. Distinguish a profile change from local inflation and geometry edits from moving an existing part.
+
+Choose a small set of useful adjustments. For each, define its geometric effect, affected region, neutral value, range, and protected features. Derive these choices from the request and current geometry; do not require prepared files, subject presets, or specific control names from the person. Source parameters help explain construction but are not automatically live bindings.
+
+## Implement the adjustments
+
+- Use a built-in operation only when its actual deformation matches the intended edit. Read [analog-shaping](../analog-shaping/SKILL.md) for bindings and regions.
+- For custom variations that preserve mesh connectivity, author [displacement fields](references/fields.md). Derive the mapping from the current construction, measured profile, or cross-sections. Evaluate source parameter changes on temporary copies when useful. Keep the generator in the project so it can be revised.
+- New holes, count changes, and other unsupported live reconstruction need a specific explanation and an agreed alternative. Do not silently replace requested controls with static variants or a completed edit.
+
+Check existing field files against the current revision and request before reusing them. Preserve the editable Blender original. Executable JavaScript previews and \`operation: parameters\` are unavailable.
+
+## Verify and present
+
+Test the actual sampled deformation on temporary copies: neutral, each axis’s extremes, and useful or large-displacement combinations. For fields, use the Blender helper’s sibling \`fields.py\`. Compare the requested profile or dimensions and protected features with the original. Check continuity, pinching, intersections, separation, and both sides of shells. Neutral must reproduce the current geometry. Do not publish changes merely to test controls.
+
+Every axis must change its intended feature in the stated direction. Revise ineffective, redundant, or disruptive bindings. Narrow the range or explain approximations where the deformation cannot reproduce the intended construction faithfully.
+
+Read [interactive-controls](../interactive-controls/SKILL.md) to choose widgets and labels. Call \`viewer_controls\` with explicit \`controls\`, \`values\`, and the current model’s exact \`path\`, \`revision\`, and \`url\`. Field values start at zero. For built-in deformations, amount .5 leaves the geometry unchanged; choose the other starting values as described in \`analog-shaping\`. Briefly explain what changes and what stays fixed.
+
+Only \`rendered\` confirms visibility. For \`viewer_hidden\`, bring the window forward; the viewer retries. For \`render_failed\`, fix the reported binding or model error. A timeout does not establish that the requested edit is unsupported.
+
+## Revise unsuitable controls
+
+When the person says controls are wrong or ineffective, reread this skill and inspect the binding. Distinguish delivery failure, a bad region or range, and an unsuitable deformation. Revise the adjustments or representation; relabeling the same operation does not fix it.
+
+Preserve wanted unsaved adjustments; ask if keeping them is unclear. Close an explicitly rejected preview without baking it. Keep the saved revision intact while preparing replacement controls. Dissatisfaction does not authorize a static edit or saving.
+
+## Save or cancel
+
+Keep controls open during exploration. Satisfaction or moving to another task resolves the latest visible edit first. Do not use the original opening values in place of the person’s adjustments.
+
+1. Freeze with \`viewer_controls\`, \`action: freeze\`, and the current control \`id\`. A failed freeze does not authorize saving stale values.
+2. Call \`blender_status\`, open the original \`.blend\` matching the selected USD, and load the returned helper with \`runpy\`. Call \`helper["apply_shape_controls"](recipePath)\`, then \`helper["publish"]\` and \`viewer_load\` the new revision. The helper checks the source USD hash and applies the frozen deformation; do not approximate it with another operator. It bakes evaluated modifiers on affected parts, so retain the original revision and modifier stack. Verify the published preview and that \`meshState\` has cleared the temporary edit and highlight before reporting a save.
+3. For explicit cancel or revert, close the current \`id\` to restore the saved preview. If the source changes, reread state and reopen controls.
+
+Failed previews preserve the last successful geometry and values. Failed execution leaves the original untouched on disk; report the error and allow reopening with the saved values. Unresolved controls are not a saved edit. A saved shape is not certified print-ready.
+",
   "printer": "---
 name: printer-awareness
 description: Retrieve printer identity, connectivity, live state, filament and machine-profile limits before answering printer questions or making printer-specific design and fit decisions.
@@ -421,26 +480,44 @@ and so on.
 ",
   "shaping": "---
 name: analog-shaping
-description: Let a person tune a mesh deformation with continuous glass controls for strength, spread, peak location, tilt, and falloff. Use for adjustable deformations or continuous planar cuts when the intended region is clear but the exact shape needs exploration.
+description: Bind Rumi’s built-in bulge, bend, twist, taper, and planar-cut operations after mesh-edit-controls has selected a suitable deformation.
 ---
 
-# Analog shaping
+# Built-in mesh operations
 
-Understand the desired result and preserved parts first. Read the current \`meshState\` context, inspect the original Blender source, and use \`viewer_highlight\` to establish a deformation region. Cuts instead use the automatic continuous teal line at the actual cut plane; do not approximate the rim with Gaussian blobs. A rendered cut-control result confirms this guide as well as the controls. For bulging, bending, twisting, tapering, or a continuous planar cut, call \`viewer_controls\` with action \`open\`. The viewer previews the operation on the existing geometry locally with its original materials; it does not compare two finished models. Read \`interactive-controls\` and supply labeled control declarations bound to the operation values. Do not generate UI code or rebuild Blender while a person drags.
+Use [mesh-edit-controls](../mesh-edit-controls/SKILL.md) to establish the intended change, verify it, and manage preview, save, or cancel. Use [interactive-controls](../interactive-controls/SKILL.md) for widget declarations. Built-in operations preview the existing geometry and materials locally; do not rebuild Blender while someone drags.
 
-Supply the exact source path, revision and url, a short plain-language region label, and exact mesh names in \`parts\` (empty means all meshes in the region). The local frame uses N = direction, U = world-up cross N, V = N cross U. Near a vertical N, world-up is Y instead of Z. \`center\` is model-local XYZ millimetres; \`radii\` are extents along U, V, N. Choose a compact region that excludes parts that must stay fixed. Inspect actual geometry, not anatomical guesses. The peak moves within that frame; spread scales the ellipsoid. Influence is compact and zero outside the ellipsoid. The ellipsoid applies only to deformations. Cut uses one continuous plane across all selected parts. These USD adapters do not implement extrusion, curved cuts, remesh, or bevel. Custom parameterized JavaScript models can expose other edits through \`interactive-controls\`; verify a faithful binding rather than substituting an unrelated operation.
+## Select the region
 
-For a continuous bottom cut, choose \`operation: cut\`, \`direction: [0,0,1]\` to retain the upper side, and \`center\` at the proposed cut height in model-local millimetres. \`amount\` moves the plane by \`(amount*2-1)*limit\` along direction; .5 is the proposed height. \`angle\` tilts along V and \`spread\` leans along U, each spanning -60 to +60 degrees with .5 neutral. Positive tilt raises the plane toward positive V; positive lean raises it toward positive U. \`peakX\`, \`peakY\` and \`falloff\` are unused; supply .5. Set all radii at least as large as limit; radii do not clip the cut footprint. Select every part that should share the edge. Opening a cut clears prior Gaussian highlights and uses a continuous teal cut-line guide that follows the live plane. The guide disappears on freeze or close; other region highlights are rejected until the cut is resolved. The viewer shows the retained side with capped cross-sections; dragging updates uniforms locally. Do not apply a cut first when the person says "let me edit it". Open controls and let them explore. If revising an already applied cut, open the matching earlier revision when they need to lower the edge and restore removed material. The frozen recipe uses an exact Blender intersection to cap cut surfaces while preserving cavity openings.
+Read \`meshState\` and the original Blender source. Supply the current model’s exact \`path\`, \`revision\`, and \`url\`, a short region label, and exact mesh names in \`parts\`. An empty parts list selects every mesh in the region. Use \`viewer_highlight\` to establish a deformation region; cuts use the automatic cut-plane guide instead.
 
-For deformations, all six \`values\` are normalized 0..1. Amount .5 is unchanged; values above .5 are positive, below .5 negative. For bulge, \`limit\` is maximum displacement in mm, no greater than the smallest radius. Spread .5 gives the specified extents; peakX and peakY .5 center the effect. Angle .5 points directly outward. Falloff ranges from broad to concentrated; .35 is a useful initial curve. Start at the current shape (normally amount .5) unless the person explicitly requested an initial change, and explain the region in one short sentence. Wait for \`rendered\` before saying the controls are ready. The child adjusts analog controls without needing numbers or operation names. Do not demand a confirmation phrase.
+\`center\` is model-local XYZ millimetres. The local frame has N = \`direction\`, U = world-up cross N, and V = N cross U; near a vertical N, world-up is Y instead of Z. \`radii\` are extents along U, V, N. Choose a region that excludes protected features. Influence is compact and zero outside this ellipsoid. The ellipsoid limits deformations, not cuts.
 
-Use the current \`meshState\` context to see the last released values. While controls are open, cursor snapshots and measurements describe no trustworthy deformed selection; close controls before changing the region. A request to change direction, operation, or region replaces the control session using a fresh open call. A request to discard uses close, restores the untouched original, and clears the region highlight.
+These operations do not implement extrusion, curved cuts, remeshing, or beveling. For other variations that preserve connectivity, follow the field workflow in \`mesh-edit-controls\`; do not relabel an unrelated operation.
 
-Open controls are the current unresolved edit. Interpret satisfaction and topic changes from the conversation and the intended result; do not require a save command or special phrase. Keep controls open while the person is still exploring this edit. When the result meets their intent, or they move to another task, preserve the latest visible shape and resolve this edit before proceeding. An explicit cancel or revert instead uses close to discard the preview. Do not claim completion while controls remain unresolved.
+## Deformation values
 
-To finish, use action \`freeze\` with the current control ID. This captures their latest live values from the visible viewer, hides the controls and region highlight, retains the shaped preview while saving, and returns a recipePath. If it is not frozen, do not export. Call \`blender_status\`, open the original .blend corresponding to the selected USD, load the returned helper with runpy, call \`helper['apply_shape_controls'](recipePath)\`, then \`helper['publish']\` to save an immutable new revision. The helper verifies the source USD hash and uses the viewer's deformation formula or cut plane in millimetres. It bakes evaluated modifiers on affected parts; preserve the original .blend with its modifier stack. Do not independently approximate the slider values with another Blender operator. Finally viewer_load the exported revision and verify it; the current meshState context must show both analog and highlight cleared before moving on. Failed execution leaves the original untouched on disk; explain the error and allow reopening controls with the saved values. The shape is not certified print-ready.
+Supply all six \`values\` in 0..1, but expose only axes useful for this edit. Declare axis ranges as min 0 and max 1.
 
-Every control has an icon reset to its exact neutral value, without changing the others. Strength becomes zero deformation, Spread returns to the supplied region extents, Tilt and Lean return to zero relative to the supplied direction, Height returns to center, Peak resets both coordinates to the center, and Softness returns to its midpoint. These are neutral values (.5), not the agent’s initial tuning. Resets update the preview locally and report the resulting values immediately.
+- Bulge uses \`amount\`, \`angle\`, \`spread\`, \`peakX\`, \`peakY\`, and \`falloff\`.
+- Bend, twist, and taper use all except \`angle\`. Their \`limit\` does not set an angle range.
+- Cut uses \`amount\`, \`angle\`, and \`spread\`; supply .5 for the unused values.
+
+For deformations, amount .5 leaves the geometry unchanged; larger values deform positively and smaller values negatively. For bulge, \`limit\` is maximum displacement in millimetres, no greater than the smallest radius. Spread .5 gives the supplied extents; peakX and peakY .5 center the effect. Angle .5 points outward. Falloff ranges from broad to concentrated; .35 is a useful starting value.
+
+Start with zero deformation unless the person requested an initial change. Define reset values explicitly: amount, spread, angle, and peak normally reset to .5; choose falloff’s reset to match the intended starting profile. Reset affects only that control’s axes.
+
+## Planar cuts
+
+For a bottom cut, use \`operation: cut\`, \`direction: [0,0,1]\` to retain the upper side, and \`center\` at the proposed height. Amount moves the plane by \`(amount*2-1)*limit\` along direction; .5 is the proposed height. Angle tilts along V and spread leans along U, each spanning -60 to +60 degrees with .5 untilted. Positive tilt raises the plane toward positive V; positive lean raises it toward positive U. Set every radius at least as large as limit; radii do not clip the cut footprint. Select all parts that should share the edge.
+
+Opening a cut clears prior Gaussian highlights and displays a continuous teal guide at the actual plane. A rendered cut receipt confirms the guide and controls. The guide disappears on freeze or close; other region highlights are rejected until the cut resolves. The viewer previews capped cross-sections; saving uses a Blender intersection that preserves cavity openings.
+
+Open controls before applying the requested cut. To restore material below an already cut edge, use the matching earlier revision.
+
+## Change an open edit
+
+\`meshState\` contains the last released values. Cursor snapshots and measurements during an edit do not describe a trustworthy deformed selection. Close the edit before changing its region; open a fresh session for a new direction, operation, or region. Follow \`mesh-edit-controls\` to preserve wanted adjustments or discard a rejected preview. Close restores the saved original and clears the region highlight.
 ",
   "stateToolAvailable": false,
   "working": "Declare which existing model you are actively inspecting or editing. Shows a green dot without changing the user selection. Use a path from meshState.models; call before work and when changing targets. Omit path to clear before clarification or unrelated work. The host also clears it when your agent stops or is disposed. This declaration does not authorize edits or resolve ambiguous references.",
@@ -528,7 +605,7 @@ exports[`loads editable source and exposes placement, camera and revision-scoped
 exports[`publishes the analog workflow in model instructions and removes it on unload 1`] = `
 "You are an AI agent powered by DeepSeek Harness.
 
-When the person asks to adjust a model themselves, including let me tilt both eyes, open real interactive controls before making their adjustment. Read interactive-controls and use viewer_controls with explicit labels and bindings. Controls are generic: sliders, two-axis pads, and curves can bind named JavaScript model parameters or supported USD deformation values. A missing binding means prepare a faithful parametric model first, not tell the person to request repeated rebuilds. Never substitute labels alone, unrelated deformation, or a simplified replacement that loses existing features. For direct edits without a request for controls, ordinary modeling remains appropriate. Read analog-shaping for built-in USD deformation math. Keep controls open while exploring; freeze then save the latest visible values on satisfaction or before another task, and close on explicit cancel. Final JavaScript parameter models save through viewer_controls. A temporary JavaScript preview of an edit to an existing model must declare finish blender, the preserved original and a semantic edit recipe; freeze its latest values, apply them to the original in Blender, check printability, publish and load the result. USD recipes save through Blender. Check the tool result before claiming controls are visible or a save succeeded."
+For each new interactive mesh edit or correction, load the current mesh-edit-controls skill even if earlier conversation turns contain control advice. Design the interaction from their intent and the current model: identify the feature, useful degrees of freedom, and what must stay fixed before choosing an operation. Use built-in operations only when their actual geometry math matches that edit; otherwise generate model-specific displacement fields for supported connectivity-preserving variations. Do not require prepared controls files, subject-specific presets, or special user wording. Test neutral, individual ranges, useful combinations and protected features before opening a small set of meaningful controls. A rendered receipt confirms delivery, not suitability. When the person says controls are wrong or ineffective, re-read the skill, inspect the binding and revise the interaction; do not re-label the same operation or silently make a static edit. Preserve wanted unsaved adjustments and never bake a rejected preview. Executable JavaScript previews remain disabled. Keep controls open while exploring; freeze the latest visible values and apply the frozen recipe in Blender only when resolving an accepted edit. Close on explicit cancel. Verify the published revision before claiming a save."
 `;
 
 exports[`records explicit validation tools and their results within one agent turn > explicit validation instructions 1`] = `"For multi-part or movable prints, read blender-modeling and joints, build connectors from the joints recipes, and publish a complete assembly with every physical mesh, root fixture, connection, axis, pivot and full movement range. Moving parts must print separately and assemble afterward; publish with mode="separate" and connectors with practical insertion and retention. Legacy print-in-place movement requires redesign, not just relabeling. Include pins, caps and axles. JavaScript models export assembly and bind every motionControls axis to its connection; controls use degrees or millimetres. Blender publish preserves assembly metadata. Preserve requested features, connectors, controls and ranges during repairs. After each build, read the RUMI_CHECKS line that publish prints and repair blocking findings. When the design is ready, follow blender-modeling: call validation_mechanics once for the costly Bullet test, then validation_accept with the returned fingerprint. The bundled Bullet checker holds only the root, without ideal joints. The open viewer refreshes checks for the selected saved revision automatically; explicit validation tools reuse completed stages. No automatic repair turns run. Read the matching meshState.validation report before claiming acceptance. Missing descriptions, disconnected pieces and blocked movement require repair. Unavailable, unsupported or incomplete checks remain unverified. A passing rigid-contact test does not certify assembly accessibility, deformation, material strength or slicer readiness."`;

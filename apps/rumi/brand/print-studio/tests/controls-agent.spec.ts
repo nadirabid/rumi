@@ -98,12 +98,12 @@ it.skipIf(!enabled).each(cases)('agent opens and uses generic controls: $name', 
     }
     applyViewer(facade, defineTool, join(root, 'diagnostics'), 8000)
     await ctx.plugin(workflow)
-    ctx.systemPrompt.section({ name: 'fixture', order: 1, text: 'You are Rumi, a model-editing tool. Work only on the current project. Preserve the current model while opening user controls. Available skills: interactive-controls and analog-shaping; read them with read using skills/<name>/SKILL.md. The current model is already loaded. Camera and rendering are supplied by the test viewer. Use the tools and then give a short status.' })
+    ctx.systemPrompt.section({ name: 'fixture', order: 1, text: 'You are Rumi, a model-editing tool. Work only on the current project. Preserve the current model while opening user controls. Available skills: mesh-edit-controls, interactive-controls and analog-shaping; read them with read using skills/<name>/SKILL.md. The current model is already loaded. Camera and rendering are supplied by the test viewer. Use the tools and then give a short status.' })
     ctx.tools.register(defineTool({ name: 'read', description: 'Read a project model or a skill.', parameters: { path: { type: 'string', required: true } },
       output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
       async execute(args) {
         calls.push({ name: 'read', args })
-        const skill = /(?:skills\/)?(interactive-controls|analog-shaping)(?:\/SKILL.md)?$/.exec(args.path)
+        const skill = /(?:skills\/)?(mesh-edit-controls|interactive-controls|analog-shaping)(?:\/SKILL.md)?$/.exec(args.path)
         if (skill) return readFile(new URL(`../skills/${skill[1]}/SKILL.md`, import.meta.url), 'utf8')
         const path = resolve(root, args.path), part = relative(root, path)
         if (part.startsWith('..') || part.startsWith('/')) throw new Error('Use this fixture project')
@@ -147,7 +147,7 @@ it.skipIf(!enabled).each(cases)('agent opens and uses generic controls: $name', 
     expect(opened).toHaveLength(1)
     expect(opened[0]!.args.operation).toBe(scenario.operation)
     expect(opened[0]!.args.controls.some((control: any) => control.kind === scenario.kind)).toBe(true)
-    expect(calls.some(call => call.name === 'read' && call.args.path.includes('interactive-controls'))).toBe(true)
+    expect(calls.some(call => call.name === 'read' && call.args.path.includes('mesh-edit-controls'))).toBe(true)
     if (scenario.operation === 'parameters') expect(scenario.values).toMatchObject(opened[0]!.args.values)
     if (scenario.name === 'fixed eye dimensions') {
       expect(opened[0]!.args.controls.flatMap((control: any) => control.axes.map((axis: any) => axis.key))).toEqual(['eyeTilt'])

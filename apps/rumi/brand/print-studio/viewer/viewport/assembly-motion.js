@@ -2,9 +2,10 @@
 import * as THREE from 'three'
 import { mechanismMetadata } from '../mechanics.js'
 import { normalizeControls } from '../analog/control-spec.js'
+import { jointControls } from './joint-controls.js'
 
 /**
- * Bind GLB physical parts to saved-world joint transforms and existing slider declarations.
+ * Bind GLB physical parts to saved-world joint transforms and declared control widgets.
  * Invalid or unsupported declarations retain visible geometry and return a diagnostic.
  * @param {object} manifest Validated glTF JSON.
  * @param {THREE.Object3D} root Loaded model in millimetres, Z up, before viewer placement.
@@ -23,13 +24,14 @@ export function assemblyMotion(manifest, root, nodeIndices) {
  * @param {THREE.Object3D} root Loaded model in millimetres, Z up.
  * @param {Map<THREE.Object3D, number>} nodeIndices Loaded objects mapped to mesh identities.
  * @param {object} [labels] Optional legacy control labels.
+ * @param {object} [presentation] Optional USD widget declarations and joint path map.
  * @returns {object} Preview factory and controls, or a motion diagnostic.
  */
-export function robotMotion(metadata, nodes, root, nodeIndices, labels) {
+export function robotMotion(metadata, nodes, root, nodeIndices, labels, presentation) {
   const assembly = metadata.assembly
   const unavailable = message => ({ motionIssue: message })
   if (!assembly) return unavailable(metadata.checks.map(check => check.message).join(' '))
-  if (!assembly.connections.some(connection => connection.kind !== 'fixed')) return {}
+  if (!assembly.connections.some(connection => connection.kind !== 'fixed') && !presentation) return {}
   const incoming = new Map(), children = new Map(assembly.parts.map(part => [part.id, []]))
   for (const connection of assembly.connections) {
     if (connection.child === assembly.root || incoming.has(connection.child)) return unavailable('Movement preview requires a tree with one parent per part; closed loops are unsupported.')
@@ -68,7 +70,10 @@ export function robotMotion(metadata, nodes, root, nodeIndices, labels) {
       step: Math.min(first.kind === 'revolute' ? 1 : .1, max - min), reset: origin }] })
     for (const connection of connections) bindings.set(connection.id, { key, origin })
   }
-  try { normalizeControls(controls, parameters) }
+  let definitions
+  try {
+    definitions = presentation ? jointControls(presentation, bindings, controls, parameters) : normalizeControls(controls, parameters)
+  }
   catch (error) { return unavailable(error.message) }
   const partsByNode = new Map(assembly.parts.map(part => [nodes.findIndex(node => node.name === part.mesh), part.id]))
   const meshes = []
@@ -83,7 +88,7 @@ export function robotMotion(metadata, nodes, root, nodeIndices, labels) {
     return unavailable('Movement preview could not bind every physical part to its loaded mesh.')
   }
   return {
-    parameters, motionDefinitions: controls, poseIdentity: JSON.stringify(assembly),
+    parameters, motionDefinitions: definitions, poseIdentity: JSON.stringify(assembly),
     createMotionPreview(parent) {
       const preview = new THREE.Group(), visible = root.visible
       const copies = meshes.map(mesh => {

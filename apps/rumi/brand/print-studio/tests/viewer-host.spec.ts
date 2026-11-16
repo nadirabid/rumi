@@ -59,6 +59,7 @@ it('documents creating multiple models and bringing a named entry into view', as
     stateToolAvailable: Boolean(f.raw('mesh_state')),
     working: f.raw('viewer_working_model').description,
     analog: f.raw('viewer_controls').description,
+    meshEdits: await readFile(new URL('../skills/mesh-edit-controls/SKILL.md', import.meta.url), 'utf8'),
     interactive: await readFile(new URL('../skills/interactive-controls/SKILL.md', import.meta.url), 'utf8'),
     shaping: await readFile(new URL('../skills/analog-shaping/SKILL.md', import.meta.url), 'utf8'),
   }).toMatchSnapshot()
@@ -816,4 +817,32 @@ it('evicts accepted validation snapshots together with inactive preview scenes',
     expect((await f.meshState('session-0')).validation.models).toEqual([])
     expect((await f.meshState('session-8')).validation.models[0].acceptedFingerprint).toBe('a'.repeat(64))
   } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it('loads project field data and rejects paths outside the project', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-fields-host-')), outside = await mkdtemp(join(tmpdir(), 'rumi-fields-outside-')), f = fixture(undefined, root)
+  try {
+    const path = join(root, 'model.usda'); await writeFile(path, '#usda 1.0\n')
+    await f.run('viewer_load', { path })
+    const design = (await f.state()).design
+    const offsets = Array(81).fill(0); offsets[41] = 10
+    const fields = [{ key: 'crown', origin: [-10,-10,-10], spacing: [10,10,10], dimensions: [3,3,3], offsets }]
+    await writeFile(join(root, 'fields.json'), JSON.stringify(fields))
+    const args = { action: 'open', path, revision: design.revision, url: design.url, operation: 'fields', label: 'Crown', parts: ['Shell'], values: { crown: 0 }, fieldsPath: 'fields.json', controls: [{ kind: 'slider', label: 'Height', axes: [{ key: 'crown', min: -1, max: 1, step: .01, reset: 0 }] }] }
+    await writeFile(join(outside, 'fields.json'), JSON.stringify(fields))
+    await expect(f.run('viewer_controls', { ...args, fieldsPath: join(outside, 'fields.json') })).rejects.toThrow('inside the project')
+    const pending = f.run('viewer_controls', args)
+    let id = ''
+    await vi.waitFor(async () => { id = (await f.state()).design.analog?.id; expect(id).toBeTruthy() })
+    await f.shapeFeedback(id, design.url, { status: 'rendered' })
+    const rendered = await pending
+    expect(rendered).toMatchObject({ status: 'rendered', controls: { fields: [{ offsetCount: 81 }] } })
+    expect(rendered.controls.fields[0].offsets).toBeUndefined()
+    const context = await f.meshState()
+    expect(context.design.analog.fields[0].offsets).toBeUndefined()
+    expect((await f.state()).design.analog.fields).toEqual(fields)
+    await writeFile(join(root, 'fields.json'), '[]')
+    expect((await f.state()).design.analog.fields).toEqual(fields)
+    await f.run('viewer_controls', { action: 'close', id })
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }) }
 })

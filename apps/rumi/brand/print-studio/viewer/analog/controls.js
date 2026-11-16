@@ -49,8 +49,7 @@ export function createAnalogPanel(React) {
       const box = event.currentTarget.getBoundingClientRect(), [x, y] = control.axes
       if (control.kind === 'pad') update({ [x.key]: fromFraction(x, (event.clientX - box.left) / box.width), [y.key]: fromFraction(y, 1 - (event.clientY - box.top) / box.height) })
       else {
-        const height = clamp(1 - ((event.clientY - box.top) / box.height - .1) / .8)
-        update({ [x.key]: fromFraction(x, (Math.log(Math.max(.001, height)) / Math.log(.75) - 1.5) / 4) })
+        update({ [x.key]: fromFraction(x, (.9 - (event.clientY - box.top) / box.height) / .8) })
       }
     }
     function gestures(control) {
@@ -82,21 +81,21 @@ export function createAnalogPanel(React) {
           onPointerDown: () => { dragging.current = true }, onInput: event => update({ [x.key]: Number(event.currentTarget.value) }),
           onPointerUp: release, onPointerCancel: release, onKeyUp: release, onBlur: () => { if (dragging.current) release() },
         }), reset(control))
-      const normalized = fraction(x, values[x.key]), exponent = 1.5 + 4 * normalized
-      const curve = Array.from({ length: 49 }, (_, i) => `${i ? 'L' : 'M'}${i / 48 * 100},${90 - 80 * Math.pow(Math.max(0, 1 - (2 * i / 48 - 1) ** 2), exponent)}`).join(' ')
+      const normalized = fraction(x, values[x.key])
+      const curve = `M0 90 Q50 ${90 - 160 * normalized} 100 90`
       return h('div', { className: 'av-glass av-field', key },
         h('div', { className: 'av-field-header' }, h('span', null, control.label), reset(control)),
         h('div', {
           className: control.kind === 'pad' ? 'av-pad' : 'av-curve', role: control.kind === 'pad' ? 'group' : 'slider',
           tabIndex: locked ? -1 : 0, 'aria-label': control.label, 'aria-disabled': locked,
-          ...(control.kind === 'curve' ? { 'aria-valuemin': x.min, 'aria-valuemax': x.max, 'aria-valuenow': values[x.key] } : {}),
+          ...(control.kind === 'curve' ? { 'aria-orientation': 'vertical', 'aria-valuemin': x.min, 'aria-valuemax': x.max, 'aria-valuenow': values[x.key] } : {}),
           ...gestures(control),
         }, control.kind === 'pad' ? [
           h('span', { key: 'x', className: 'av-cross av-cross-x' }), h('span', { key: 'y', className: 'av-cross av-cross-y' }),
           h('span', { key: 'handle', className: 'av-handle', style: { left: `${normalized * 100}%`, top: `${(1 - fraction(y, values[y.key])) * 100}%` } }),
         ] : [
           h('svg', { key: 'curve', viewBox: '0 0 100 100', preserveAspectRatio: 'none', 'aria-hidden': true }, h('path', { d: curve, className: 'av-curve-line' })),
-          h('span', { key: 'handle', className: 'av-handle', style: { left: '75%', top: `${90 - 80 * Math.pow(.75, exponent)}%` } }),
+          h('span', { key: 'handle', className: 'av-handle', style: { left: '50%', top: `${90 - 80 * normalized}%` } }),
         ]))
     }
     if (spec.frozen) return h('div', { className: 'av-saving av-glass', role: 'status' }, t('shapeFrozen'))

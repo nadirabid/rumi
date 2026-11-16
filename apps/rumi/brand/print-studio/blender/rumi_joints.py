@@ -8,6 +8,7 @@ Recipes are starting points. Each cuts and adds the mating features on the two p
 returns the joint records that `publish` turns into the USD assembly. Recipes live in `joints/*.py`.
 """
 import math
+import json
 import runpy
 from pathlib import Path
 
@@ -341,7 +342,7 @@ def joint(name, kind, parent, child, axis='Z', pivot=(0, 0, 0), limits=(0, 0), c
     return record
 
 
-def robot(root, joints, mode=None, sequences=(), steps=None):
+def robot(root, joints, mode=None, sequences=(), steps=None, controls=None):
     """Return the `configure_robot` callback for the helper's publish: `root` is held, every other mesh must be a joint child.
 
     Moving assemblies require explicit mode='separate' and connectors that can be assembled after printing.
@@ -349,6 +350,7 @@ def robot(root, joints, mode=None, sequences=(), steps=None):
     steps lists translation-only removal paths for every nonroot part; omitted paths leave assembly unverified.
     sequences is a list of dict(id=..., waypoints=[{joint_name: value}, ...]) for joints that only move together,
     in degrees or millimetres.
+    controls optionally declares widgets with absolute USD joint paths; omitted widgets use sliders.
     """
     flat = []
     for item in joints:
@@ -370,19 +372,23 @@ def robot(root, joints, mode=None, sequences=(), steps=None):
 
     def configure_robot(stage):
         migrate(stage, assembly)
+        if controls is not None:
+            from pxr import Sdf
+            stage.GetDefaultPrim().CreateAttribute('rumi:motionControls', Sdf.ValueTypeNames.String, custom=False).Set(json.dumps(controls, allow_nan=False))
     return configure_robot
 
 
-def publish(directory, root, joints=(), mode=None, sequences=(), steps=None):
+def publish(directory, root, joints=(), mode=None, sequences=(), steps=None, controls=None):
     """Publish the scene as `directory/model.usda` with its assembly, print `RUMI_CHECKS`, and return the helper's report.
 
     root is the part the checker holds still; joints is the list of records the recipes returned (nested lists are fine).
+    controls uses the USD widget declarations documented in the blender-modeling skill.
     """
     helper = runpy.run_path(str(_HERE / 'rumi_blender.py'))
     meshes = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH']
-    if len(meshes) == 1 and not joints:
+    if len(meshes) == 1 and not joints and controls is None:
         return helper['publish'](directory)
-    return helper['publish'](directory, configure_robot=robot(root, joints, mode, sequences, steps))
+    return helper['publish'](directory, configure_robot=robot(root, joints, mode, sequences, steps, controls))
 
 
 def _load_recipes():

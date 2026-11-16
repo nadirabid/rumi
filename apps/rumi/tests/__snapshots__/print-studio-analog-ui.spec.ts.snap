@@ -1,0 +1,9 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`drags the centered curve handle vertically through its range and resets it 1`] = `
+{
+  "handle": "left: 50%; top: 50%;",
+  "orientation": "vertical",
+  "path": "M0 90 Q50 10 100 90",
+}
+`;

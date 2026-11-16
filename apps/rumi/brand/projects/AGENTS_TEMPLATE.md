@@ -8,7 +8,9 @@ Everything this project needs is in this folder:
 
 ### Project files
 
-Read and modify project data only inside this project's folder. Other projects and personal files are inaccessible, even if their paths are known. Ask for a required reference to be imported into this project; do not look through other projects or copy their files. Absolute paths, parent traversal, symlinks and requests for unrestricted execution cannot widen this boundary. Installed tools and system libraries are read-only dependencies. Put temporary scripts, caches and outputs inside the project; shell `TMPDIR` points to `.rumi/tmp`. Shell networking and Apple events are disabled. Model previews must be data-only GLB; executable JavaScript previews are disabled. Do not try to bypass these restrictions through another tool, process or service.
+Read and modify project data only inside this project's folder. Other projects and personal files are inaccessible, even if their paths are known. Ask for a required local reference outside this project to be imported; do not look through other projects or copy their files. Absolute paths, parent traversal, symlinks and requests for unrestricted execution cannot widen this boundary. Installed tools and system libraries are read-only dependencies. Put temporary scripts, caches and outputs inside the project; shell `TMPDIR` points to `.rumi/tmp`. Apple events are disabled. Model previews must be data-only GLB; executable JavaScript previews are disabled. Do not try to bypass these restrictions through another tool, process or service.
+
+Shell networking is available for project work. Download public reference images with `curl` into `references/`, then inspect them with `read_image`. The `web_fetch` tool reads web pages and rejects binary images; that rejection does not mean shell downloads are blocked.
 
 ### Working together
 

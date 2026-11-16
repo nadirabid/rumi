@@ -12,7 +12,7 @@ import { usdRequiresSeparatePrint } from './usd.js'
 import { registerPrintLayout } from './print-layout/host.js'
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { analyzeMesh } from './checks.js'
 import { createHistory } from './document.js'
 import { STL_LIMITS, encodeStl, parseStl } from './stl.js'
@@ -179,6 +179,12 @@ function sceneReport(record) {
   }
 }
 
+/** Keep sampled geometry out of conversational context; frozen recipe files retain every offset. */
+function modelContextJson(value) {
+  return JSON.stringify(value, (key, entry) => key === 'fields' && Array.isArray(entry)
+    ? entry.map(({ offsets, ...field }) => ({ ...field, offsetCount: offsets.length })) : entry)
+}
+
 /** Exact source and measurement context awaited by viewer_load. */
 function loadIdentity(record) {
   const design = record.source?.state()
@@ -223,7 +229,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       text: ({ agent }) => {
         if (!agent) return ''
         const record = sessions.get(agent.session.id)
-        return JSON.stringify({ meshState: record
+        return modelContextJson({ meshState: record
           ? { ...sceneReport(record), ...(validation ? { displayedDesign: record.source?.state() ?? null } : {}), validation: summarizeValidationState(validation?.read(agent.session.id)), workingModels: focus.paths(agent.session.id) }
           : { status: 'unavailable', reason: 'viewer_not_initialized', validation: summarizeValidationState(validation?.read(agent.session.id)) } })
       },
@@ -233,7 +239,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       text: context => {
         const shape = sessions.get(context.agent?.session.id)?.source?.state().analog
         if (!shape) return ''
-        return `Unresolved model edit: ${JSON.stringify({ id: shape.id, label: shape.label, operation: shape.operation, controls: shape.controls, values: shape.values, frozen: shape.frozen, finish: shape.finish, original: shape.original, edit: shape.edit })}. Keep controls open while the person explores. Satisfaction or moving to another task resolves the current edit first: freeze the latest visible values, then ${shape.operation === 'parameters' && shape.finish !== 'blender' ? 'call viewer_controls save with the frozen id' : 'apply the captured recipe in Blender, publish and load the revision'}. If already frozen, finish saving. Explicit cancel uses close. Read interactive-controls; do not require a special phrase.`
+        return `Unresolved model edit: ${JSON.stringify({ id: shape.id, label: shape.label, operation: shape.operation, controls: shape.controls, values: shape.values, frozen: shape.frozen, finish: shape.finish, original: shape.original, edit: shape.edit })}. Keep controls open while the person explores. Satisfaction or moving to another task resolves the current edit first: freeze the latest visible values, then ${shape.operation === 'parameters' && shape.finish !== 'blender' ? 'call viewer_controls save with the frozen id' : 'apply the captured recipe in Blender, publish and load the revision'}. If already frozen, finish saving. Explicit cancel uses close. Read mesh-edit-controls; do not require a special phrase.`
       },
     }), 'print-studio active edit context')
   })
@@ -778,7 +784,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_controls',
-    description: 'Open temporary edit sliders, pads, or curves for supported USD deformation operations. For persistent doors and wheels, use USD assembly joints; read interactive-controls. Movement controls remain at the bottom-right independently of edits. Supply labeled controls and initial values for the selected operation. Read analog-shaping for geometry and Blender save rules. Executable JavaScript parameter previews are disabled by project isolation. Keep controls open while the person explores; freeze the latest values before applying and publishing the edit in Blender.',
+    description: 'Open temporary edit sliders, pads, or curves after reading mesh-edit-controls and designing bindings from the requested geometric variation and preserved features. Generate model-specific fields when a built-in operation is unsuitable; prepared presets are not required. For persistent doors and wheels, use USD assembly joints; read mesh-edit-controls. Movement controls remain at the bottom-right independently of edits. Supply labeled controls and initial values for the selected operation. Read analog-shaping for geometry and Blender save rules. Executable JavaScript parameter previews are disabled by project isolation. Keep controls open while the person explores; freeze the latest values before applying and publishing the edit in Blender.',
     parameters: {
       action: { type: 'string', required: true, enum: ['open', 'freeze', 'save', 'close'] },
       id: { type: 'string', description: 'Current design.analog.id for freeze or close.' },
@@ -786,10 +792,12 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       revision: { type: 'integer', description: 'Exact design.revision for open.' },
       url: { type: 'string', description: 'Exact design.url for open.' },
       label: { type: 'string', description: 'Short plain-language region label.' },
-      operation: { type: 'string', enum: ['parameters', 'bulge', 'bend', 'twist', 'taper', 'cut'], description: 'parameters binds JavaScript model parameters; other adapters deform a USD.' },
+      operation: { type: 'string', enum: ['fields', 'parameters', 'bulge', 'bend', 'twist', 'taper', 'cut'], description: 'fields blends data-only displacement lattices on USD meshes. Other adapters are fixed USD edits. JavaScript parameters are disabled.' },
       finish: { type: 'string', enum: ['parameters', 'blender'], description: 'For parameter controls: parameters saves a final JavaScript model; blender finishes a temporary preview on a preserved original.' },
       original: { type: 'string', description: 'Preserved source path for a Blender-finished preview.' },
       edit: { type: 'string', description: 'Semantic Blender edit recipe, including how parameter values affect the original and what must be preserved.' },
+      fieldsPath: { type: 'string', description: 'Project-local JSON file containing the fields array; use instead of inline fields for generated lattices.' },
+      fields: { type: 'array', items: { type: 'object', additionalProperties: true }, description: 'For operation fields: {key, origin:[x,y,z], spacing:[x,y,z], dimensions:[nx,ny,nz], offsets:[dx,dy,dz,...]}. Model-local mm; x fastest. 2–16 samples per axis, zero boundary offsets, at most 12 fields. Values/ranges within -1..1, reset 0. Read mesh-edit-controls.' },
       center: { type: 'array', items: { type: 'number' }, description: 'Three model-local coordinates, mm.' },
       radii: { type: 'array', items: { type: 'number' }, description: 'Three positive extents along U,V,N, mm; for cut these bound the allowed limit, not the plane footprint.' },
       direction: { type: 'array', items: { type: 'number' }, description: 'Three numbers: outward axis. Back of helmet is often [0,1,0]; inspect source.' },
@@ -826,6 +834,15 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         const { shape, receipt } = await serialize(record, async () => {
           await record.source.poll()
           if (args.action === 'freeze') record.source.requestShapeFreeze(args.id)
+          let fields = args.fields
+          if (args.action === 'open' && args.fieldsPath !== undefined) {
+            if (args.operation !== 'fields' || fields !== undefined) throw new Error('Use fieldsPath only for fields, without inline fields')
+            const target = await realpath(resolve(record.cwd, args.fieldsPath)), part = relative(await realpath(record.cwd), target)
+            if (!part || part === '..' || part.startsWith(`..${sep}`) || isAbsolute(part)) throw new Error('Field data must stay inside the project')
+            const bytes = await readFile(target)
+            if (bytes.length > 2 * 1024 * 1024) throw new Error('Field data exceeds 2 MiB')
+            fields = JSON.parse(bytes.toString('utf8'))
+          }
           let original = args.original, originalHash, finish = args.finish, edit = args.edit
           if (args.action === 'open' && args.operation === 'parameters') {
             const marker = resolve(dirname(await realpath(resolve(record.cwd, args.path))), '.rumi-preview.json')
@@ -850,7 +867,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
             originalHash = createHash('sha256').update(await readFile(original)).digest('hex')
           }
           const shape = args.action === 'open'
-            ? record.source.shape({ ...args, finish, edit, original, originalHash, path: await realpath(resolve(record.cwd, args.path)) })
+            ? record.source.shape({ ...args, fields, finish, edit, original, originalHash, path: await realpath(resolve(record.cwd, args.path)) })
             : record.source.state().analog
           const receipt = receipts.wait(sessionId, args.action === 'freeze' ? `${shape.id}:freeze` : shape.id, exec.signal)
           events.notify(sessionId)
@@ -874,9 +891,9 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
           const recipePath = resolve(directory, `${recipe.id}.json`)
           await writeFile(recipePath, JSON.stringify(recipe, null, 2)+'\n', { mode: 0o600 })
           events.notify(sessionId)
-          return JSON.stringify({ status: 'frozen', recipePath, recipe })
+          return modelContextJson({ status: 'frozen', recipePath, recipe })
         }
-        return JSON.stringify({ status: 'rendered', controls: record.source.state().analog })
+        return modelContextJson({ status: 'rendered', controls: record.source.state().analog })
       })()
       captureJobs.add(operation)
       try { return await operation } finally { captureJobs.delete(operation) }

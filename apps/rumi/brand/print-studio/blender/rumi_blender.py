@@ -314,18 +314,22 @@ def apply_shape_controls(recipe_path):
     """
     import hashlib
     recipe = json.loads(Path(recipe_path).read_text())
-    if recipe.get('version') != 1 or not recipe.get('frozen') or recipe.get('operation') not in ['bulge', 'bend', 'twist', 'taper', 'cut']:
+    if recipe.get('version') != 1 or not recipe.get('frozen') or recipe.get('operation') not in ['bulge', 'bend', 'twist', 'taper', 'cut', 'fields']:
         raise ValueError('Use a frozen v1 recipe from viewer_controls')
     values = recipe.get('values', {})
-    for key in ['amount', 'spread', 'peakX', 'peakY', 'falloff', 'angle']:
-        if not isinstance(values.get(key), (int, float)) or not math.isfinite(values[key]) or not 0 <= values[key] <= 1:
-            raise ValueError('Invalid control value: ' + key)
-    for key in ['center', 'radii', 'direction']:
-        vector = recipe.get(key)
-        if not isinstance(vector, list) or len(vector) != 3 or any(not isinstance(n, (int, float)) or not math.isfinite(n) for n in vector):
-            raise ValueError('Invalid frame: ' + key)
-    if min(recipe['radii']) <= 0 or sum(n*n for n in recipe['direction']) < .000001 or not 0 < recipe['limit'] <= min(recipe['radii']):
-        raise ValueError('Invalid deformation extent')
+    if recipe['operation'] == 'fields':
+        field_helpers = runpy.run_path(str(Path(__file__).with_name('fields.py')))
+        field_helpers['validate_fields'](recipe)
+    else:
+        for key in ['amount', 'spread', 'peakX', 'peakY', 'falloff', 'angle']:
+            if not isinstance(values.get(key), (int, float)) or not math.isfinite(values[key]) or not 0 <= values[key] <= 1:
+                raise ValueError('Invalid control value: ' + key)
+        for key in ['center', 'radii', 'direction']:
+            vector = recipe.get(key)
+            if not isinstance(vector, list) or len(vector) != 3 or any(not isinstance(n, (int, float)) or not math.isfinite(n) for n in vector):
+                raise ValueError('Invalid frame: ' + key)
+        if min(recipe['radii']) <= 0 or sum(n*n for n in recipe['direction']) < .000001 or not 0 < recipe['limit'] <= min(recipe['radii']):
+            raise ValueError('Invalid deformation extent')
     if hashlib.sha256(Path(recipe['source']).read_bytes()).hexdigest() != recipe['sourceHash']:
         raise ValueError('Source model changed; reopen shape controls')
     parts = recipe.get('parts')
@@ -334,6 +338,8 @@ def apply_shape_controls(recipe_path):
     objects = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH' and obj.visible_get() and not obj.hide_render and (not parts or obj.name in parts)]
     if not objects:
         raise ValueError('No visible mesh matches the recipe parts')
+    if recipe['operation'] == 'fields' and (not parts or any(name not in [obj.name for obj in objects] for name in parts)):
+        raise ValueError('Field parts must match visible meshes exactly')
     graph = bpy.context.evaluated_depsgraph_get()
     pending = []
     try:
@@ -350,7 +356,9 @@ def apply_shape_controls(recipe_path):
                     bpy.data.meshes.remove(mesh)
             else:
                 for vertex in mesh.vertices:
-                    vertex.co = inverse @ (shape_point((matrix @ vertex.co) * 1000, recipe) / 1000)
+                    point = (matrix @ vertex.co) * 1000
+                    deformed = field_helpers['field_point'](point, recipe) if recipe['operation'] == 'fields' else shape_point(point, recipe)
+                    vertex.co = inverse @ (deformed / 1000)
         untouched = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH' and obj.visible_get() and not obj.hide_render and obj not in objects]
         if not any(mesh.polygons for _, mesh, _ in pending) and not any(obj.data.polygons for obj in untouched):
             raise ValueError('The cut removes the entire model; reopen controls and lower the cut')

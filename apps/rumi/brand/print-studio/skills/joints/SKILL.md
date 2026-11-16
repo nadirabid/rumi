@@ -29,7 +29,7 @@ Use the kit and a recipe before designing a connector yourself. Working out rete
 | `K.paint(obj, (r, g, b))` | One surface colour. |
 | `K.bounds(obj)`, `K.solids(obj)` | Corner coordinates; the number of disconnected pieces (a printable part has one). |
 | `K.joint(name, kind, parent, child, axis, pivot, limits, control)` | A joint record for a connector you modelled yourself. |
-| `K.publish(directory, root, joints, mode=...)` | Publishes `model.usda`, writes the whole USD assembly from the joint records, and prints `RUMI_CHECKS`. It replaces `helper["publish"]` and `configure_robot`. |
+| `K.publish(directory, root, joints, mode=..., controls=...)` | Publishes `model.usda`, writes the whole USD assembly from the joint records, and prints `RUMI_CHECKS`. It replaces `helper["publish"]` and `configure_robot`. |
 
 Axes are `'X'`, `'-Y'`, `'+Z'` or a vector. Give tools and helper solids names starting with `_`; never leave one in the scene, because every visible mesh is published as a part. Overlap pieces you fuse by at least 0.5 mm and run cutters past the surface.
 
@@ -50,6 +50,8 @@ Run the geometry, clearance, collision, retention and movement workflow in [fini
 3. Call the recipe. It adds and cuts the mating features on both parts and returns the joint record. A recipe raises an error that says what to move when a part does not reach the joint.
 4. Add detail and colour. Build one side and `K.mirror` it for pairs.
 5. `K.publish(...)`, read `RUMI_CHECKS`, then follow `blender-modeling` for `viewer_load` and validation.
+
+Choose movement widgets through [blender-modeling](../blender-modeling/SKILL.md#movement-controls). Pass their declarations as `controls` to `K.publish`; joint geometry and limits remain the movement definition.
 
 ## Publish the assembly
 

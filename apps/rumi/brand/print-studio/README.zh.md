@@ -128,7 +128,7 @@ Blender 未发现阻断性几何错误后，主机通过协议 2 将求值后的
 
 运动控件位于查看器右下角，与光标控件相对，独立于临时编辑控件。控件使用内高光，不带外部阴影。运动只改变本地预览姿态，不修改验证输入。临时编辑期间面板保持可见但被禁用。运动期间及重置后，光标高亮跟随可见部件。请求绑定源码的光标编辑前请重置姿态；预览运动不代表机械验证通过。
 
-USD 旋转及滑动关节生成滑块，提供 `rumi:control` 时用其作为标签，否则使用子部件网格名称。预览按关节坐标系变换部件及其后代，包括固定附件。共享控件使用范围交集且单位必须一致。最多支持 12 个独立控件；声明无效、闭环或不支持的绑定保留可见几何并报告 `assembly_motion_unavailable`，不显示误导性控件。装配声明不变时姿态值跨重新加载保留。预览借用原始网格资源，不修改导出几何，也不代表机械验证通过。
+USD 旋转和移动关节默认生成滑块。根节点可选的 `rumi:motionControls` JSON 可选择滑块、双轴面板或标量曲线，并绑定绝对关节路径；未声明的运动保留自动滑块。关节限位和保存姿态提供范围与重置值。编写方式见[运动控件](skills/blender-modeling/SKILL.md#movement-controls)。自动标签使用 `rumi:control` 或子网格名称。预览将关节坐标系应用于部件及其后代，包括固定附件。共享控件使用重叠的声明范围，并要求单位一致。最多支持 12 个独立运动；格式错误的声明、闭环或不支持的绑定会保留几何体并报告 `assembly_motion_unavailable`，不显示误导性控件。装配描述相同时，姿态值可在重新加载后保留。预览变换借用原始网格资源，不修改导出几何体，也不代表机械验证通过。
 
 ## 可编辑的 Three.js 模型
 
@@ -170,7 +170,7 @@ agent 区域使用青绿色填充和深色线框，指针区域使用蓝色填�
 
 ## 连续网格编辑
 
-agent 使用 `viewer_controls` 声明带标签的滑块、双轴面板和标量曲线。每个轴绑定一个数值，并指定范围、步长和重置值。面板可以仅展示所提供模型参数中的一部分。渲染器独立于模型操作；标签描述真实绑定。控件悬浮在查看器右上角，必要时可滚动，并支持键盘输入、独立重置、焦点指示和降低透明度。[interactive-controls skill](skills/interactive-controls/SKILL.md) 说明何时提供控件，并给出眼睛倾斜、宽度、位置、鼓起和切割示例。其活动工作流提示词也适用于已有项目。
+agent 使用 `viewer_controls` 声明带标签的滑块、双轴面板和标量曲线。每个轴绑定一个数值，并指定范围、步长和重置值。面板可以仅展示所提供模型参数中的一部分。曲线控件的手柄位于水平中央，随数值上下移动。渲染器独立于模型操作；标签描述真实绑定。控件悬浮在查看器右上角，必要时可滚动，并支持键盘输入、独立重置、焦点指示和降低透明度。[interactive-controls skill](skills/interactive-controls/SKILL.md) 介绍通用控件。[网格编辑控件](skills/mesh-edit-controls/SKILL.md) 根据请求选择有用的调整、编写变形，并处理预览、修改和保存。其活动工作流提示词也适用于已有项目。
 
 可执行的 JavaScript 参数预览被禁用。几何适配器保留其几何行为：鼓包、弯曲、扭转和渐缩更新 GPU uniforms，无需重建。声明的轴使用 0..1 归一化值，中性值为 .5。区域与保存规则见 [analog-shaping](skills/analog-shaping/SKILL.md)。本地编辑暂时停用光标选择和缩略图；几何检查描述已保存的原件。
 
@@ -199,3 +199,5 @@ Rumi 在 `agent/request` 中通过持久化的表面替换移除先前的运行�
 在 macOS 上，Print Studio 中的 **Set up Bambu Studio** 和 **Set up Bambu Connect** 按请求安装对应应用。Bambu Connect 2.5.0-beta.15 从 Bambu CDN 下载 Apple Silicon 或 Intel 版本。Bambu Studio 02.08.02.61 从 `bambulab/BambuStudio` 的 GitHub 发布下载通用磁盘映像。下载使用固定 SHA-256 校验和；暂存应用在安装前必须通过 Bambu 团队 `T3UBR9Y3B2` 的深度代码签名验证和 macOS Gatekeeper 评估。Rumi 将应用存放在 `$DSH_HOME/print-studio/applications`，也识别 `/Applications` 和 `~/Applications` 中的副本。
 
 两个安装器共用 `app-setup.js` 的实现，由下载规格配置。安装过程报告下载、验证、安装及失败状态。同一应用的并发请求共用一个操作。安装失败不会替换现有应用；重试会重新下载。插件关闭等待有界操作及暂存清理完成。磁盘映像卸载失败时保留暂存目录并报告清理失败。`appDownloadTimeoutSeconds`（900）和 `appDownloadRetries`（2）配置每次下载的网络预算；每个挂载、复制、签名和 Gatekeeper 步骤限时 600 秒。更新固定版本必须同时更新校验和，并在每个目标平台验证发布者签名和启动。应用保留自身的更新行为，Bambu Connect 也保留确认窗口。
+
+模型专用控件使用 `operation: fields` 和纯数据位移网格。预览在选定 USD 网格的副本上插值并混合位移，取消后恢复原始几何体。冻结配方在 Blender 中使用相同的插值方法。预览器不会执行项目代码。这些编辑保持网格连接关系，但不保证壁厚或无自相交。参见[位移场编写](skills/mesh-edit-controls/references/fields.md)。

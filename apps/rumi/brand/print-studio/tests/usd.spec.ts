@@ -7,6 +7,77 @@ import { parseUsdModel } from '../viewer/viewport/usd.js'
 import { disposeModel } from '../viewer/viewport/model.js'
 import { analyzeMesh } from '../viewer/checks.js'
 
+function withMotionControls(text: string, controls: unknown) {
+  return new TextEncoder().encode(text.replace('token rumi:manufacturingMode',
+    `string rumi:motionControls = ${JSON.stringify(JSON.stringify(controls))}\n    token rumi:manufacturingMode`)).buffer
+}
+
+function twoJointUsd() {
+  const text = validateUsd(robotUsd())
+  const mesh = text.slice(text.indexOf('    def Mesh "Door"'), text.indexOf('    def Mesh "Body"')).replace('"Door"', '"Slide"')
+  const joint = text.slice(text.indexOf('    def PhysicsRevoluteJoint'), text.lastIndexOf('}'))
+    .replace('PhysicsRevoluteJoint "DoorHinge"', 'PhysicsPrismaticJoint "SlideJoint"')
+    .replace('</Model/Door>', '</Model/Slide>').replace('"Door"', '"Slide"')
+    .replace('upperLimit = 90', 'upperLimit = 0.02').replace('axis = "Z"', 'axis = "X"')
+  return text.replace('robotJoints = </Model/DoorHinge>', 'robotJoints = [</Model/DoorHinge>, </Model/SlideJoint>]')
+    .replace('</Model/Body>,', '</Model/Body>, </Model/Slide>,').replace(/}\s*$/, `${mesh}${joint}}`)
+}
+
+it('binds a pad to two USD joints and retains sliders for unspecified movements', async () => {
+  for (const kind of ['pad', 'slider']) {
+    const axes = [{ joint: '/Model/DoorHinge' }, ...(kind === 'pad' ? [{ joint: '/Model/SlideJoint', step: 0.25 }] : [])]
+    const model = await parseUsdModel(withMotionControls(twoJointUsd(), [{ kind, label: 'Position', axes }]))
+    try {
+      expect(model.motionIssue).toBeUndefined()
+      expect(model.motionDefinitions.map(control => control.kind)).toEqual(kind === 'pad' ? ['pad'] : ['slider', 'slider'])
+      const allAxes = model.motionDefinitions.flatMap(control => control.axes)
+      expect(allAxes.map(axis => [axis.min, axis.max, axis.reset])).toEqual([[0, 90, 0], [0, 20, 0]])
+      const parent = new THREE.Group(), preview = model.createMotionPreview(parent)
+      preview.update({ joint0: 90, joint1: 10 })
+      const slide = new THREE.Box3().setFromObject(parent.getObjectByName('Slide')!).getCenter(new THREE.Vector3())
+      expect(slide.x).toBeCloseTo(35, 3)
+      const door = new THREE.Box3().setFromObject(parent.getObjectByName('Door')!).getCenter(new THREE.Vector3())
+      expect(door.y).toBeCloseTo(10, 3)
+      preview.update({ joint0: 0, joint1: 0 })
+      expect(new THREE.Box3().setFromObject(parent.getObjectByName('Slide')!).getCenter(new THREE.Vector3()).x).toBeCloseTo(25, 3)
+      preview.dispose()
+    } finally { disposeModel(model.root) }
+  }
+})
+
+it('uses a declared curve with joint limits and moves the same physical part', async () => {
+  const model = await parseUsdModel(withMotionControls(validateUsd(robotUsd()), [
+    { kind: 'curve', label: 'Open lid', axes: [{ joint: '/Model/DoorHinge', step: 0.5 }] },
+  ]))
+  try {
+    expect(model.motionIssue).toBeUndefined()
+    expect(model.motionDefinitions).toEqual([{ kind: 'curve', label: 'Open lid', axes: [{ key: 'joint0', min: 0, max: 90, step: 0.5, reset: 0 }] }])
+    const parent = new THREE.Group(), preview = model.createMotionPreview(parent)
+    preview.update({ joint0: 90 })
+    const center = new THREE.Box3().setFromObject(parent.getObjectByName('Door')!).getCenter(new THREE.Vector3())
+    expect(center.x).toBeCloseTo(15, 3)
+    expect(center.y).toBeCloseTo(10, 3)
+    preview.dispose()
+  } finally { disposeModel(model.root) }
+})
+
+it.each([
+  [[], '1–12'],
+  [[{ kind: 'dial', label: 'Door', axes: [{ joint: '/Model/DoorHinge' }] }], 'slider, pad, or curve'],
+  [[{ kind: 'pad', label: 'Door', axes: [{ joint: '/Model/DoorHinge' }] }], 'two axes'],
+  [[{ kind: 'slider', label: 'Door', axes: [{ joint: '/Model/Missing' }] }], 'movable joint'],
+  [[{ kind: 'slider', label: 'Door', axes: [{ joint: '/Model/DoorHinge', min: 10 }] }], 'limits and reset'],
+  [[{ kind: 'slider', label: 'Door', axes: [{ joint: '/Model/DoorHinge', step: 100 }] }], 'Invalid control range'],
+  [[{ kind: 'pad', label: 'Door', axes: [{ joint: '/Model/DoorHinge' }, { joint: '/Model/DoorHinge' }] }], 'more than once'],
+])('keeps geometry visible with a diagnostic for invalid motion UI: %j', async (controls, message) => {
+  const model = await parseUsdModel(withMotionControls(validateUsd(robotUsd()), controls))
+  try {
+    expect(model.positions.length).toBeGreaterThan(0)
+    expect(model.motionDefinitions).toBeUndefined()
+    expect(model.motionIssue).toContain(message)
+  } finally { disposeModel(model.root) }
+})
+
 it('loads Blender USD geometry and derives its joint control from the Isaac relationships', async () => {
   const model = await parseUsdModel(robotUsd().buffer)
   try {

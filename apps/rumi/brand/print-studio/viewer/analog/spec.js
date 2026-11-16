@@ -1,4 +1,5 @@
 /** Fixed, continuous shape operations in model-local millimetres. */
+import { normalizeFields } from './fields.js'
 import { normalizeControls, parameterValues, legacyControls } from './control-spec.js'
 export const OPERATIONS = ['bulge', 'bend', 'twist', 'taper', 'cut']
 export const INITIAL_VALUES = Object.freeze({ amount: 0.65, spread: 0.5, peakX: 0.5, peakY: 0.5, falloff: 0.5, angle: 0.5 })
@@ -16,6 +17,13 @@ export function normalizeValues(value) {
 /** Validate a deformation selected by the agent. @param {object} value Operation and local frame. @returns {object} Canonical recipe. */
 export function normalizeShape(value) {
   if (typeof value.label !== 'string' || !value.label.trim() || value.label.length > 160) throw new Error('Give the region a short label')
+  if (value.operation === 'fields') {
+    const values = parameterValues(value.values), controls = normalizeControls(value.controls, values)
+    if (!Array.isArray(value.parts) || !value.parts.length || value.parts.length > 64 || value.parts.some(p => typeof p !== 'string' || !p || p.length > 200) || new Set(value.parts).size !== value.parts.length) throw new Error('Fields require exact, distinct mesh names')
+    const fields = normalizeFields(value.fields, values)
+    if (fields.length !== Object.keys(values).length || controls.flatMap(c => c.axes).length !== fields.length || controls.some(c => c.axes.some(a => a.min < -1 || a.max > 1 || a.reset !== 0))) throw new Error('Expose every field with ranges within -1..1 and reset zero')
+    return { version: 1, operation: 'fields', label: value.label.trim(), parts: [...value.parts], fields, values, controls }
+  }
   if (value.operation === 'parameters') {
     const values = parameterValues(value.values), controls = normalizeControls(value.controls, values)
     const finish = value.finish ?? 'parameters'

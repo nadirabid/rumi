@@ -63,7 +63,30 @@ This example assumes both mesh transforms are identity and requires actual conne
 
 The helper retains the native USD description in the editable `.blend`. Later `publish` calls preserve it; supply `configure_robot` when changing the robot. USD is the authoritative geometry and joint format, while `.blend` retains editable modifiers. Use one self-contained ASCII layer, metres/Z up, with no external textures, references, variants or animation. Use surface colours for the preview. Each exported physical link must be one uniquely named mesh.
 
-Rumi-specific attributes cover information the robot schema does not define: `rumi:control` on a joint labels its slider; `rumi:manufacturingMode` on the root must be `separate` for moving assemblies. Legacy `print-in-place` models remain viewable but require connector redesign before publishing or print preparation. Optional root strings `rumi:sequences` and `rumi:disassembly` encode JSON movement waypoints and translation-only reverse-assembly paths. Waypoints name joint prims and use degrees or millimetres; disassembly paths name link prims and use millimetre offsets. These are checking instructions, not a second body/joint description. Unsupported coupling and incomplete coverage remain unverified. Read `interactive-controls` for persistent movement controls.
+Rumi-specific attributes cover information the robot schema does not define: `rumi:control` on a joint labels its slider; `rumi:manufacturingMode` on the root must be `separate` for moving assemblies. Legacy `print-in-place` models remain viewable but require connector redesign before publishing or print preparation. Optional root strings `rumi:sequences` and `rumi:disassembly` encode JSON movement waypoints and translation-only reverse-assembly paths. Waypoints name joint prims and use degrees or millimetres; disassembly paths name link prims and use millimetre offsets. These are checking instructions, not a second body/joint description. Unsupported coupling and incomplete coverage remain unverified. See [movement controls](#movement-controls) for viewer widgets.
+
+## Movement controls
+
+Use [interactive-controls](../interactive-controls/SKILL.md) to choose widgets and labels. Publish control layout changes in a model revision. Operating those controls afterward changes only the local preview pose, not saved geometry or validation input; pose changes need no freeze or save. Keep physical joint declarations and connectors intact when editing the UI.
+
+Without UI declarations, revolute and prismatic joints generate sliders labeled by `rumi:control` or the child mesh name. To choose widgets, set the default prim’s string attribute `rumi:motionControls` to a JSON array. Each item has `kind`, `label`, and `axes`; each axis references an absolute joint prim path and may set `step`. For example:
+
+```python
+controls = [dict(kind="pad", label="Aim", axes=[
+    dict(joint="/Model/Joints/Pan", step=1),
+    dict(joint="/Model/Joints/Tilt", step=1),
+])]
+K.publish("models/turret", root=base, joints=joints, mode="separate",
+          steps=steps, controls=controls)
+```
+
+The kit writes joints under `/Model/Joints/<USD identifier of joint id>`. Use the actual exported paths. For direct USD authoring, set `root.CreateAttribute("rumi:motionControls", Sdf.ValueTypeNames.String, custom=False).Set(json.dumps(controls))` inside `configure_robot`.
+
+A slider or curve references one movable joint; a pad references two independent movements, horizontal then vertical. Joint limits supply axis ranges; reset returns to the saved pose at zero. Steps use degrees for rotation and millimetres for translation; defaults are 1 degree or 0.1 mm, capped to the range width. UI declarations cannot override limits or reset. Unspecified movements retain automatic sliders.
+
+Joints sharing `rumi:control` share one value and must use matching units and overlapping limits. Reference that group once through any member joint. Repeated bindings, missing or fixed joints, unsupported widgets, and invalid steps withhold movement controls with a viewer diagnostic; geometry stays visible. The preview supports trees with up to 12 independent movements and preserves fixed descendants. Closed loops remain unsupported.
+
+After publishing, inspect `viewer_load` feedback under `design.motion` and exercise each axis and reset. Invalid UI metadata does not change the physical validation result. Preview movement does not establish mechanical feasibility. Temporary mesh edits disable movement controls while keeping the panel visible. Reset the pose before source-bound cursor edits. Compatible pose values survive revisions and model switching while the viewer remains mounted; reopening starts at the saved pose.
 
 ## Clearances and retention
 

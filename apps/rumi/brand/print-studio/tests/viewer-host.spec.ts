@@ -1,3 +1,7 @@
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { MockAdapter, textResponse, toolCallResponse } from '../../../../../packages/core/agent-loop/tests/mock-adapter.ts'
 /** A session's scene is edited by commands; geometry is read once and never rewritten by placement. */
 import { createHash } from 'node:crypto'
 import { createSource } from '../viewer/source.js'
@@ -475,8 +479,39 @@ it('refines a spoken selection through the original cursor anchor and retains th
   expect(await contributor.refineRequest({ sessionId: 'session-a', text: 'whole panel', content: refined, signal })).toBe(refined)
 })
 
+/** Drive the renderer response while exercising the real host review gate. */
+async function prepareReviewed(f: ReturnType<typeof fixture>, args: { controls: { axes: { key: string }[] }[]; [key: string]: unknown }) {
+  const expectations = args.controls.flatMap(control => control.axes.map(axis => ({ key: axis.key, effect: 'Change the selected profile', preserve: 'Keep adjacent parts fixed' })))
+  const prepared = await f.run('viewer_controls', { ...args, expectations })
+  expect(prepared.status).toBe('validation_required')
+  expect(f.contexts.get('rumi:active-shape')!.text({ agent: { session: { id: 'session-a' } } })).toContain('validation_required')
+  expect((await f.state()).design.analog).toBeNull()
+  await expect(f.run('viewer_controls', { action: 'present', id: prepared.id })).rejects.toThrow('Validate')
+  const pending = f.run('viewer_controls', { action: 'validate', id: prepared.id })
+  let request: any // Renderer request schema is owned by the JavaScript host.
+  await vi.waitFor(async () => {
+    const response = await f.routes.get('/api/print-studio/viewer/state')!(new Request('http://rumi/api/print-studio/viewer/state?sessionId=session-a'))
+    request = (await response.json()).controlValidationRequest
+    expect(request).toBeTruthy()
+  })
+  const result = { status: 'complete', neutralMaxDisplacementMm: 0, cases: request.cases.map((item: { id: string }) => ({ id: item.id, maxDisplacementMm: 2, rmsDisplacementMm: 1, affectedFraction: .1, image: 'data:image/png;base64,iVBORw0KGgo=' })) }
+  const response = await f.routes.get('/api/print-studio/viewer/control-evidence')!(new Request('http://rumi/api/print-studio/viewer/control-evidence?sessionId=session-a', { method: 'POST', body: JSON.stringify({ id: request.id, result }) }))
+  expect(response.status).toBe(200)
+  const evidence = await pending
+  expect(evidence.status).toBe('awaiting_review')
+  expect(f.contexts.get('rumi:active-shape')!.text({ agent: { session: { id: 'session-a' } } })).toContain('awaiting_review')
+  expect(f.raw('viewer_controls').output.render({}, JSON.stringify(evidence)).filter((block: { type: string }) => block.type === 'image')).toHaveLength(request.cases.length)
+  expect(evidence.images.length).toBe(request.cases.length)
+  await expect(f.run('viewer_controls', { action: 'present', id: prepared.id })).rejects.toThrow('Validate')
+  await f.run('viewer_controls', { action: 'review', id: prepared.id, evidenceId: evidence.evidenceId,
+    assessments: expectations.map(e => ({ key: e.key, decision: 'accept', observation: 'The comparisons show smooth profile changes with adjacent parts fixed.' })),
+    combined: { decision: 'accept', observation: 'The combined extremes preserve the intended profile.' },
+  })
+  return prepared.id
+}
+
 it('opens analog controls and freezes a fresh viewer capture without rewriting the model', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'rumi-analog-host-')), f = fixture(undefined, root)
+  const root = await mkdtemp(join(tmpdir(), 'rumi-analog-host-')), f = fixture(undefined, root, 500)
   try {
     const bytes = Buffer.from('#usda 1.0\n# preview\n')
     await vi.waitFor(() => expect(f.contexts.has('rumi:active-shape')).toBe(true))
@@ -485,7 +520,8 @@ it('opens analog controls and freezes a fresh viewer capture without rewriting t
     await f.run('viewer_load', { path })
     const design = (await f.state()).design
     const values = { amount: .65, spread: .5, peakX: .5, peakY: .5, falloff: .5, angle: .5 }
-    const opened = f.run('viewer_controls', { action: 'open', path: 'model.usda', url: design.url, revision: design.revision, operation: 'bulge', label: 'Back', center: [0, 0, 0], radii: [30, 30, 30], direction: [0, 1, 0], limit: 10, parts: [], values, controls: legacyControls('bulge') })
+    const reviewId = await prepareReviewed(f, { action: 'open', path: 'model.usda', url: design.url, revision: design.revision, operation: 'bulge', label: 'Back', center: [0, 0, 0], radii: [30, 30, 30], direction: [0, 1, 0], limit: 10, parts: [], values, controls: legacyControls('bulge') })
+    const opened = f.run('viewer_controls', { action: 'present', id: reviewId })
     let controls: { id: string }
     await vi.waitFor(async () => { controls = (await f.state()).design.analog; expect(controls).toBeTruthy() })
     const feedback = (body: object) => f.routes.get('/api/print-studio/viewer/shape-feedback')!(new Request('http://rumi/api/print-studio/viewer/shape-feedback?sessionId=session-a', { method: 'POST', body: JSON.stringify({ id: controls.id, url: design.url, ...body }) }))
@@ -540,16 +576,17 @@ it('declares work without switching the viewer and rejects missing or cancelled 
 })
 
 it.each(['viewer_hidden', 'render_failed'])('reports control %s immediately and accepts a later visible render', async (status) => {
-  const root = await mkdtemp(join(tmpdir(), 'rumi-control-feedback-')), f = fixture(undefined, root)
+  const root = await mkdtemp(join(tmpdir(), 'rumi-control-feedback-')), f = fixture(undefined, root, 500)
   try {
-    const path = join(root, 'model.mjs')
-    await writeFile(path, 'export const parameters={size:60};export function build(){}\n')
+    const path = join(root, 'model.usda')
+    await writeFile(path, '#usda 1.0\n')
     await f.run('viewer_load', { path })
     const design = (await f.state()).design
-    const pending = f.run('viewer_controls', { action: 'open', path, revision: design.revision, url: design.url,
-      operation: 'parameters', label: 'Size', values: { size: 60 },
-      controls: [{ kind: 'slider', label: 'Size', axes: [{ key: 'size', min: 20, max: 120, step: 1, reset: 60 }] }],
+    const reviewId = await prepareReviewed(f, { action: 'prepare', path, revision: design.revision, url: design.url,
+      operation: 'bulge', label: 'Back', center: [0, 0, 0], radii: [30, 30, 30], direction: [0, 1, 0], limit: 10, parts: [],
+      values: { amount: .5, spread: .5, peakX: .5, peakY: .5, falloff: .5, angle: .5 }, controls: legacyControls('bulge'),
     })
+    const pending = f.run('viewer_controls', { action: 'present', id: reviewId })
     let id: string
     await vi.waitFor(async () => { id = (await f.state()).design.analog?.id; expect(id).toBeTruthy() })
     const feedback = f.shapeFeedback.bind(null, id!, design.url)
@@ -566,51 +603,17 @@ it.each(['viewer_hidden', 'render_failed'])('reports control %s immediately and 
   } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-it('rejects freezing a Blender preview when its preserved original changed', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'rumi-original-')), f = fixture(undefined, root)
+it('does not stage executable parameter previews', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-parameters-disabled-')), f = fixture(undefined, root)
   try {
-    const path = join(root, 'model.js'), original = join(root, 'original.glb')
+    const path = join(root, 'model.js')
     await writeFile(path, 'export const parameters={size:60};export function build(){}\n')
-    await writeFile(original, 'original')
     await f.run('viewer_load', { path })
     const design = (await f.state()).design
-    const pending = f.run('viewer_controls', { action: 'open', path, revision: design.revision, url: design.url,
-      operation: 'parameters', label: 'Size', finish: 'blender', original, edit: 'Set the box width to size millimetres.', values: { size: 60 },
+    await expect(f.run('viewer_controls', { action: 'prepare', path, revision: design.revision, url: design.url,
+      operation: 'parameters', label: 'Size', values: { size: 60 },
       controls: [{ kind: 'slider', label: 'Size', axes: [{ key: 'size', min: 20, max: 120, step: 1, reset: 60 }] }],
-    })
-    let id: string
-    await vi.waitFor(async () => { id = (await f.state()).design.analog?.id; expect(id).toBeTruthy() })
-    const feedback = f.shapeFeedback.bind(null, id!, design.url)
-    await feedback({ status: 'rendered' }); expect(await pending).toMatchObject({ status: 'rendered' })
-    await writeFile(original, 'changed')
-    const freezing = f.run('viewer_controls', { action: 'freeze', id })
-    await vi.waitFor(async () => expect((await f.state()).design.analog.freezeRequested).toBe(true))
-    await feedback({ status: 'frozen', sequence: 1, values: { size: 90 } })
-    await expect(freezing).rejects.toThrow('Preserved original changed')
-    expect(await readFile(original, 'utf8')).toBe('changed')
-    expect((await f.state()).design.analog).toMatchObject({ frozen: true, values: { size: 90 } })
-  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
-})
-
-it.each([undefined, 'parameters'])('uses preview metadata when finish is %s', async (finish) => {
-  const root = await mkdtemp(join(tmpdir(), 'rumi-marker-')), f = fixture(undefined, root)
-  try {
-    const path = join(root, 'model.js'), original = join(root, 'original.blend')
-    await writeFile(path, 'export const parameters={size:60};export function build(){}\n')
-    await writeFile(original, 'original')
-    await writeFile(join(root, '.rumi-preview.json'), JSON.stringify({ original: 'original.blend', edit: 'Set width to size; preserve height.' }))
-    await f.run('viewer_load', { path })
-    const design = (await f.state()).design
-    const pending = f.run('viewer_controls', { action: 'open', path, revision: design.revision, url: design.url,
-      operation: 'parameters', label: 'Size', ...(finish ? { finish } : {}), values: { size: 60 },
-      controls: [{ kind: 'slider', label: 'Size', axes: [{ key: 'size', min: 20, max: 120, step: 1, reset: 60 }] }],
-    })
-    let analog: any
-    await vi.waitFor(async () => { analog = (await f.state()).design.analog; expect(analog?.id).toBeTruthy() })
-    await f.routes.get('/api/print-studio/viewer/shape-feedback')!(new Request('http://rumi/api/print-studio/viewer/shape-feedback?sessionId=session-a', {
-      method: 'POST', body: JSON.stringify({ id: analog.id, url: design.url, status: 'rendered' }),
-    }))
-    expect(await pending).toMatchObject({ status: 'rendered', controls: { finish: 'blender', original: await realpath(original), edit: 'Set width to size; preserve height.' } })
+    })).rejects.toThrow('disabled')
   } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
@@ -820,7 +823,7 @@ it('evicts accepted validation snapshots together with inactive preview scenes',
 })
 
 it('loads project field data and rejects paths outside the project', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'rumi-fields-host-')), outside = await mkdtemp(join(tmpdir(), 'rumi-fields-outside-')), f = fixture(undefined, root)
+  const root = await mkdtemp(join(tmpdir(), 'rumi-fields-host-')), outside = await mkdtemp(join(tmpdir(), 'rumi-fields-outside-')), f = fixture(undefined, root, 500)
   try {
     const path = join(root, 'model.usda'); await writeFile(path, '#usda 1.0\n')
     await f.run('viewer_load', { path })
@@ -831,7 +834,8 @@ it('loads project field data and rejects paths outside the project', async () =>
     const args = { action: 'open', path, revision: design.revision, url: design.url, operation: 'fields', label: 'Crown', parts: ['Shell'], values: { crown: 0 }, fieldsPath: 'fields.json', controls: [{ kind: 'slider', label: 'Height', axes: [{ key: 'crown', min: -1, max: 1, step: .01, reset: 0 }] }] }
     await writeFile(join(outside, 'fields.json'), JSON.stringify(fields))
     await expect(f.run('viewer_controls', { ...args, fieldsPath: join(outside, 'fields.json') })).rejects.toThrow('inside the project')
-    const pending = f.run('viewer_controls', args)
+    const reviewId = await prepareReviewed(f, args)
+    const pending = f.run('viewer_controls', { action: 'present', id: reviewId })
     let id = ''
     await vi.waitFor(async () => { id = (await f.state()).design.analog?.id; expect(id).toBeTruthy() })
     await f.shapeFeedback(id, design.url, { status: 'rendered' })
@@ -845,4 +849,46 @@ it('loads project field data and rejects paths outside the project', async () =>
     expect((await f.state()).design.analog.fields).toEqual(fields)
     await f.run('viewer_controls', { action: 'close', id })
   } finally { await f.dispose(); await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }) }
+})
+
+
+it('records a refused presentation and repeats the pending review in the next agent request', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-control-turn-')), f = fixture(undefined, root), ctx = new Context()
+  try {
+    const path = join(root, 'model.usda'); await writeFile(path, '#usda 1.0\n')
+    await f.run('viewer_load', { path })
+    await vi.waitFor(() => expect(f.contexts.has('rumi:active-shape')).toBe(true))
+    const design = (await f.state()).design
+    await mountAgentLoopTestDependencies(ctx)
+    const harness = await mountAgentLoopTestHarness(ctx)
+    ctx.effect(() => ctx.tools.register(f.raw('viewer_controls')))
+    ctx.effect(() => ctx.systemPrompt.context({ name: 'test:pending-controls', order: 210, required: true,
+      text: context => f.contexts.get('rumi:active-shape')!.text(context),
+    }))
+    const adapter = new MockAdapter([
+      toolCallResponse('prepare', 'viewer_controls', { action: 'prepare', path, revision: design.revision, url: design.url,
+        operation: 'bulge', label: 'Profile', center: [0, 0, 0], radii: [30, 30, 30], direction: [0, 1, 0], limit: 10, parts: [],
+        values: { amount: .5, spread: .5, peakX: .5, peakY: .5, falloff: .5, angle: .5 },
+        controls: [{ kind: 'slider', label: 'Depth', axes: [{ key: 'amount', min: 0, max: 1, reset: .5, step: .1 }] }],
+        expectations: [{ key: 'amount', effect: 'Change profile depth', preserve: 'Keep adjacent geometry fixed' }],
+      }),
+      options => {
+        expect(JSON.stringify(options.messages)).toContain('validation_required')
+        const state = f.contexts.get('rumi:active-shape')!.text({ agent: { session: { id: 'session-a' } } })
+        const id = /"id":"([^" ]+)"/.exec(state)![1]
+        return toolCallResponse('skip-validation', 'viewer_controls', { action: 'present', id })
+      },
+      textResponse('Validation is required before presenting these controls.'),
+    ])
+    ctx.effect(() => ctx.llm.registerAdapter(['mock'], adapter))
+    const agent = await harness.create(SessionId('session-a'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Let me adjust the profile.' }] }))
+    await agent.whenIdle()
+    const results = agent.session.snapshotEvents().flatMap(event => event.type === 'tool/result' ? [event.data.message] : [])
+    expect(results).toHaveLength(2)
+    expect(results[1]!.isError).toBe(true)
+    expect(results[1]!.content).toMatchSnapshot()
+    expect(JSON.stringify(adapter.requests.at(-1)!.messages)).toContain('validation_required')
+    expect((await f.state()).design.analog).toBeNull()
+  } finally { await ctx.fiber.dispose(); await f.dispose(); await rm(root, { recursive: true, force: true }) }
 })

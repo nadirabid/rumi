@@ -1,3 +1,4 @@
+import { renderControlEvidence } from './analog/evidence-renderer.js'
 /**
  * The mesh preview's browser half: registrations, the scene subscription, and
  * the pane that hands the scene to the viewport.
@@ -134,6 +135,20 @@ export function installViewer(ctx, React, primitives) {
           method: 'POST', headers: { 'content-type': contentType }, body: bytes, signal: controller.signal,
         })
         if (!submitted.ok && submitted.status !== 409) throw new Error('Validation geometry delivery failed')
+      }
+      if (response.controlValidationRequest) {
+        const job = response.controlValidationRequest
+        let result
+        try {
+          const artifact = await artifacts.resolve({ ...job.identity, format: 'usd' })
+          result = await renderControlEvidence(artifact.bytes, job, controller.signal)
+        } catch (error) { result = { status: 'failed', message: String(error.message ?? error).slice(0, 2000) } }
+        if (stopped()) return
+        const submitted = await fetch(`${ROUTE}/control-evidence?sessionId=${encodeURIComponent(sessionId)}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
+          body: JSON.stringify({ id: job.id, result }),
+        })
+        if (!submitted.ok && submitted.status !== 409) throw new Error('Control evidence delivery failed')
       }
       if (response.cursorRequest) {
         let snapshot

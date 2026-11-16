@@ -26,3 +26,9 @@
 - id: llm-deepseek-account
   config:
     reasoningEffort: low
+
+- insert:
+    - id: rumi-image-budget
+      name: '@rumi/brand/image-budget'
+      config:
+        maxImages: 20

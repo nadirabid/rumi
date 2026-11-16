@@ -23,6 +23,8 @@ Both apps run at the same time and share nothing: separate bundle ids, single-in
 
 Project agents are confined to their own project directory for reads and writes, with read-only runtime exceptions. See [project isolation](apps/rumi/brand/projects/README.md#project-isolation) for enforcement, restrictions and upgrade behavior.
 
+Rumi retains the newest 20 image occurrences per model request, configured by `maxImages` on the `rumi-image-budget` plugin. Before an over-budget request reaches the provider, the harness records durable `image/offload` selections for older images and retries locally. Saved attachments and text findings remain available; omitted images become attachment references in subsequent requests, including resumed sessions and compaction summaries. Cache reuse can end at the first replaced image.
+
 Rumi reports failed foreground Bash commands as structured tool errors while preserving stdout, stderr, and exit diagnostics. Successful commands and background acknowledgements retain their existing behavior.
 
 ## Build

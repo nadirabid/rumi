@@ -8,13 +8,15 @@
     ".": "./index.js",
     "./client": "./client.js",
     "./package.json": "./package.json",
-    "./preset": "./preset.js"
+    "./preset": "./preset.js",
+    "./image-budget": "./image-budget.js"
   },
   "files": [
     "index.js",
     "client.js",
     "cordis.patch.yml",
-    "preset.js"
+    "preset.js",
+    "image-budget.js"
   ],
   "dsh": {
     "bundle": {

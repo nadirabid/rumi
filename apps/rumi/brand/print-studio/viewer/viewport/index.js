@@ -110,7 +110,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   let highlightOverlay = null, highlightId = null, highlightVisible = true
   let design = null, designUrl = null, requestedUrl = null, generation = 0, cameraCommand = null
   let sceneRevision = 0, sceneGeneration = 0
-  let designSpec = null, designVolume = null, designPending = null
+  let designSpec = null, designVolume = null, designPending = null, requestedRenderRequest = null
   let measurement = null
   const cursorAnchors = new Map()
   const ink = token(element, '--dsw-alias-label-tertiary', FALLBACK_INK)
@@ -529,15 +529,16 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         generation++
         clearShape(); clearMotion(); clearHighlight()
         if (design) { designRoot.remove(design.root); clearShape(); disposeDesign(design) }
-        measurement = null; design = null; motion = null; designUrl = null; requestedUrl = null
+        measurement = null; design = null; motion = null; designUrl = null; requestedUrl = null; requestedRenderRequest = null
         render()
         return null
       }
       if (designUrl === spec.url) return placeDesign()
-      if (requestedUrl === spec.url) return designPending
+      if (requestedUrl === spec.url && requestedRenderRequest === spec.renderRequest) return designPending
       syncHighlight()
       render()
       requestedUrl = spec.url
+      requestedRenderRequest = spec.renderRequest
       const request = ++generation
       designPending = track((async () => {
         try {

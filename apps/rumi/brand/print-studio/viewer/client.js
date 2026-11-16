@@ -375,7 +375,7 @@ export function installViewer(ctx, React, primitives) {
         trace('feedback_started')
         const response = await fetch(`${ROUTE}/feedback?sessionId=${encodeURIComponent(view.sessionId)}`, {
           method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
-          body: JSON.stringify({ revision: view.design.revision, url: view.design.url, transform: view.design.transform, volume: view.volume, diagnostics: diagnostics(), ...value }),
+          body: JSON.stringify({ revision: view.design.revision, url: view.design.url, renderRequest: view.design.renderRequest, transform: view.design.transform, volume: view.volume, diagnostics: diagnostics(), ...value }),
         })
         if (!response.ok) { trace('feedback_failed'); throw new Error(`Build feedback unavailable (${response.status})`) }
         trace('feedback_delivered')
@@ -415,7 +415,7 @@ export function installViewer(ctx, React, primitives) {
       })
       return () => { trace('effect_disposed'); active = false; controller.abort(); document.removeEventListener('visibilitychange', visible) }
     }, [
-      view?.design?.highlight?.id, view?.design?.url, JSON.stringify(view?.design?.transform), view?.design?.camera?.id,
+      view?.design?.highlight?.id, view?.design?.url, view?.design?.renderRequest, JSON.stringify(view?.design?.transform), view?.design?.camera?.id,
       view?.sessionId, JSON.stringify(view?.volume), failed,
     ])
     function sendShape(status, values, error) {

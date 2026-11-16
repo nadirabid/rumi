@@ -80,11 +80,15 @@ it('keeps failed, timed-out, and rejected reviews unavailable for presentation',
     expect(await first).toMatchObject({ status: 'validation_failed' })
     expect(() => review.present(draft.id, identity)).toThrow('Validate')
     const second = review.validate(draft.id, new AbortController().signal, 1000)
+    const expired = review.request()!.id
     await vi.advanceTimersByTimeAsync(1000)
-    expect(await second).toMatchObject({ status: 'validation_failed' })
+    expect(await second).toMatchObject({ status: 'validation_failed', message: expect.stringContaining(`Prepared controls ${draft.id} are retained`) })
+    expect(review.state()).toMatchObject({ id: draft.id, status: 'validation_required' })
     expect(review.request()).toBeNull()
     const third = review.validate(draft.id, new AbortController().signal, 1000)
     const request = review.request()!
+    expect(request.id).not.toBe(expired)
+    expect(review.deliver(expired, { status: 'failed', message: 'Late renderer result' })).toBe(false)
     review.deliver(request.id, { status: 'complete', neutralMaxDisplacementMm: 0, cases: request.cases.map((test: { id: string }) => ({ id: test.id, maxDisplacementMm: 0, rmsDisplacementMm: 0, affectedFraction: 0, image: png })) })
     const evidence = review.evidence(draft.id, (await third).cases)
     review.review(draft.id, evidence.evidenceId, [{ ...assessments[0], decision: 'revise', observation: 'The intended surface does not move.' }], combined)

@@ -539,7 +539,7 @@ it('opens analog controls and freezes a fresh viewer capture without rewriting t
     expect(await readFile(path)).toEqual(bytes)
     expect(await f.run('viewer_controls', { action: 'close', id: controls.id })).toEqual({ status: 'closed' })
     expect((await feedback({ status: 'adjusted', sequence: 4, values })).status).toBe(409)
-    expect(editContext?.text({ agent: { session: { id: 'session-a' } } })).toBe('')
+    expect(editContext?.text({ agent: { session: { id: 'session-a' } } })).toBe('No temporary mesh controls are staged or presented.')
   } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
@@ -872,7 +872,7 @@ it('records a refused presentation and repeats the pending review in the next ag
         controls: [{ kind: 'slider', label: 'Depth', axes: [{ key: 'amount', min: 0, max: 1, reset: .5, step: .1 }] }],
         expectations: [{ key: 'amount', effect: 'Change profile depth', preserve: 'Keep adjacent geometry fixed' }],
       }),
-      options => {
+      (options) => {
         expect(JSON.stringify(options.messages)).toContain('validation_required')
         const state = f.contexts.get('rumi:active-shape')!.text({ agent: { session: { id: 'session-a' } } })
         const id = /"id":"([^" ]+)"/.exec(state)![1]
@@ -890,5 +890,96 @@ it('records a refused presentation and repeats the pending review in the next ag
     expect(results[1]!.content).toMatchSnapshot()
     expect(JSON.stringify(adapter.requests.at(-1)!.messages)).toContain('validation_required')
     expect((await f.state()).design.analog).toBeNull()
+  } finally { await ctx.fiber.dispose(); await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+
+it('retains reviewed controls when reloading identical bytes and invalidates them for changed bytes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-control-reload-')), f = fixture(undefined, root, 500)
+  try {
+    const path = join(root, 'model.usda'); await writeFile(path, '#usda 1.0\n')
+    await f.run('viewer_load', { path })
+    const design = (await f.state()).design
+    const id = await prepareReviewed(f, { action: 'prepare', path, revision: design.revision, url: design.url,
+      operation: 'bulge', label: 'Profile', center: [0, 0, 0], radii: [30, 30, 30], direction: [0, 1, 0], limit: 10, parts: [],
+      values: { amount: .5, spread: .5, peakX: .5, peakY: .5, falloff: .5, angle: .5 }, controls: legacyControls('bulge') })
+    const before = (await f.state()).design
+    const reload = f.run('viewer_load', { path })
+    let after: typeof before
+    await vi.waitFor(async () => { after = (await f.state()).design; expect(after.renderRequest).toBeTruthy() })
+    expect(after!.url).toBe(design.url)
+    expect(after!.controlReview).toEqual(before.controlReview)
+    await f.routes.get('/api/print-studio/viewer/feedback')!(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
+      method: 'POST', body: JSON.stringify({ revision: before.revision, url: before.url, transform: before.transform, volume: null, error: 'Stale renderer failure', loadStatus: 'build_failed' }),
+    }))
+    expect((await f.state()).design.error).toBeNull()
+    const response = await f.routes.get('/api/print-studio/viewer/feedback')!(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
+      method: 'POST', body: JSON.stringify({ revision: after!.revision, url: after!.url, renderRequest: after!.renderRequest,
+        transform: after!.transform, volume: null, loadStatus: 'ready', report: { status: 'ok', dimensions: { x: 1, y: 1, z: 1 }, checks: [] } }),
+    }))
+    expect(response.status).toBe(200)
+    expect((await reload).load.status).toBe('ready')
+    expect((await f.state()).design.controlReview).toMatchObject({ id, status: 'approved' })
+    await writeFile(path, '#usda 1.0\n# changed geometry\n')
+    await f.run('viewer_load', { path })
+    expect((await f.state()).design.controlReview).toBeNull()
+    await expect(f.run('viewer_controls', { action: 'review', id, evidenceId: before.controlReview.evidenceId })).rejects.toThrow('no longer staged')
+    expect(f.contexts.get('rumi:active-shape')!.text({ agent: { session: { id: 'session-a' } } })).toBe('No temporary mesh controls are staged or presented.')
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+
+it('records retained retry instructions and reports when controls have been cleared', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-control-retry-turn-')), f = fixture(undefined, root), ctx = new Context()
+  try {
+    const path = join(root, 'model.usda'); await writeFile(path, '#usda 1.0\n')
+    await f.run('viewer_load', { path })
+    await vi.waitFor(() => expect(f.contexts.has('rumi:active-shape')).toBe(true))
+    const design = (await f.state()).design
+    await mountAgentLoopTestDependencies(ctx)
+    const harness = await mountAgentLoopTestHarness(ctx)
+    for (const name of ['viewer_controls', 'viewer_load']) ctx.effect(() => ctx.tools.register(f.raw(name)))
+    ctx.effect(() => ctx.systemPrompt.context({ name: 'test:pending-controls', order: 210, required: true,
+      text: context => f.contexts.get('rumi:active-shape')!.text(context),
+    }))
+    let id = ''
+    const adapter = new MockAdapter([
+      toolCallResponse('prepare', 'viewer_controls', { action: 'prepare', path, revision: design.revision, url: design.url,
+        operation: 'bulge', label: 'Profile', center: [0, 0, 0], radii: [30, 30, 30], direction: [0, 1, 0], limit: 10, parts: [],
+        values: { amount: .5, spread: .5, peakX: .5, peakY: .5, falloff: .5, angle: .5 },
+        controls: [{ kind: 'slider', label: 'Depth', axes: [{ key: 'amount', min: 0, max: 1, reset: .5, step: .1 }] }],
+        expectations: [{ key: 'amount', effect: 'Change profile depth', preserve: 'Keep adjacent geometry fixed' }],
+      }),
+      () => {
+        const state = f.contexts.get('rumi:active-shape')!.text({ agent: { session: { id: 'session-a' } } })
+        id = /"id":"([^" ]+)"/.exec(state)![1]!
+        return toolCallResponse('validate', 'viewer_controls', { action: 'validate', id })
+      },
+      (options) => {
+        expect(JSON.stringify(options.messages)).toContain(`Prepared controls ${id} are retained`)
+        return toolCallResponse('reload', 'viewer_load', { path })
+      },
+      (options) => {
+        const current = f.contexts.get('rumi:active-shape')!.text({ agent: { session: { id: 'session-a' } } })
+        expect(current).toContain(`"id":"${id}"`)
+        expect(current).toContain('validation_required')
+        expect(JSON.stringify(options.messages)).toContain('validation_required')
+        return toolCallResponse('retry', 'viewer_controls', { action: 'validate', id })
+      },
+      () => toolCallResponse('close', 'viewer_controls', { action: 'close', id }),
+      (options) => {
+        expect(JSON.stringify(options.messages)).toContain('No temporary mesh controls are staged or presented.')
+        return toolCallResponse('stale', 'viewer_controls', { action: 'present', id })
+      },
+      textResponse('The controls were cleared. Prepare and validate them again before presentation.'),
+    ])
+    ctx.effect(() => ctx.llm.registerAdapter(['mock'], adapter))
+    const agent = await harness.create(SessionId('session-a'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Retry the profile controls.' }] }))
+    await agent.whenIdle()
+    const failures = agent.session.snapshotEvents().flatMap(event => event.type === 'tool/result' && event.data.message.isError ? [event.data.message.content] : [])
+    expect(failures).toHaveLength(3)
+    expect(JSON.parse(JSON.stringify(failures).replaceAll(id, '<review-id>'))).toMatchSnapshot()
+    expect((await f.state()).design.controlReview).toBeNull()
   } finally { await ctx.fiber.dispose(); await f.dispose(); await rm(root, { recursive: true, force: true }) }
 })

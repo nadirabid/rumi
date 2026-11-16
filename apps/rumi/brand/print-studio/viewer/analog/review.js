@@ -12,7 +12,7 @@ const text = (value, name) => {
 export function createControlReview() {
   let draft = null, pending = null, closed = false
   function requireDraft(id) {
-    if (closed || !draft || draft.id !== id) throw new Error('Controls changed; prepare and validate the current controls again')
+    if (closed || !draft || draft.id !== id) throw new Error('Controls changed or are no longer staged. Read the current meshState; prepare and validate again before presenting controls.')
     return draft
   }
   function cancel() {
@@ -55,7 +55,7 @@ export function createControlReview() {
           resolve(result)
         }
         const abort = () => finish({ status: 'cancelled' })
-        const timer = setTimeout(() => finish({ status: 'validation_failed', message: 'Open the model viewer and retry validation; no complete evidence arrived.' }), timeoutMs)
+        const timer = setTimeout(() => finish({ status: 'validation_failed', message: `No complete evidence arrived within ${timeoutMs} ms. Prepared controls ${id} are retained. Retry viewer_controls validate with this id; reloading the model is unnecessary.` }), timeoutMs)
         pending = { id: randomUUID(), finish }
         signal.addEventListener('abort', abort, { once: true })
       })

@@ -47,7 +47,7 @@ function applyHighlight(state, value) {
 }
 
 function applyFeedback(state, value) {
-  if (value.revision !== state.revision || value.url !== state.url
+  if (value.revision !== state.revision || value.url !== state.url || value.renderRequest !== state.renderRequest
     || JSON.stringify(value.transform) !== JSON.stringify(state.transform)) return false
   if (value.report) {
     const report = value.report
@@ -180,6 +180,7 @@ export async function createSource(ctx, path, workspace) {
       state.url = `${prefix}/${entryName.split('/').map(encodeURIComponent).join('/')}`
       state.revision++
       state.highlight = null
+      delete state.renderRequest
       state.analog = null
       controlReview.reset()
       delete state.motion
@@ -217,6 +218,11 @@ export async function createSource(ctx, path, workspace) {
   return {
     state: () => ({ ...state, controlReview: controlReview.state(), error: sourceError ?? buildError }),
     controlReview,
+    /** Request fresh renderer feedback without replacing geometry, edits, or review evidence. */
+    requestRender() {
+      if (closed) throw new Error('Model source is closed')
+      state.renderRequest = randomUUID()
+    },
     /** Retain the current immutable routes until the returned release operation settles. */
     retainSnapshot() {
       if (closed || !currentSnapshot) throw new Error('Model source is closed')

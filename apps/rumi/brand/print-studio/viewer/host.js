@@ -189,7 +189,7 @@ function modelContextJson(value) {
 function loadIdentity(record) {
   const design = record.source?.state()
   return design ? { path: design.path, revision: design.revision, url: design.url,
-    transform: design.transform, volume: record.history.current().volume } : null
+    transform: design.transform, volume: record.history.current().volume, ...(design.renderRequest ? { renderRequest: design.renderRequest } : {}) } : null
 }
 
 /**
@@ -240,7 +240,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         const shape = sessions.get(context.agent?.session.id)?.source?.state().analog
         const review = sessions.get(context.agent?.session.id)?.source?.controlReview.state()
         if (review) return `Pending mesh control review: ${JSON.stringify(review)}. Do not claim controls are ready before presenting reviewed controls. Validation renders are evidence, not an automatic quality pass. Inspect every comparison for the expected effect, unwanted movement, pinching, intersections, and part fit.`
-        if (!shape) return ''
+        if (!shape) return sessions.get(context.agent?.session.id)?.source ? 'No temporary mesh controls are staged or presented.' : ''
         return `Unresolved model edit: ${JSON.stringify({ id: shape.id, label: shape.label, operation: shape.operation, controls: shape.controls, values: shape.values, frozen: shape.frozen, finish: shape.finish, original: shape.original, edit: shape.edit })}. Keep controls open while the person explores. Satisfaction or moving to another task resolves the current edit first: freeze the latest visible values, then ${shape.operation === 'parameters' && shape.finish !== 'blender' ? 'call viewer_controls save with the frozen id' : 'apply the captured recipe in Blender, publish and load the revision'}. If already frozen, finish saving. Explicit cancel uses close. Read mesh-edit-controls; do not require a special phrase.`
       },
     }), 'print-studio active edit context')
@@ -322,14 +322,20 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   async function loadSource(record, cwd, path, volume, signal) {
     signal?.throwIfAborted()
     if (closed) throw new Error('Model preview is closed')
-    const source = await createSource(ctx, resolve(cwd, path), cwd)
+    const candidate = await createSource(ctx, resolve(cwd, path), cwd)
+    const previous = record.source?.state(), next = candidate.state()
+    const retained = previous?.path === next.path && previous.contentHash === next.contentHash
+    const source = retained ? record.source : candidate
     try {
       signal?.throwIfAborted()
       if (closed) throw new Error('Model preview is closed')
       const selected = relative(cwd, resolve(cwd, path)).split(sep).join('/')
       await saveSelection(cwd, selected, volume === undefined ? record.history.current().volume : volume)
       if (closed) throw new Error('Model preview is closed')
-      await record.source?.dispose()
+      if (retained) {
+        await candidate.dispose()
+        source.requestRender()
+      } else await record.source?.dispose()
       record.source = source
       record.cwd = cwd
       record.selectedModel = selected
@@ -340,7 +346,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       }
       loads.update(record.sessionId, loadIdentity(record))
     } catch (error) {
-      await source.dispose()
+      await candidate.dispose()
       throw error
     }
   }
@@ -486,12 +492,14 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
           client: value.diagnostics ? { hidden: value.diagnostics.hidden === true, elapsedMs: Number.isFinite(value.diagnostics.elapsedMs) ? value.diagnostics.elapsedMs : null, width: Number.isFinite(value.diagnostics.width) ? value.diagnostics.width : null, height: Number.isFinite(value.diagnostics.height) ? value.diagnostics.height : null } : null, highlightStatus: value.highlightStatus ?? null, hasError: Boolean(value.error),
         })
       }
+      if (value.renderRequest !== source.state().renderRequest) return json({ error: 'stale_render_feedback' }, 409)
       try { source.feedback(value) } catch (_error) { diagnostics.record(sessionId, 'viewer.feedback_rejected', { reason: 'invalid_report' }); return json({ error: 'invalid_feedback' }, 400) }
       const current = source.state()
       const record = sessions.get(sessionId)
       if (record?.source === source && value.revision === current.revision && value.url === current.url
         && JSON.stringify(value.transform) === JSON.stringify(current.transform)
-        && JSON.stringify(value.volume) === JSON.stringify(record.history.current().volume)) {
+        && JSON.stringify(value.volume) === JSON.stringify(record.history.current().volume)
+        && value.renderRequest === current.renderRequest) {
         const status = current.error ? current.error.kind === 'source' ? 'source_failed' : 'build_failed'
           : value.loadStatus === 'viewer_hidden' ? 'viewer_hidden'
           : value.loadStatus === 'ready' && current.report ? 'ready' : null
@@ -642,6 +650,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       + 'Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. '
       + 'Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. '
       + 'Executable .js/.mjs previews are disabled by project isolation; export USD instead. '
+      + 'Reloading identical source bytes preserves staged controls and their review while requesting fresh renderer feedback. Changed source bytes invalidate them. '
       + 'Saved models display immediately; use validation_mechanics then validation_accept before claiming acceptance. '
       + 'Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.',
     parameters: {

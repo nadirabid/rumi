@@ -337,7 +337,7 @@ Mechanics column: **passes** means the recipe's sample passed \`validation_mecha
 
 Read the card before the first use of a recipe. Each family's file under \`references/\` beside this skill gives every recipe's call, what the parts must provide, the options worth changing, how it prints, and what validation reported. A recipe sample passing motion probes does not establish separate assembly feasibility.
 ",
-  "load": "Select a Blender-exported USD in the Three.js viewer. Use models/<name>/model.usda; the viewer discovers these entries and reloads completed exports automatically. USD uses metres and Z up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Executable .js/.mjs previews are disabled by project isolation; export USD instead. Saved models display immediately; use validation_mechanics then validation_accept before claiming acceptance. Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.",
+  "load": "Select a Blender-exported USD in the Three.js viewer. Use models/<name>/model.usda; the viewer discovers these entries and reloads completed exports automatically. USD uses metres and Z up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Executable .js/.mjs previews are disabled by project isolation; export USD instead. Reloading identical source bytes preserves staged controls and their review while requesting fresh renderer feedback. Changed source bytes invalidate them. Saved models display immediately; use validation_mechanics then validation_accept before claiming acceptance. Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.",
   "meshEdits": "---
 name: mesh-edit-controls
 description: Turn a request to adjust a mesh into useful live controls. Choose the editable features, construct their deformations, verify the preview, and save or cancel the edit.
@@ -538,5 +538,28 @@ exports[`records a refused presentation and repeats the pending review in the ne
     "text": "Error: Validate the controls and review the images before presenting them",
     "type": "text",
   },
+]
+`;
+
+exports[`records retained retry instructions and reports when controls have been cleared 1`] = `
+[
+  [
+    {
+      "text": "Error: No complete evidence arrived within 1 ms. Prepared controls <review-id> are retained. Retry viewer_controls validate with this id; reloading the model is unnecessary.",
+      "type": "text",
+    },
+  ],
+  [
+    {
+      "text": "Error: No complete evidence arrived within 1 ms. Prepared controls <review-id> are retained. Retry viewer_controls validate with this id; reloading the model is unnecessary.",
+      "type": "text",
+    },
+  ],
+  [
+    {
+      "text": "Error: Controls changed or are no longer staged. Read the current meshState; prepare and validate again before presenting controls.",
+      "type": "text",
+    },
+  ],
 ]
 `;

@@ -22,6 +22,53 @@ _HERE = Path(__file__).resolve().parent
 _AXES = {'X': (1, 0, 0), 'Y': (0, 1, 0), 'Z': (0, 0, 1)}
 
 
+def outline_distances(points, outlines, batch_size=256):
+    """Return exact shortest distances from 2D points to closed outline segments.
+
+    Coordinates and returned distances share the caller's units. Each outline closes from its
+    last point to its first; repeated points are permitted. NumPy ships with Blender. Batches
+    bound pairwise working arrays to O(batch_size²), plus O(points + segments) input/output storage.
+    Empty points return an empty array; outlines must contain at least one finite 2D point.
+    """
+    import numpy as np
+
+    if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 1:
+        raise ValueError('batch_size must be a positive integer')
+    points = np.asarray(points, dtype=np.float64)
+    if points.shape == (0,):
+        points = points.reshape(0, 2)
+    if points.ndim != 2 or points.shape[1] != 2 or not np.isfinite(points).all():
+        raise ValueError('points must be finite 2D coordinates')
+    starts, ends = [], []
+    for outline in outlines:
+        values = np.asarray(outline, dtype=np.float64)
+        if values.ndim != 2 or values.shape[1] != 2 or not len(values) or not np.isfinite(values).all():
+            raise ValueError('Each outline must contain finite 2D coordinates')
+        starts.append(values)
+        ends.append(np.roll(values, -1, axis=0))
+    if not starts:
+        raise ValueError('At least one outline is required')
+    starts, ends = np.concatenate(starts), np.concatenate(ends)
+    vectors = ends - starts
+    lengths = np.sum(vectors * vectors, axis=1)
+    lengths[lengths == 0] = 1
+    result = np.full(len(points), np.inf)
+    for offset in range(0, len(points), batch_size):
+        current = points[offset:offset + batch_size]
+        best = np.full(len(current), np.inf)
+        for segment in range(0, len(starts), batch_size):
+            origin = starts[segment:segment + batch_size]
+            vector = vectors[segment:segment + batch_size]
+            dx = current[:, 0, None] - origin[:, 0]
+            dy = current[:, 1, None] - origin[:, 1]
+            fraction = np.clip((dx * vector[:, 0] + dy * vector[:, 1]) / lengths[segment:segment + batch_size], 0, 1)
+            dx = current[:, 0, None] - (origin[:, 0] + fraction * vector[:, 0])
+            dy = current[:, 1, None] - (origin[:, 1] + fraction * vector[:, 1])
+            best = np.minimum(best, np.min(dx * dx + dy * dy, axis=1))
+        result[offset:offset + batch_size] = np.sqrt(best)
+    return result
+
+
 def direction(value):
     """Return a unit vector for '+X', '-Z', 'Y' or an (x, y, z) tuple."""
     if isinstance(value, str):

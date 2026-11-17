@@ -29,11 +29,34 @@ Constraints only help when they arrive before the geometry is fixed. Work in thi
 4. **Apply the constraints that the facts and the geometry disagree on.** Each numbered constraint above names a decision. When a requested design cannot meet one, say which and why, and offer the smallest change that resolves it before building.
 5. **Validate before claiming readiness.** Run the model checks described in [blender-modeling](../blender-modeling/SKILL.md#validate-a-finished-revision), then slice and inspect the preview for unsupported regions, thin walls and layer time. Report what was checked and what remains unverified.
 
+## Report the checks before recommending a change
+
+Reading these constraints is not applying them. When a requested design could fail to print — a feature near the nozzle limit, a span that needs support, a fit that must move, a part loaded in service, or a size near the bed limit — fill in the table below and let its answers shape the recommendation. Skip the table when nothing in the model is near a limit: a small solid shape in a known material needs no ceremony.
+
+Write a number in every Cell column. If you cannot, write `unverified` and say what fact is missing. A row answered "looks fine" is a row not done.
+
+| Ask | Cell | Answer |
+|---|---|---|
+| What can the nozzle actually place? | nozzle diameter × layers | e.g. `0.4 mm → 0.8 mm min wall` |
+| Smallest wall, post or stroke in the model | measured value vs that cell | e.g. `0.6 mm < 0.8 mm — too thin` |
+| Smallest hole or gap | measured value vs nozzle | e.g. `3.0 mm — prints ~2.8 mm, drill after` |
+| Every moving pair | measured gap vs 0.3 mm | e.g. `0.25 mm — binds, raise to 0.35` |
+| Overhangs and bridges | angle or span that needs support | e.g. `55° overhang, 12 mm bridge` |
+| Orientation chosen | what it costs | e.g. `flat — no support, 3 mm layer lines across load` |
+| Overall size | vs usable bed region | e.g. `120×40×30 in a 220×220 bed` |
+| Facet held in service | material and load assumption | e.g. `PLA, ~2 kg static — fine` |
+
+Then answer in this order: what must change, why each change follows from its row, and which rows stayed `unverified`. Do not lead with a change whose row you have not filled.
+
+If the person supplied no printer, material or layer height, say so once and mark the affected rows `unverified` rather than assuming a common setup. Naming the gap is more useful than a confident answer built on guessed defaults.
+
 ## Worked examples
 
 **A wheel that must spin.** The person asks for a cart with four turning wheels on a 0.4 mm nozzle. Constraint 6 sets 0.3 mm between the wheel bore and the axle, and constraint 3 means the axle is a separate part rather than a fused lump. Orientation puts the wheel disc flat on the bed so the bore is round, not ovalised by layer stair-stepping. The joint kit in [joints](../joints/SKILL.md) already carries these clearances; read it before hand-modelling the axle.
 
 **A bracket that must hold.** The person asks for a shelf bracket "as thin as possible". Constraint 7 makes the load the deciding fact, not the render. Lay it so layer lines run along the bending span, since a part loaded across layer boundaries splits sooner. State the assumption you used for load and offer a thicker section if it is heavy.
+
+**Filling the table for a bracket.** Dimensions 120 × 40 × 30 mm, 2 mm walls, one 3 mm pin hole, Ender 3, 0.4 mm nozzle, PLA, no layer height given. Rows: wall `2 mm` against `0.8 mm min` — fine; hole `3 mm` prints undersize to roughly `2.8 mm` — enlarge to `3.3 mm` or drill after; no moving pair — not applicable; upright is vertical so the hole's upper rim overhangs — make it a teardrop; orientation `flat on the base flange`, no support needed; size fits `220 × 220`. Layer height is `unverified`, so say that the wall figure assumes a coarse-enough layer to keep two perimeters, rather than asserting it.
 
 **Text on a lid.** The person asks for their name embossed on a lid in the same colour. Constraint 5 makes the stroke width the question: letters narrower than about two extrusion widths on the selected nozzle may vanish or blur. Either raise the text to a relief height that survives, or widen the strokes, and say which you did.
 

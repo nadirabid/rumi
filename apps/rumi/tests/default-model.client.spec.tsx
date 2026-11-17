@@ -2,7 +2,7 @@
 /** Exercise the shipped browser entry with real settings forms and menu primitives. */
 import * as React from 'react'
 import { readFileSync } from 'node:fs'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -10,9 +10,21 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 
 const disposers: (() => void)[] = []
-afterEach(() => { cleanup(); disposers.splice(0).reverse().forEach(dispose => dispose()) })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); disposers.splice(0).reverse().forEach(dispose => dispose()) })
 
-async function fixture(options: { writable?: boolean; failSave?: boolean } = {}) {
+async function fixture(options: { writable?: boolean; failSave?: boolean; freshBaseten?: boolean } = {}) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(
+    url.endsWith('rumi-chatgpt') ? { connected: true } : { hasKey: true, hint: '1234' })))
+  const configured = new Set(['DIRECT_KEY'])
+  const basetenProfiles: Record<string, { apiKeyEnv: string }> = options.freshBaseten ? {} : { baseten: { apiKeyEnv: 'BASETEN_REF' } }
+  const configureRoute = vi.fn(async (_ns: string, ops: { value: { apiKeyEnv: string } }[]) => {
+    basetenProfiles.baseten = ops[0]!.value
+    return { ok: true }
+  })
+  const storeKey = vi.fn(async (ref: string, _value: string) => {
+    configured.add(ref)
+    return { ok: true }
+  })
   const scope = createSnapshotStore({ status: 'ready' as const, value: { provider: 'test', model: 'first', reasoningEffort: 'high' }, base: {}, user: {}, writable: options.writable !== false, revision: 1 })
   const mutate = vi.fn(async (ops: { op: string; path: string[]; value?: string }[], revision: number) => {
     expect(revision).toBe(1)
@@ -29,7 +41,7 @@ async function fixture(options: { writable?: boolean; failSave?: boolean } = {})
   const catalog = { groups: [{ id: 'test', name: 'Test provider', models: [
     { id: 'first', name: 'First', reasoning: { efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }], defaultEffort: 'low' } },
     { id: 'second', name: 'Second' },
-  ] }], failures: [] }
+  ] }, { id: 'baseten', name: 'DeepSeek via Baseten', models: [{ id: 'deepseek-ai/demo', name: 'Baseten model' }] }], failures: [] }
   const modelCatalog = vi.fn(async () => ({ ok: true, value: catalog }))
   const dictionaries = new Map<string, Record<string, string>>()
   const listeners = new Map<string, () => void>()
@@ -55,11 +67,25 @@ async function fixture(options: { writable?: boolean; failSave?: boolean } = {})
     on(event: string, listener: () => void) { listeners.set(event, listener) },
     inject(_names: string[], apply: (ctx: typeof context) => void) { apply(context) },
     configForms: { get: () => ({ ...scope, mutate }) },
-    remote: { session: { modelCatalog }, $on(event: string, listener: () => void) {
-      listeners.set(event, listener)
-      return () => { listeners.delete(event) }
-    } },
-    locale: { register(ns: string, copy: { en: Record<string, string> }) { dictionaries.set(ns, copy.en); return () => {} }, bind: () => () => '' },
+    remote: { session: { modelCatalog },
+      settings: { describe: async () => ({ ok: true, value: { namespaces: [
+        { ns: 'llm-deepseek', value: { apiKeyEnv: 'DIRECT_KEY' } },
+        { ns: 'llm-pi-ai', revision: 7, value: { providers: basetenProfiles } },
+      ] } }), mutate: configureRoute },
+      credentials: {
+        describe: async ([ref]: string[]) => ({
+          ok: true, value: { [ref]: { configured: configured.has(ref), writable: true, source: 'file' } },
+        }),
+        set: storeKey,
+      },
+      $on(event: string, listener: () => void) {
+        listeners.set(event, listener)
+        return () => { listeners.delete(event) }
+      } },
+    locale: {
+      register(ns: string, copy: { en: Record<string, string> }) { dictionaries.set(ns, copy.en); return () => {} },
+      bind: (ns: string) => (key: string) => dictionaries.get(ns)?.[key] ?? key,
+    },
     slots: {
       inject(name: string, register: () => (() => void)) {
         if (name === 'settings.models.footer') {
@@ -91,7 +117,7 @@ async function fixture(options: { writable?: boolean; failSave?: boolean } = {})
       useCatalog={select => select(React.useSyncExternalStore(injected.hooks.catalog.subscribe, injected.hooks.catalog.getSnapshot))} />
   }
   await act(async () => { render(<View />) })
-  return { scope, mutate, modelCatalog, listeners, catalog }
+  return { scope, mutate, modelCatalog, listeners, catalog, configured, storeKey, configureRoute }
 }
 
 it('stages a new model, clears incompatible effort, and saves the default atomically', async () => {
@@ -150,7 +176,47 @@ it('ignores stale catalog responses after a newer refresh and reports load failu
   await screen.findByRole('button', { name: 'Model Test provider · First' })
 })
 
-it('renders the default settings explanation and named controls', async () => {
-  await fixture()
-  expect(screen.getByRole('region', { name: 'Default model' }).textContent).toMatchInlineSnapshot('"Default modelUsed for new conversations. Existing conversations keep their model and effort.ModelTest provider · FirstReasoning effortHighSave default"')
+it('keeps independent connections when configuring a second API provider', async () => {
+  const f = await fixture()
+  const row = (name: string) => within(screen.getByText(name, { selector: 'strong' }).parentElement!.parentElement!.parentElement!)
+  expect(row('ChatGPT plan').getByText('Configured')).toBeTruthy()
+  expect(row('DeepSeek API').getByText('Configured')).toBeTruthy()
+  fireEvent.click(row('DeepSeek via Baseten').getByRole('button', { name: 'Connect' }))
+  fireEvent.change(row('DeepSeek via Baseten').getByLabelText('API key'), { target: { value: 'test-only' } })
+  fireEvent.click(row('DeepSeek via Baseten').getByRole('button', { name: 'Save key' }))
+  await waitFor(() => expect(row('DeepSeek via Baseten').getByRole('button', { name: 'Manage' })).toBeTruthy())
+  expect(f.storeKey).toHaveBeenCalledWith('BASETEN_REF', 'test-only')
+  expect([...f.configured]).toEqual(['DIRECT_KEY', 'BASETEN_REF'])
+  expect(f.mutate).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Model Test provider · First' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Baseten model' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save default' }))
+  await screen.findByText('Default saved.')
+  expect(f.scope.getSnapshot().value.provider).toBe('baseten')
+  expect(f.storeKey).toHaveBeenCalledTimes(1)
+  expect(screen.getAllByText('Configured')).toHaveLength(3)
+  expect(screen.getAllByRole('heading').map(heading => heading.textContent)).toMatchInlineSnapshot(`
+    [
+      "Project conversations",
+      "Provider connections",
+      "Live voice",
+    ]
+  `)
+})
+
+it('creates a scoped Baseten route on first connection without changing the default', async () => {
+  const f = await fixture({ freshBaseten: true })
+  const row = within(screen.getByText('DeepSeek via Baseten', { selector: 'strong' }).parentElement!.parentElement!.parentElement!)
+  fireEvent.click(row.getByRole('button', { name: 'Connect' }))
+  fireEvent.change(row.getByLabelText('API key'), { target: { value: 'demo' } })
+  fireEvent.click(row.getByRole('button', { name: 'Save key' }))
+  await waitFor(() => expect(row.getByRole('button', { name: 'Manage' })).toBeTruthy())
+  expect(f.configureRoute).toHaveBeenCalledWith('llm-pi-ai', [{
+    op: 'set', path: ['providers', 'baseten'], value: {
+      displayName: 'DeepSeek via Baseten', apiKeyEnv: 'BASETEN_API_KEY',
+      models: [{ id: 'deepseek-ai/DeepSeek-V4.1-Flash' }, { id: 'deepseek-ai/DeepSeek-V4-Pro' }],
+    },
+  }], 7)
+  expect(f.storeKey).toHaveBeenCalledWith('BASETEN_API_KEY', 'demo')
+  expect(f.mutate).not.toHaveBeenCalled()
 })

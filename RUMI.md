@@ -100,7 +100,7 @@ Launch from Finder. If you launch from inside a DSH shell, unset `ELECTRON_RUN_A
 
 First launch opens Projects without signing in or entering a key. Configure the DeepSeek API key in **Rumi → Settings → Models**; new conversations default to DeepSeek Flash (`deepseek-flash`). Rumi's DeepSeek providers default to `low` reasoning effort, including resumed conversations that inherit the provider default. Keys stay in local credentials and are not included in the installer.
 
-For personal ChatGPT plan usage, open **Settings → Models → Sign in with ChatGPT**, continue in your browser, then select a ChatGPT plan model under **Default model** and save. The picker shows compatible models from your account. Live voice uses its separately billed OpenAI API key. Disconnecting ChatGPT removes the grant from Rumi’s local credential store.
+Under **Settings → Models → Provider connections**, configure ChatGPT plan, DeepSeek API, and DeepSeek via Baseten independently. For ChatGPT, choose **Connect → Sign in with ChatGPT** and continue in your browser. Under **Project conversations**, select a provider and model, then save the default for new conversations. The picker shows compatible models from your account. Live voice uses its separately billed OpenAI API key. Disconnecting ChatGPT removes the grant from Rumi’s local credential store.
 
 ## Moving an earlier install
 

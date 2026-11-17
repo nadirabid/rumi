@@ -91,3 +91,33 @@ export async function forwardWebRequest(request: Request, host: string, cookie: 
   if (PLUGIN_BUNDLE_PATH.test(source.pathname)) outgoing.set('cache-control', 'no-store')
   return new Response(response.body, { status: response.status, headers: outgoing })
 }
+
+/** Cancels renderer reads before update admission drains the Host, while preserving admitted writes. */
+export class DesktopUpdateReadGate {
+  private reads = new AbortController()
+
+  /** Stop long polls and streamed reads; subsequent reads receive a retryable response. */
+  pause(): void { this.reads.abort() }
+
+  /** Admit fresh reads after a cancelled or failed installation. */
+  resume(): void { if (this.reads.signal.aborted) this.reads = new AbortController() }
+
+  /**
+   * Forward a renderer request with update cancellation applied only to reads.
+   * @param request Renderer request; writes retain their original cancellation and must drain in the Host.
+   * @param host Authenticated Host origin.
+   * @param cookie Shell-owned Host cookie.
+   * @returns Streamed response, or 503 when installation interrupts a read. Other failures propagate.
+   */
+  async forward(request: Request, host: string, cookie: string): Promise<Response> {
+    if (request.method !== 'GET' && request.method !== 'HEAD') return forwardWebRequest(request, host, cookie)
+    const signal = this.reads.signal
+    if (signal.aborted) return new Response(null, { status: 503 })
+    try {
+      return await forwardWebRequest(new Request(request, { signal: AbortSignal.any([request.signal, signal]) }), host, cookie)
+    } catch (error) {
+      if (signal.aborted) return new Response(null, { status: 503 })
+      throw error
+    }
+  }
+}

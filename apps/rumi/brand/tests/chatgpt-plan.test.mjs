@@ -2,15 +2,16 @@ import { test as it } from 'node:test'
 import assert from 'node:assert/strict'
 import { apply, Config } from '../chatgpt.js'
 
-function mount(record, settings = {}) {
+function mount(record, settings = {}, selections = new Map()) {
   let adapter
-  let endpoint
+  let endpoint, speed
   return apply({
+    storageDomain: { open: async () => ({ close() {}, table: () => ({ get: key => selections.get(key), put: async (key, value) => selections.set(key, value) }) }) },
     credentials: { readRecord: async () => record, modifyRecord: async (_key, mutate) => mutate(undefined), deleteRecord: async () => { record = undefined } },
     llm: { registerAdapter: (_routes, registered) => { adapter = registered } },
     effect: setup => setup(),
-    connection: { fetch: { register: route => { endpoint = route.fetch } } },
-  }, Config.parse(settings)).then(() => ({ adapter, endpoint }))
+    connection: { fetch: { register: route => { if (route.path.endsWith('/speed')) speed = route.fetch; else endpoint = route.fetch } } },
+  }, Config.parse(settings)).then(() => ({ adapter, endpoint, speed }))
 }
 
 it('keeps a metered environment key out of the disconnected plan route', async () => {
@@ -87,4 +88,36 @@ it('opens a local callback for the Rumi installation and releases it on cancella
   } finally {
     assert.equal((await (await post('cancel')).json()).pending, false)
   }
+})
+
+it('persists a requested tier per conversation and model, including explicit Auto over the Sol default', async () => {
+  const selections = new Map()
+  const record = { kind: 'grant', payload: { token: { type: 'oauth', access: 'fixture', expires: Date.now() + 60000 },
+    models: [{ id: 'gpt-6.2-sol', name: 'Sol', tiers: ['auto', 'priority', 'ultrafast'] },
+      { id: 'gpt-6.1-sol', name: 'Sol 6.1', tiers: ['auto'] }] } }
+  const open = () => mount(record, { solServiceTier: 'ultrafast' }, selections)
+  const session = 'one', model = 'gpt-6.2-sol', path = 'http://localhost/api/rumi-chatgpt/speed'
+  const put = (sessionId, model, tier) => new Request(path, { method: 'POST',
+    headers: { 'x-rumi-settings': '1' }, body: JSON.stringify({ sessionId, model, tier }) })
+  const get = sessionId => new Request(path + '?' + new URLSearchParams({ sessionId, model }))
+  const { speed } = await open()
+  assert.equal((await (await speed(get(session))).json()).requested, 'ultrafast')
+  assert.equal((await speed(put(session, model, 'auto'))).status, 200)
+  const reopened = await open()
+  assert.equal((await (await reopened.speed(get(session))).json()).requested, 'auto')
+  assert.equal((await (await reopened.speed(get('two'))).json()).requested, 'ultrafast')
+  assert.equal((await speed(put(session, 'gpt-6.1-sol', 'priority'))).status, 422)
+  await speed(put(session, model, 'priority'))
+  let payload
+  const original = globalThis.fetch
+  globalThis.fetch = async (url, options) => {
+    payload = await new Request(url, options).json()
+    return Response.json({ error: { message: 'fixture' } }, { status: 403 })
+  }
+  try {
+    for await (const chunk of reopened.adapter.stream({ provider: 'rumi-chatgpt', model, sessionId: session, messages: [] })) {
+      if (chunk.type === 'finish') break
+    }
+  } finally { globalThis.fetch = original }
+  assert.equal(payload.service_tier, 'priority')
 })

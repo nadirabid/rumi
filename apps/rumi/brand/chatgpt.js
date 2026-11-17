@@ -1,17 +1,35 @@
 /** Local ChatGPT plan login and account-scoped Responses models. */
 import { z } from 'zod'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
+import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import { LlmError, resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
 
 /** Processing tier requested for GPT-6.2 Sol on the ChatGPT account route. */
 export const Config = z.object({ solServiceTier: z.enum(['auto', 'ultrafast']).default('auto') })
-export const inject = ['connection', 'credentials', 'llm']
+export const inject = ['connection', 'credentials', 'llm', 'storageDomain']
 const route = 'rumi-chatgpt'
 const account = credentialKey(route, 'account')
 const install = credentialKey(route, 'installation')
+
+const tierSchema = z.enum(['auto', 'priority', 'ultrafast'])
+const speedPreferences = defineDomain({ name: 'rumi_model_speed', version: 1,
+  tables: { selections: domainTable(z.object({ requested: tierSchema })) } })
+const address = z.object({ sessionId: z.string().min(1).max(200), model: z.string().min(1).max(200) })
+
+async function accountCatalog(accessToken, models, signal) {
+  const response = await fetch('https://api.openai.com/v1/models', { signal, redirect: 'error',
+    headers: { Authorization: 'Bearer ' + accessToken } })
+  if (!response.ok) throw new Error('ChatGPT model discovery failed')
+  const catalog = (await response.json()).models.filter(item => item.visibility === 'list' &&
+    (item.slug === 'gpt-6.2-sol' || models.some(m => m.id === item.slug && m.api === 'openai-responses')))
+    .map(item => ({ id: item.slug, name: item.display_name, tiers: ['auto', ...new Set(
+      (item.service_tiers ?? []).map(tier => tier.id).filter(id => id === 'priority' || id === 'ultrafast'))] }))
+  if (!catalog.length) throw new Error('No compatible ChatGPT models')
+  return catalog
+}
 
 /** Mount the provider and its local settings actions. */
 export async function apply(ctx, config) {
@@ -19,6 +37,15 @@ export async function apply(ctx, config) {
   const oauth = native.auth.oauth
   const models = native.getModels()
   const sol = models.find(m => m.id === 'gpt-6.1-sol')
+  const domain = await ctx.storageDomain.open(speedPreferences)
+  ctx.effect(() => () => domain.close())
+  const preferences = domain.table('selections')
+  const keyFor = (sessionId, model) => createHash('sha256').update(JSON.stringify([sessionId, model])).digest('hex')
+  function requested(sessionId, model, tiers) {
+    const saved = sessionId && preferences.get(keyFor(sessionId, model))?.requested
+    const tier = saved || (model === 'gpt-6.2-sol' ? config.solServiceTier : 'auto')
+    return !tiers || tiers.includes(tier) ? tier : 'auto'
+  }
   let attempt
   let failed = false
   let choices = []
@@ -29,7 +56,8 @@ export async function apply(ctx, config) {
     getModels: () => choices,
     streamSimple: (model, context, options) => native.streamSimple({ ...model, provider: 'openai' }, context, {
       ...options, onPayload(payload) {
-        if (model.id === 'gpt-6.2-sol' && config.solServiceTier === 'ultrafast') payload.service_tier = 'ultrafast'
+        const tier = requested(options.sessionId, model.id, choices.find(item => item.id === model.id)?.tiers)
+        if (tier !== 'auto') payload.service_tier = tier
         if (payload.tools?.length) {
           payload.input.unshift({ type: 'additional_tools', role: 'developer', tools: payload.tools })
           delete payload.tools
@@ -58,7 +86,7 @@ export async function apply(ctx, config) {
   function restoreModels(record) {
     choices = record.payload.models.map(item => {
       const template = models.find(m => m.id === item.id) ?? sol
-      return { ...template, provider: route, id: item.id, name: item.name,
+      return { ...template, provider: route, id: item.id, name: item.name, tiers: item.tiers,
         compat: { ...template.compat, supportsToolSearch: false } }
     })
   }
@@ -82,18 +110,45 @@ export async function apply(ctx, config) {
         else prompt.signal.addEventListener('abort', abort, { once: true })
       }) },
     }, { getDeviceId: () => identity.payload.id, agentName: 'Rumi' })
-    const response = await fetch('https://api.openai.com/v1/models', { signal, redirect: 'error', headers: { Authorization: 'Bearer ' + token.access } })
-    if (!response.ok) throw new Error('ChatGPT model discovery failed')
-    const catalog = (await response.json()).models.filter(item => item.visibility === 'list' &&
-      (item.slug === 'gpt-6.2-sol' || models.some(m => m.id === item.slug && m.api === 'openai-responses')))
-      .map(item => ({ id: item.slug, name: item.display_name }))
-    if (!catalog.length) throw new Error('No compatible ChatGPT models')
+    const catalog = await accountCatalog(token.access, models, signal)
     await ctx.credentials.modifyRecord(account, async () => {
       signal.throwIfAborted()
       return { kind: 'grant', payload: { token, models: catalog } }
     })
   }
   ctx.effect(() => () => attempt?.controller.abort())
+  // Earlier grants stored model names only. Refresh their catalog once without a new login.
+  async function tiersFor(model) {
+    let record = await ctx.credentials.readRecord(account)
+    grant(record)
+    if (record.payload.models.some(item => !item.tiers)) {
+      const bearer = await access()
+      const catalog = await accountCatalog(bearer, models, AbortSignal.timeout(15000))
+      record = await ctx.credentials.modifyRecord(account, async current => {
+        if (grant(current).access !== bearer) throw new Error('ChatGPT account changed')
+        return { ...current, payload: { ...current.payload, models: catalog } }
+      })
+      restoreModels(record)
+    }
+    return record.payload.models.find(item => item.id === model)?.tiers
+  }
+  ctx.effect(() => ctx.connection.fetch.register({ path: '/api/rumi-chatgpt/speed', methods: ['GET', 'POST'], requestBody: 'buffered',
+    async fetch(request) {
+      const write = request.method === 'POST'
+      if (write && request.headers.get('x-rumi-settings') !== '1') return new Response(null, { status: 403 })
+      const parsed = write ? address.extend({ tier: tierSchema }).safeParse(await request.json().catch(() => null))
+        : address.safeParse(Object.fromEntries(new URL(request.url).searchParams))
+      if (!parsed.success) return new Response(null, { status: 400 })
+      const { sessionId, model, tier } = parsed.data
+      try {
+        const tiers = await tiersFor(model)
+        if (!tiers || (write && !tiers.includes(tier))) return new Response(null, { status: 422 })
+        if (write) await preferences.put(keyFor(sessionId, model), { requested: tier })
+        return Response.json({ tiers, requested: requested(sessionId, model, tiers) }, { headers: { 'Cache-Control': 'no-store' } })
+      } catch (error) {
+        return new Response(null, { status: error.code === 'MISSING_CREDENTIAL' ? 401 : 503 })
+      }
+    } }))
   ctx.effect(() => ctx.connection.fetch.register({ path: '/api/rumi-chatgpt', methods: ['GET', 'POST'], requestBody: 'buffered',
     async fetch(request) {
       if (request.method === 'POST') {

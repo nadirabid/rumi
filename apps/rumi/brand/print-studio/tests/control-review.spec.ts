@@ -116,3 +116,13 @@ it('blocks surface presentation when new triangle pairs intersect, regardless of
     expect(() => review.present(draft.id, identity)).toThrow('Validate')
   } finally { review.dispose() }
 })
+
+
+it('explains omitted field values and accepts the same controls when zero values are supplied', () => {
+  const review = createControlReview()
+  try {
+    expect(() => review.prepare({ ...input, values: undefined }, identity)).toThrowErrorMatchingSnapshot()
+    expect(review.state()).toBeNull()
+    expect(review.prepare(input, identity).status).toBe('validation_required')
+  } finally { review.dispose() }
+})

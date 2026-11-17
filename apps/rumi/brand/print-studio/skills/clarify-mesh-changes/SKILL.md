@@ -30,3 +30,26 @@ When the person corrects the region, stop work based on the previous region, rep
 When the requested change is clear, follow `mesh-edit-controls` if the person wants to adjust it themselves; prepare a faithful live binding without applying their edit first. For a direct edit, change the model source and inspect the resulting preview and measurements. Clear an obsolete reference with `blobs: []`, using the current model identity and an empty label. Explain changes using the person's feature names rather than coordinates or triangle indices. Only refer to labels or viewer controls that actually exist; do not invent hover labels.
 
 Cursor driven mesh highlighting uses local patch, connected surface, whole part, and boundary edge scopes. A captured `region.selection` identifies the exact part path and geometric surface for this source revision; copy it with `modelLocalBlob` for teal confirmation. Surface boundaries follow creases, material seams, and disconnected pieces, not inferred anatomical names. Short voice phrases such as “whole panel”, “whole part”, “just the edge”, “larger selection”, and “smaller selection” refine the original pointing reference locally. Use the refined attached snapshot; never substitute a later hover. For bilateral changes, inspect the model’s actual symmetry and highlight both intended regions; do not assume its symmetry axis or silently treat one side as both. Selection phrases change presentation only and never authorize an unrelated geometry edit.
+
+## Worked examples
+
+**Clear request, no ambiguity.** "Make the eyes bigger." Region is settled by the model's face; see it, call `viewer_highlight` on both eye regions in one highlight because both are meant, and move on to the edit. Do not ask a question you do not need answered.
+
+**Ambiguous size word.** "Make the eyes bigger." The openings might grow, or the surrounding material might widen. Highlight the openings, describe them as the teal area, and ask one question: "Should the eye openings get larger, or the material around them get wider?" Wait for the reply before computing anything.
+
+**Ambiguous region.** "Make this part rounder", with the cursor over the shoulder. The pointing reference narrows it, but "rounder" has several meanings. Capture with `viewer_cursor_snapshot`, highlight the pointed region, then ask whether they mean the outer contour or the local bulge. One question, not a list.
+
+**Correction.** The person said "the chin", you highlighted the whole jaw, and they say "no, just the chin". Stop work on the jaw region, replace the complete blob list with a smaller chin-only highlight, and confirm the new region in plain words. Keep the change they want in context; the correction concerns the region, not the request.
+
+**Pointing with nothing captured.** The person points and says "this bit's too thin", but the capture returns `no_hit`. Ask them to keep the pointer over the intended surface and retry. Do not guess a region from the words alone, and do not reuse an earlier capture.
+
+**Authoritative but unrelated.** The person says "yes, that's the right spot" and then "now delete the eyes completely". Confirming the region authorized the highlight, not a geometry deletion. Treat the deletion as a new request with its own ambiguity.
+
+## Asking well
+
+Ask about the uncertainty that changes the edit, not about things you can observe.
+
+- Ask: "Wider or taller?" when both are plausible and produce different geometry.
+- Ask: "Which side?" when the model is not symmetric and the request names one feature.
+- Do not ask: "Is this the chin?" when a highlight already shows them the chin.
+- Do not ask: "Should I proceed?" Confirmation of a region is not a confirmation step; follow the person's clear request when it is clear.

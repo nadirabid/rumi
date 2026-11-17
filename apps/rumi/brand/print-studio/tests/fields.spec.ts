@@ -2,6 +2,7 @@
 import { expect, it } from 'vitest'
 import * as THREE from 'three'
 import { execFileSync } from 'node:child_process'
+import { parameterValues, normalizeControls } from '../viewer/analog/control-spec.js'
 import { normalizeShape } from '../viewer/analog/spec.js'
 import { sampleField } from '../viewer/analog/fields.js'
 import { createFieldPreview } from '../viewer/analog/field-preview.js'
@@ -64,4 +65,19 @@ it('freezes the latest released field values and invalidates controls when the s
     expect(source.state().analog).toBeNull()
     expect(() => source.shape({ ...state, ...input })).toThrow('changed')
   } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+
+it.each([null, [], '{"width":0}', 0])('distinguishes malformed values %j from too many parameters', (values) => {
+  expect(() => parameterValues(values)).toThrow('Invalid values: expected an object')
+})
+
+it('reports actual parameter counts, invalid numbers, and missing axis values separately', () => {
+  expect(() => parameterValues(Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`p${i}`, 0])))).toThrow('received 33; at most 32')
+  expect(() => parameterValues({ width: '0' })).toThrow('values.width must be a finite number')
+  expect(() => parameterValues({ width: 1000001 })).toThrow('values.width must be between')
+  expect(() => parameterValues({ 'bad key': 0 })).toThrow('Invalid parameter key')
+  expect(() => normalizeControls(input.controls, {})).toThrow('Missing control value: values.crown')
+  expect(() => normalizeControls([...input.controls, ...input.controls], { crown: 0 })).toThrow('Duplicate control binding: crown')
+  expect(parameterValues({ width: 0, height: 0, standoff: 0, eyes: 0 })).toEqual({ width: 0, height: 0, standoff: 0, eyes: 0 })
 })

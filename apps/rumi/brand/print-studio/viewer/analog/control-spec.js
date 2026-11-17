@@ -3,10 +3,15 @@ const KEY = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
 
 /** Validate numeric model parameters from files or tool input. @param {object} values Parameter dictionary. @returns {object} Independent numeric values. */
 export function parameterValues(values) {
-  if (!values || typeof values !== 'object' || Array.isArray(values) || Object.keys(values).length > 32) throw new Error('Provide at most 32 numeric parameters')
+  if (values === undefined) throw new Error('Missing values object. Provide an initial numeric value for every control axis, for example values: {"width": 0}. For displacement fields, start every value at 0.')
+  if (values === null || typeof values !== 'object' || Array.isArray(values)) throw new Error('Invalid values: expected an object mapping control-axis keys to numbers, for example values: {"width": 0}. Do not pass an array or a JSON string.')
+  const count = Object.keys(values).length
+  if (count > 32) throw new Error(`Too many control values: received ${count}; at most 32 numeric parameters are supported.`)
   const result = {}
   for (const [key, value] of Object.entries(values)) {
-    if (!KEY.test(key) || ['constructor', 'prototype', '__proto__'].includes(key) || !Number.isFinite(value) || Math.abs(value) > 1000000) throw new Error(`Invalid parameter: ${key}`)
+    if (!KEY.test(key) || ['constructor', 'prototype', '__proto__'].includes(key)) throw new Error(`Invalid parameter key: ${key}. Use 1–64 letters, digits, or underscores, starting with a letter; reserved property names are not allowed.`)
+    if (!Number.isFinite(value)) throw new Error(`Invalid parameter: values.${key} must be a finite number, not a string, null, or another value type.`)
+    if (Math.abs(value) > 1000000) throw new Error(`Invalid parameter: values.${key} must be between -1000000 and 1000000; received ${value}.`)
     result[key] = value
   }
   return result
@@ -22,7 +27,9 @@ export function normalizeControls(controls, values) {
     if (!Array.isArray(control.axes) || control.axes.length !== (control.kind === 'pad' ? 2 : 1)) throw new Error('Pads need two axes; sliders and curves need one')
     const axes = control.axes.map(axis => {
       const { key, min, max, step, reset } = axis
-      if (!KEY.test(key) || used.has(key) || !Object.hasOwn(checked, key)) throw new Error(`Missing or duplicate control binding: ${key}`)
+      if (!KEY.test(key)) throw new Error(`Invalid control binding key: ${key}. Use a parameter key from values.`)
+      if (used.has(key)) throw new Error(`Duplicate control binding: ${key}. Bind each parameter to exactly one control axis.`)
+      if (!Object.hasOwn(checked, key)) throw new Error(`Missing control value: values.${key}. Provide its initial numeric value; displacement fields start at 0.`)
       if (![min, max, step, reset].every(Number.isFinite) || min >= max || step <= 0 || step > max - min || reset < min || reset > max || Math.max(Math.abs(min), Math.abs(max)) > 1000000) throw new Error(`Invalid control range: ${key}`)
       if (checked[key] < min || checked[key] > max) throw new Error(`Control value outside range: ${key}`)
       used.add(key)

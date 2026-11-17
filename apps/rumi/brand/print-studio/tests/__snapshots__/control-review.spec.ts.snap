@@ -49,3 +49,5 @@ exports[`blocks surface presentation when new triangle pairs intersect, regardle
   "status": "needs_revision",
 }
 `;
+
+exports[`explains omitted field values and accepts the same controls when zero values are supplied 1`] = `[Error: Missing values object. Provide an initial numeric value for every control axis, for example values: {"width": 0}. For displacement fields, start every value at 0.]`;

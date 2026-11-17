@@ -218,6 +218,45 @@ def publish(model_directory, configure_robot=None, check=True):
     return report
 
 
+def restore_revision(model_directory, revision):
+    """Atomically restore a saved revision's exact USD without rebuilding or modifying its original.
+
+    revision is a direct child directory name under model_directory/revisions. Both the saved
+    .blend and self-contained USD must exist there. Returns their paths for subsequent edits;
+    the current Blender scene is unchanged. Restoration does not grant validation acceptance:
+    load the canonical preview and use the explicit validation tools before claiming readiness.
+    """
+    directory = Path(model_directory).resolve()
+    revisions = directory / 'revisions'
+    if not isinstance(revision, str) or not revision or Path(revision).name != revision or revision in ('.', '..'):
+        raise ValueError('Select one saved revision directory name')
+    saved = revisions / revision
+    if revisions.is_symlink() or saved.is_symlink() or saved.resolve().parent != revisions.resolve():
+        raise ValueError('Revision must be inside this model')
+    usd, blend = saved / 'model.usda', saved / 'model.blend'
+    if any(path.is_symlink() or not path.is_file() for path in (usd, blend)):
+        raise ValueError('Revision requires saved model.usda and model.blend files')
+    if not 10 <= usd.stat().st_size <= 64 * 1024 * 1024:
+        raise ValueError('Saved USD must fit 64 MiB')
+    data = usd.read_bytes()
+    if not data.startswith(b'#usda 1.0') or b'@' in data:
+        raise ValueError('Restore a self-contained ASCII USD layer')
+    stage = Usd.Stage.CreateInMemory()
+    if not stage.GetRootLayer().ImportFromString(data.decode('utf-8')):
+        raise ValueError('Saved USD is invalid')
+    read_robot(stage)
+    temporary = directory / ('.preview-' + uuid.uuid4().hex + '.usda')
+    try:
+        temporary.write_bytes(data)
+        os.replace(temporary, directory / 'model.usda')
+    finally:
+        temporary.unlink(missing_ok=True)
+    report = dict(blend=str(blend), revisionUsd=str(usd), preview=str(directory / 'model.usda'),
+                  printReady=False, validation='pending')
+    print('RUMI_MODEL ' + json.dumps(report))
+    return report
+
+
 def shape_point(point, recipe):
     """Evaluate the analog v1 deformation in model-local millimetres."""
     from mathutils import Vector

@@ -3,7 +3,7 @@ import { ModelSelect } from 'rumi-composer-select'
 import { en, zh } from '../../../../packages/client/ui-model-selection/src/client/locales.ts'
 import { DeepSeekModelLabel } from '../../../../packages/client/ui-deepseek-model-label-1017/src/client/DeepSeekModelLabel.tsx'
 
-export const inject = ['modelDirectories', 'sessions', 'slots', 'locale']
+export const inject = ['modelDirectories', 'sessions', 'slots', 'locale', 'remote', 'remote.session']
 export function apply(ctx) {
   const locale = 'rumi.model-picker'
   ctx.effect(() => ctx.locale.register(locale, {

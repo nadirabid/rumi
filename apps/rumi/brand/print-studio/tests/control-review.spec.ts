@@ -96,3 +96,23 @@ it('keeps failed, timed-out, and rejected reviews unavailable for presentation',
     expect(() => review.present(draft.id, identity)).toThrow('Validate')
   } finally { review.dispose(); vi.useRealTimers() }
 })
+
+it('blocks surface presentation when new triangle pairs intersect, regardless of agent assessment', () => {
+  const review = createControlReview()
+  const draft = review.prepare({ operation: 'surface', label: 'Profile', parts: ['Shell'],
+    form: { kind: 'profile', at: [0, .5, 1], pinned: [0, 2] }, values: { p1: 0 },
+    controls: [{ kind: 'slider', label: 'Height', axes: [{ key: 'p1', min: -12, max: 12, step: 1, reset: 0 }] }],
+    expectations: [{ key: 'p1', effect: 'Raise crown', preserve: 'Keep wall intact' }],
+  }, identity)
+  try {
+    expect(() => review.validate(draft.id, new AbortController().signal, 100)).toThrow('host geometry')
+    const findings = review.geometryRequest(draft.id)!.cases.map((item: { id: string }) => ({ id: item.id,
+      baselineIntersectionPairs: 52, intersectionPairs: 52, newIntersectionPairs: 1 }))
+    const rejected = review.geometry(draft.id, findings)
+    expect(rejected.status).toBe('needs_revision')
+    expect({ ...rejected, id: '<prepared-controls>' }).toMatchSnapshot()
+    expect(() => review.validate(draft.id, new AbortController().signal, 100)).toThrow('host geometry')
+    expect(() => review.review(draft.id, 'invented', [{ key: 'p1', decision: 'accept', observation: 'Near an existing defect' }], combined)).toThrow('Generate')
+    expect(() => review.present(draft.id, identity)).toThrow('Validate')
+  } finally { review.dispose() }
+})

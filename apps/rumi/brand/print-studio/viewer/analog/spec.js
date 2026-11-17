@@ -31,6 +31,7 @@ export function normalizeShape(value) {
     if (finish === 'blender' && (typeof value.original !== 'string' || !value.original.trim() || typeof value.edit !== 'string' || !value.edit.trim() || value.edit.length > 4000)) throw new Error('Blender previews require the preserved original path and an edit recipe')
     return { version: 2, operation: 'parameters', label: value.label.trim(), controls, values, finish, ...(finish === 'blender' ? { original: value.original, originalHash: value.originalHash, edit: value.edit.trim() } : {}) }
   }
+  if (value.operation === 'surface') return normalizeSurface(value)
   const vector = (key, positive = false) => {
     const v = value[key]
     if (!Array.isArray(v) || v.length !== 3 || v.some(n => !Number.isFinite(n) || Math.abs(n) > 100000 || (positive && n < 0.01))) throw new Error(`Invalid ${key}`)
@@ -83,4 +84,87 @@ export function cutPlane(spec) {
   for (let i = 0; i < 3; i++) normal[i] /= length
   const point = spec.center.map((value, i) => value + n[i] * (spec.values.amount * 2 - 1) * spec.limit)
   return { normal, point, constant: -normal.reduce((sum, value, i) => sum + value * point[i], 0) }
+}
+
+/** Axes each surface form requires, so controls always bind a real parameter. */
+const SURFACE_AXES = { profile: ['amount'], ring: ['amount'], facet: ['amount'], channel: ['depth'] }
+const SURFACE_KINDS = Object.keys(SURFACE_AXES)
+
+/**
+ * Validate a deformation stated in the part's own cylindrical coordinates.
+ * @param {object} value Untrusted recipe from the tool call.
+ * @returns {object} Canonical surface recipe.
+ */
+function normalizeSurface(value) {
+  if (typeof value.label !== 'string' || !value.label.trim() || value.label.length > 160) throw new Error('Give the region a short label')
+  if (!Array.isArray(value.parts) || !value.parts.length || value.parts.length > 16
+    || value.parts.some(part => typeof part !== 'string' || !part || part.length > 200) || new Set(value.parts).size !== value.parts.length) {
+    throw new Error('Surface deformation needs exact, distinct mesh names')
+  }
+  const uAt = value.uAt === undefined ? -90 : value.uAt
+  if (!Number.isFinite(uAt) || Math.abs(uAt) > 360) throw new Error('The front meridian must be an angle in degrees')
+  const form = value.form
+  if (!form || typeof form !== 'object' || !SURFACE_KINDS.includes(form.kind)) throw new Error('Choose a surface form: profile, ring, channel or facet')
+  const number = (source, name, min, max) => {
+    const raw = source[name]
+    if (!Number.isFinite(raw) || raw < min || raw > max) throw new Error(`Surface ${name} must be between ${min} and ${max}`)
+    return raw
+  }
+  const span = source => {
+    const from = number(source, 'from', 0, 1), to = number(source, 'to', 0, 1)
+    if (!(to > from)) throw new Error('Surface bands need from below to')
+    return { from, to }
+  }
+  const lateral = form.lateral === undefined ? 1 : number(form, 'lateral', 1, 8)
+  const edge = form.edge === undefined ? .08 : number(form, 'edge', .01, .5)
+  let normalized
+  if (form.kind === 'profile') {
+    const at = form.at
+    if (!Array.isArray(at) || at.length < 2 || at.length > 8) throw new Error('A surface profile needs form.at with 2–8 rising knot positions')
+    let previous = -1
+    for (const position of at) {
+      if (!Number.isFinite(position) || position < 0 || position > 1 || position <= previous) throw new Error('Surface form.at knot positions must rise within 0..1')
+      previous = position
+    }
+    const pinned = form.pinned ?? []
+    if (!Array.isArray(pinned) || pinned.some(i => !Number.isInteger(i) || i < 0 || i >= at.length) || new Set(pinned).size !== pinned.length || pinned.length === at.length) throw new Error('Pinned profile stations must be distinct indices and leave an adjustable station')
+    const links = form.links ?? {}
+    if (!links || typeof links !== 'object' || Array.isArray(links) || Object.entries(links).some(([i, target]) => !/^[0-7]$/.test(i) || Number(i) >= at.length || !Number.isInteger(target) || target < 0 || target >= Number(i) || pinned.includes(Number(i)) || pinned.includes(target) || Object.hasOwn(links, target))) throw new Error('Profile links must reference an earlier unpinned, unlinked station')
+    const directions = form.directions ?? at.map(t => [-Math.sin((t - .5) * 2 * Math.PI), Math.cos((t - .5) * 2 * Math.PI)])
+    if (!Array.isArray(directions) || directions.length !== at.length || directions.some(d => !Array.isArray(d) || d.length !== 2 || d.some(n => !Number.isFinite(n)) || Math.abs(Math.hypot(...d) - 1) > 1e-6)) throw new Error('Profile directions need one unit [front, up] vector per station')
+    normalized = { kind: 'profile', lateral, at: [...at], pinned: [...pinned], links: { ...links }, directions: directions.map(d => [...d]) }
+  } else if (form.kind === 'ring') {
+    normalized = { kind: 'ring', lateral, ...span(form), millimetres: number(form, 'millimetres', -500, 500), edge }
+  } else if (form.kind === 'channel') {
+    if (!Array.isArray(form.at) || !form.at.length || form.at.length > 4 || form.at.some(at => !Number.isFinite(at) || Math.abs(at) > 180)) {
+      throw new Error('A channel needs 1–4 meridian angles within ±180')
+    }
+    normalized = { kind: 'channel', lateral, ...span(form), at: [...form.at], widthMillimetres: number(form, 'widthMillimetres', .5, 400), edge }
+  } else {
+    if (!Array.isArray(form.planes) || !form.planes.length || form.planes.length > 12) throw new Error('Facet needs 1–12 target planes')
+    const planes = form.planes.map(plane => {
+      if (!Array.isArray(plane?.normal) || plane.normal.length !== 3 || plane.normal.some(n => !Number.isFinite(n))) throw new Error('Facet plane needs a finite normal')
+      const length = Math.hypot(...plane.normal)
+      if (Math.abs(length - 1) > 1e-6) throw new Error('Facet plane normal must have unit length')
+      return { normal: [...plane.normal], offset: number(plane, 'offset', -100000, 100000) }
+    })
+    for (let i = 0; i < planes.length; i++) for (const other of planes.slice(i + 1)) {
+      const plane = planes[i], dot = plane.normal.reduce((sum, n, j) => sum + n * other.normal[j], 0)
+      if (Math.abs(dot) > 1e-6 && Math.abs(dot + 1) > 1e-6) throw new Error('Facet planes must be opposing or perpendicular; use separate edits for other planes')
+      if (dot < -.999999 && plane.offset + other.offset <= 2 * (form.wallThickness ?? 0)) throw new Error('Opposing facet planes leave no room for the shell')
+    }
+    normalized = { kind: 'facet', ...span(form), planes, edge, ...(form.wallThickness === undefined ? {} : { wallThickness: number(form, 'wallThickness', .1, 100) }) }
+  }
+  const required = normalized.kind === 'profile' ? normalized.at.flatMap((_position, index) => normalized.pinned.includes(index) || Object.hasOwn(normalized.links, index) ? [] : [`p${index}`]) : SURFACE_AXES[normalized.kind]
+  const values = parameterValues(value.values ?? {})
+  if (Object.keys(values).sort().join() !== [...required].sort().join()) throw new Error(`Surface ${normalized.kind} binds exactly: ${required.join(', ')}`)
+  const controls = normalizeControls(value.controls, values)
+  const axes = controls.flatMap(control => control.axes)
+  if (axes.length !== required.length) throw new Error('Every surface parameter needs a control')
+  for (const axis of axes) {
+    if (!required.includes(axis.key)) throw new Error(`Unknown surface axis: ${axis.key}`)
+    if (Math.max(Math.abs(axis.min), Math.abs(axis.max)) > 1000 || axis.reset !== 0) throw new Error('Surface ranges must stay within ±1000 and reset to zero')
+  }
+  if (normalized.kind === 'facet' && (values.amount < 0 || values.amount > 1 || controls.some(control => control.axes.some(axis => axis.min < 0 || axis.max > 1)))) throw new Error('Facet amount and its control range must stay within 0..1')
+  return { version: 1, operation: 'surface', label: value.label.trim(), parts: [...value.parts], uAt, form: normalized, values, controls }
 }

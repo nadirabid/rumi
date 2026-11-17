@@ -3,12 +3,20 @@ import * as THREE from 'three'
 import { parseUsdModel } from '../viewport/usd.js'
 import { disposeModel } from '../viewport/model.js'
 import { createFieldPreview } from './field-preview.js'
+import { createSurfacePreview } from './surface.js'
 import { createShapeDeformer } from './gpu.js'
 import { measureControlCase } from './evidence.js'
 
 const SIZE = 300
 const HEAT_MM = 20
 const VIEWS = [[0, -1, .12], [1, 0, .12], [.7, 1, .4]]
+
+/** Choose the preview adapter that owns the recipe. @param {object} root Saved model. @param {object} spec Validated recipe. @returns {object} Preview with update and dispose. */
+export function createSpecPreview(root, spec) {
+  if (spec.operation === 'fields') return createFieldPreview(root, spec)
+  if (spec.operation === 'surface') return createSurfacePreview(root, spec)
+  return createShapeDeformer(root, spec)
+}
 
 /** Render comparisons using the viewer adapters. @param {ArrayBuffer} bytes Saved USD. @param {object} request Source-bound cases. @param {AbortSignal} signal Cancellation. @returns {Promise<object>} Neutral check, measurements, and PNG comparisons. */
 export async function renderControlEvidence(bytes, request, signal) {
@@ -49,7 +57,7 @@ export async function renderControlEvidence(bytes, request, signal) {
       let preview
       try {
         if (!original) {
-          preview = request.spec.operation === 'fields' ? createFieldPreview(model.root, request.spec) : createShapeDeformer(model.root, request.spec)
+          preview = createSpecPreview(model.root, request.spec)
           preview.setGuideVisible?.(false); preview.update(values)
         }
         drawColumn(column)

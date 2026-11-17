@@ -39,7 +39,7 @@ import { claimDesktopSingleInstance } from './single-instance.ts'
 import { desktopUpdateChannel } from './update-channel.ts'
 import { DesktopUpdateCoordinator } from './update-coordinator.ts'
 import { DesktopCommandManager } from './command-management.ts'
-import { serveWebDocument, authenticateWebHost, forwardWebRequest } from './web-document.ts'
+import { serveWebDocument, authenticateWebHost, DesktopUpdateReadGate } from './web-document.ts'
 import { DesktopFatalRecovery } from './fatal-recovery.ts'
 import { pruneCrashReports, RendererConsoleTail, writeCrashReport, type CrashReportSource } from './crash-report.ts'
 import { openWelcomeWindow } from './welcome-window.ts'
@@ -410,6 +410,7 @@ async function main(): Promise<void> {
   const applicationUrl = `${SCHEME}://app/`
   let hostUrl: string | undefined
   let hostCookie: string | undefined
+  const updateReads = new DesktopUpdateReadGate()
   const browserGuests = new DesktopBrowserGuests(() => hostUrl)
   let injections: readonly unknown[] = []
   let welcomeBackend: DesktopWelcomeBackend | undefined
@@ -546,6 +547,7 @@ async function main(): Promise<void> {
     }
     if (state.phase === 'error' && state.failedOperation !== 'check') {
       const restoreHost = state.failedOperation === 'install' && updateStoppedHost && !quitting
+      if (state.failedOperation === 'install') updateReads.resume()
       shellInstallerOwnsQuit = false
       updateStoppedHost = false
       if (restoreHost) {
@@ -628,6 +630,8 @@ async function main(): Promise<void> {
       await track('desktop_upgrade_install_restart_click', {})
       if (backend.host !== host) throw new DesktopUpdatePreparationError('tasks-unavailable', locale.messages.updateTasksUnavailable)
       try {
+        // Viewer long polls can outlive the Host's admission deadline; writes still drain under its lock.
+        updateReads.pause()
         const stillActive = await host.updateTasks('lock')
         if (stillActive && !active) throw new DesktopUpdatePreparationError('tasks-changed', locale.messages.updateTasksChanged)
         mandatoryUI?.preparingRestart(stillActive)
@@ -689,7 +693,7 @@ async function main(): Promise<void> {
       if (backend.host === undefined || hostUrl === undefined || hostCookie === undefined) {
         return Promise.resolve(new Response(null, { status: 503 }))
       }
-      return forwardWebRequest(request, hostUrl, hostCookie)
+      return updateReads.forward(request, hostUrl, hostCookie)
     }
     return Promise.resolve(new Response(null, { status: 404 }))
   })
@@ -748,7 +752,7 @@ async function main(): Promise<void> {
     try { event.returnValue = platformView.bootstrap(event) }
     catch { event.returnValue = null }
   })
-  ipcMain.handle('rumi:bambu:login', (event) => openBambuLogin(assertMainApplication(event),
+  ipcMain.handle('rumi:bambu:login', event => openBambuLogin(assertMainApplication(event),
     fileURLToPath(new URL('./preload-bambu.cjs', import.meta.url))))
   ipcMain.handle(PLATFORM_IPC.open, (event, page: unknown, bounds: unknown) => {
     const owner = assertMainApplication(event)

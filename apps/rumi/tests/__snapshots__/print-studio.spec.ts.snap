@@ -1,8 +1,58 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`blocks surface presentation when new triangle pairs intersect, regardless of agent assessment 1`] = `
+{
+  "assessments": null,
+  "evidenceId": null,
+  "expectations": [
+    {
+      "effect": "Raise crown",
+      "key": "p1",
+      "preserve": "Keep wall intact",
+    },
+  ],
+  "geometry": [
+    {
+      "baselineIntersectionPairs": 52,
+      "id": "p1:min",
+      "intersectionPairs": 52,
+      "newIntersectionPairs": 1,
+    },
+    {
+      "baselineIntersectionPairs": 52,
+      "id": "p1:max",
+      "intersectionPairs": 52,
+      "newIntersectionPairs": 1,
+    },
+    {
+      "baselineIntersectionPairs": 52,
+      "id": "combined:min",
+      "intersectionPairs": 52,
+      "newIntersectionPairs": 1,
+    },
+    {
+      "baselineIntersectionPairs": 52,
+      "id": "combined:max",
+      "intersectionPairs": 52,
+      "newIntersectionPairs": 1,
+    },
+  ],
+  "id": "<prepared-controls>",
+  "identity": {
+    "contentHash": "one",
+    "path": "/project/model.usda",
+    "revision": 1,
+    "url": "/source/one",
+  },
+  "next": "Revise the controls, then prepare and validate again.",
+  "report": null,
+  "status": "needs_revision",
+}
+`;
+
 exports[`documents creating multiple models and bringing a named entry into view 1`] = `
 {
-  "analog": "Open temporary edit sliders, pads, or curves after reading mesh-edit-controls and designing bindings from the requested geometric variation and preserved features. Generate model-specific fields when a built-in operation is unsuitable; prepared presets are not required. For persistent doors and wheels, use USD assembly joints; read mesh-edit-controls. Movement controls remain at the bottom-right independently of edits. Supply labeled controls and initial values for the selected operation. Read analog-shaping for geometry and Blender save rules. Executable JavaScript parameter previews are disabled by project isolation. Keep controls open while the person explores; freeze the latest values before applying and publishing the edit in Blender.",
+  "analog": "Prepare, validate, review, and present temporary mesh edit controls. prepare (or open) stages controls without showing them and requires an expected effect and preserved features for every axis. validate generates actual-mesh before/after and displacement-overlay images for endpoints and combinations. Inspect every image, then review each axis and combined effects using the evidenceId; accept only useful, well-behaved edits, otherwise revise and prepare again. present requires accepted current evidence. Changes to the model, fields, parts or ranges require new validation. Pending work is reminded in context. Freeze the latest visible values before saving in Blender; close cancels. Read mesh-edit-controls for intent and quality guidance. Persistent joint controls are authored in USD, independently of this workflow.",
   "blender": "---
 name: blender-modeling
 description: Create, import, or edit Rumi meshes using background Blender Python scripts, then inspect and iterate in the Three.js viewer. Use for model creation and geometry edits.
@@ -149,6 +199,29 @@ When the person corrects the region, stop work based on the previous region, rep
 When the requested change is clear, follow \`mesh-edit-controls\` if the person wants to adjust it themselves; prepare a faithful live binding without applying their edit first. For a direct edit, change the model source and inspect the resulting preview and measurements. Clear an obsolete reference with \`blobs: []\`, using the current model identity and an empty label. Explain changes using the person's feature names rather than coordinates or triangle indices. Only refer to labels or viewer controls that actually exist; do not invent hover labels.
 
 Cursor driven mesh highlighting uses local patch, connected surface, whole part, and boundary edge scopes. A captured \`region.selection\` identifies the exact part path and geometric surface for this source revision; copy it with \`modelLocalBlob\` for teal confirmation. Surface boundaries follow creases, material seams, and disconnected pieces, not inferred anatomical names. Short voice phrases such as “whole panel”, “whole part”, “just the edge”, “larger selection”, and “smaller selection” refine the original pointing reference locally. Use the refined attached snapshot; never substitute a later hover. For bilateral changes, inspect the model’s actual symmetry and highlight both intended regions; do not assume its symmetry axis or silently treat one side as both. Selection phrases change presentation only and never authorize an unrelated geometry edit.
+
+## Worked examples
+
+**Clear request, no ambiguity.** "Make the eyes bigger." Region is settled by the model's face; see it, call \`viewer_highlight\` on both eye regions in one highlight because both are meant, and move on to the edit. Do not ask a question you do not need answered.
+
+**Ambiguous size word.** "Make the eyes bigger." The openings might grow, or the surrounding material might widen. Highlight the openings, describe them as the teal area, and ask one question: "Should the eye openings get larger, or the material around them get wider?" Wait for the reply before computing anything.
+
+**Ambiguous region.** "Make this part rounder", with the cursor over the shoulder. The pointing reference narrows it, but "rounder" has several meanings. Capture with \`viewer_cursor_snapshot\`, highlight the pointed region, then ask whether they mean the outer contour or the local bulge. One question, not a list.
+
+**Correction.** The person said "the chin", you highlighted the whole jaw, and they say "no, just the chin". Stop work on the jaw region, replace the complete blob list with a smaller chin-only highlight, and confirm the new region in plain words. Keep the change they want in context; the correction concerns the region, not the request.
+
+**Pointing with nothing captured.** The person points and says "this bit's too thin", but the capture returns \`no_hit\`. Ask them to keep the pointer over the intended surface and retry. Do not guess a region from the words alone, and do not reuse an earlier capture.
+
+**Authoritative but unrelated.** The person says "yes, that's the right spot" and then "now delete the eyes completely". Confirming the region authorized the highlight, not a geometry deletion. Treat the deletion as a new request with its own ambiguity.
+
+## Asking well
+
+Ask about the uncertainty that changes the edit, not about things you can observe.
+
+- Ask: "Wider or taller?" when both are plausible and produce different geometry.
+- Ask: "Which side?" when the model is not symmetric and the request names one feature.
+- Do not ask: "Is this the chin?" when a highlight already shows them the chin.
+- Do not ask: "Should I proceed?" Confirmation of a region is not a confirmation step; follow the person's clear request when it is clear.
 ",
   "cursor": "Ask the open 3D viewer to capture the current cursor Gaussian region and a PNG of the current view. Cursor mesh vision is blue; agent viewer_highlight regions are teal. Captures when the viewer services this request, not when the person last spoke. Prefer an attached cursor-at-start-of-spoken-request reference for that utterance. Returns a revision-specific region.selection (surface/part/edge scope) and anchorId; copy selection together with modelLocalBlob into viewer_highlight to confirm the exact area. Returns the pointed object/part, world-space point and radius in millimetres, model identity, camera and capture time. Editable-model hits include modelLocalBlob ready for viewer_highlight with identity.design path/revision/url. Read the image and region before highlighting or editing. no_hit means no active cursor intersection; viewer_unavailable means no response from an open viewer. Never substitute an earlier hover or treat a soft region as an exact edit mask.",
   "fdm": "---
@@ -171,6 +244,43 @@ Use \`printer-awareness\` to obtain the selected printer, nozzle and material fa
 5. **Preserve printable features.** Size walls, posts, holes, gaps, and text for the selected nozzle, layer height, material, and wall generator. Thin features may disappear or widen during slicing. No fixed wall thickness, bridge length, or overhang angle applies to every configuration.
 6. **Allow intended fits and motion.** Mating and moving parts need clearance or interference appropriate to the intended fit, material, orientation, and calibrated process. Do not assume nominally identical dimensions will fit. Keep at least 0.3 mm between separate moving parts; tighter fits fuse or bind. Use a small fit test when the result matters and calibration is unavailable.
 7. **Design for intended use.** For functional parts, choose material, section thickness, connections, and orientation for expected loads and temperature exposure. Layer-dependent strength, shrinkage, and warping matter; successful slicing does not establish strength or dimensional accuracy.
+
+## Sequence the work
+
+Constraints only help when they arrive before the geometry is fixed. Work in this order.
+
+1. **Get printer facts.** Read [printer-awareness](../printer-awareness/SKILL.md) for the selected model, nozzle diameter, single or dual mode, build volume and excluded areas. Without a selected printer, continue a visual draft and leave fit, feature size and clearance unverified rather than guessing defaults.
+2. **Inspect the geometry you have.** Read the current \`meshState\` and the model's source. Record overall dimensions, the thinnest walls and posts, hole diameters, gap sizes, and which parts must move or stay separate. These numbers decide every constraint below; do not assess them from the render alone.
+3. **Choose an orientation.** Pick the resting face for the first layer, then check what the choice costs: supported area, bridge spans, layer direction against expected load, and whether surface finish matters on the face touching the bed. Orientation is a design decision made now, not a slicer setting fixed later.
+4. **Apply the constraints that the facts and the geometry disagree on.** Each numbered constraint above names a decision. When a requested design cannot meet one, say which and why, and offer the smallest change that resolves it before building.
+5. **Validate before claiming readiness.** Run the model checks described in [blender-modeling](../blender-modeling/SKILL.md#validate-a-finished-revision), then slice and inspect the preview for unsupported regions, thin walls and layer time. Report what was checked and what remains unverified.
+
+## Worked examples
+
+**A wheel that must spin.** The person asks for a cart with four turning wheels on a 0.4 mm nozzle. Constraint 6 sets 0.3 mm between the wheel bore and the axle, and constraint 3 means the axle is a separate part rather than a fused lump. Orientation puts the wheel disc flat on the bed so the bore is round, not ovalised by layer stair-stepping. The joint kit in [joints](../joints/SKILL.md) already carries these clearances; read it before hand-modelling the axle.
+
+**A bracket that must hold.** The person asks for a shelf bracket "as thin as possible". Constraint 7 makes the load the deciding fact, not the render. Lay it so layer lines run along the bending span, since a part loaded across layer boundaries splits sooner. State the assumption you used for load and offer a thicker section if it is heavy.
+
+**Text on a lid.** The person asks for their name embossed on a lid in the same colour. Constraint 5 makes the stroke width the question: letters narrower than about two extrusion widths on the selected nozzle may vanish or blur. Either raise the text to a relief height that survives, or widen the strokes, and say which you did.
+
+**A part that will not fit the bed.** The person asks for a 300 mm rail on a 256 mm bed. Constraint 2 rules out printing it as one piece. Offer splitting into parts with a connection that constraint 3 can justify — a dovetail or a pinned joint, not a butt seam — or a different orientation if the diagonal fits. Do not scale it down without being asked.
+
+## When a constraint cannot be met
+
+These are the recurring failures with their causes and the action to take.
+
+| Symptom | Cause | What to do |
+|---|---|---|
+| Slicer reports open or nonmanifold edges | Geometry was not a closed solid, or booleans left stray faces | Repair the source geometry and re-check; do not accept slicer auto-repair as proof |
+| Thin wall or post vanishes in the preview | Feature thinner than the nozzle can deposit | Thicken to at least two extrusion widths, or remove the feature and say so |
+| Small hole closes up | Hole smaller than the nozzle, or bridging across the top | Enlarge the hole, or model it as a teardrop and drill after printing |
+| Moving part fuses or binds | Clearance below the calibrated process tolerance | Raise clearance to 0.3 mm or more, re-check, and consider a fit test coupon |
+| Part warps or lifts at a corner | Large flat area, sharp corner, or uneven cooling | Add a brim, round the corner, or reconsider material; report that the cause is process, not geometry |
+| Two parts meant to be one separate | Only touching at a point or edge | Add a real overlap, a connector, or an explicit assembly joint |
+| Long unsupported span droops | Bridge span beyond the material's feasible length | Reorient, add supports, or split the span with a rib |
+| Model will not validate after a change | A boolean left intersecting triangles or a degenerate face | Rerun the operation with cleaned inputs, or repair the affected region; a new defect is not excused by an older one |
+
+Report a constraint you could not satisfy, and why, rather than silently certifying the result. A model that slices is not a model that fits, holds or prints.
 ",
   "highlight": "Replace temporary Gaussian wireframe regions on the editable model loaded by viewer_load. Read displayedDesign in the current meshState context (design when validation is unavailable) for the visible path, revision and url; inspect model source to locate regions. Coordinates are model-local millimetres before viewer_transform, including part transforms. Rotation uses XYZ Euler degrees. Up to eight ellipsoids combine by maximum influence, with a fixed soft fade. All intersected surfaces, including the back, may be highlighted. Empty blobs clears. Does not edit geometry or exports. Waits for the visible viewer to acknowledge the matching highlight. Returns rendered only after acknowledgment; not_rendered or superseded is not success. Rendering is not user confirmation. Use this tool to visually ground region-specific edits and explanations of named parts. Follow the user’s requested action and clarify ambiguous intent; no special confirmation phrase is required. Use clarify-mesh-changes for guidance.",
   "instructions": "### Project type
@@ -231,6 +341,20 @@ The renderer’s axes have \`key\`, \`min\`, \`max\`, \`step\`, and \`reset\`. V
 Mesh-edit tools receive these axes directly. USD movement declarations instead reference joints; the viewer derives keys, limits, and reset values from those joints. Follow the relevant skill for the declaration format, delivery feedback, and save behavior.
 
 Controls support keyboard input and per-control reset. Verify that each axis changes the intended feature and that reset restores its starting state. A rendered acknowledgment confirms delivery, not the quality of the interaction.
+
+## Worked examples
+
+**One value.** "Can I make the snout stick out more?" A single \`slider\` labelled "Snout length", one axis \`{key: 'amount', min: 0, max: 1, step: 0.01, reset: 0.5}\`. Amount .5 is the current shape for built-in deformations, so the person starts from what they already see.
+
+**Two directions that belong together.** "I want to move the ears out and up." A \`pad\`, first axis horizontal for outward, second vertical for upward, both starting at .5 with equal ranges. Do not offer two sliders when the gesture is one spatial movement; the pad expresses the relationship.
+
+**A shape over a range.** "Let me tune the curve of the back." A \`curve\` per adjustable station, each with its own label naming the station's position ("Back — upper", "Back — middle") rather than "Station 1". The curve handle adjusts one value; it does not expose movement points.
+
+**A request the widget cannot keep.** "Let me type the exact millimetre value." A slider does not accept numeric entry. Say so and offer the closest thing: a fine step on the slider, or a direct source edit for an exact dimension. Do not label a slider with millimetres it cannot promise.
+
+**Too many controls.** A request implies eight independent values across four panels. A panel supports 1–12 controls, but the person cannot reason about twelve at once. Choose the four that match how they described the change, and say which other values you fixed and at what value.
+
+**Bind each value once.** If two controls would both drive the same underlying axis, bind it to one and give the other a different quantity, or drop it. Two controls on one value fight each other and make the preview unpredictable.
 ",
   "joints": "---
 name: joints
@@ -337,7 +461,7 @@ Mechanics column: **passes** means the recipe's sample passed \`validation_mecha
 
 Read the card before the first use of a recipe. Each family's file under \`references/\` beside this skill gives every recipe's call, what the parts must provide, the options worth changing, how it prints, and what validation reported. A recipe sample passing motion probes does not establish separate assembly feasibility.
 ",
-  "load": "Select a Blender-exported USD in the Three.js viewer. Use models/<name>/model.usda; the viewer discovers these entries and reloads completed exports automatically. USD uses metres and Z up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Executable .js/.mjs previews are disabled by project isolation; export USD instead. Saved models display immediately; use validation_mechanics then validation_accept before claiming acceptance. Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.",
+  "load": "Select a Blender-exported USD in the Three.js viewer. Use models/<name>/model.usda; the viewer discovers these entries and reloads completed exports automatically. USD uses metres and Z up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Executable .js/.mjs previews are disabled by project isolation; export USD instead. Reloading identical source bytes preserves staged controls and their review while requesting fresh renderer feedback. Changed source bytes invalidate them. Saved models display immediately; use validation_mechanics then validation_accept before claiming acceptance. Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.",
   "meshEdits": "---
 name: mesh-edit-controls
 description: Turn a request to adjust a mesh into useful live controls. Choose the editable features, construct their deformations, verify the preview, and save or cancel the edit.
@@ -358,18 +482,19 @@ Choose a small set of useful adjustments. For each, define its geometric effect,
 ## Implement the adjustments
 
 - Use a built-in operation only when its actual deformation matches the intended edit. Read [analog-shaping](../analog-shaping/SKILL.md) for bindings and regions.
-- For custom variations that preserve mesh connectivity, author [displacement fields](references/fields.md). Derive the mapping from the current construction, measured profile, or cross-sections. Evaluate source parameter changes on temporary copies when useful. Keep the generator in the project so it can be revised.
+- Use \`surface\` for a continuous side-view profile, radial band, groove, or planar patch when its geometry matches the request. Place profile stations from measured sections, choose the front direction, and pin stations around protected interfaces at zero travel rather than exposing those stations as controls. Link adjacent stations with the same displacement direction when a feature must move without changing its internal shape. Check crown continuity and the lower rim; a radial ring edit is not a whole-profile edit. Facets use target planes, not a smoother bulge. For an oriented hollow shell, supply the measured wall thickness so inner and outer faces target separate planes; avoid rim edges and verify the transition. Do not add a seated part to the edit merely to claim its fit is preserved.
+- For other custom variations that preserve mesh connectivity, author [displacement fields](references/fields.md). Derive the mapping from the current construction, measured profile, or cross-sections. Evaluate source parameter changes on temporary copies when useful. Keep the generator in the project so it can be revised.
 - New holes, count changes, and other unsupported live reconstruction need a specific explanation and an agreed alternative. Do not silently replace requested controls with static variants or a completed edit.
 
 Check existing field files against the current revision and request before reusing them. Preserve the editable Blender original. Executable JavaScript previews and \`operation: parameters\` are unavailable.
 
 ## Verify and present
 
-Test the actual sampled deformation on temporary copies: neutral, each axis’s extremes, and useful or large-displacement combinations. For fields, use the Blender helper’s sibling \`fields.py\`. Compare the requested profile or dimensions and protected features with the original. Check continuity, pinching, intersections, separation, and both sides of shells. Neutral must reproduce the current geometry. Do not publish changes merely to test controls.
+State the expected geometric effect and preserved features for each axis. Prepare the controls through \`viewer_controls\`; preparation stages them without changing the person's preview. Validate the prepared controls to generate actual-mesh endpoint and combination comparisons. Inspect every before/after image, displacement overlay, and measurement against the expected effects. Check useful movement, direction, continuity, pinching, intersections, part fit, and both sides of shells. Measure planarity for flat-face requests and wall thickness for shell edits; displacement magnitude alone does not establish either. An inverted or collapsed triangle fails surface validation: reduce the range, protect the affected region, or repair the source, then validate again. Compare defects against the saved mesh. New intersecting triangle pairs fail even beside an existing defect; a lower total count does not excuse new pairs. Check wall thickness against the project’s minimum, not an invented threshold. If preserving a defective region requires it, move that region rigidly or keep it fixed. Repairing the saved source is a separate edit. A completed render is evidence, not a quality pass.
 
-Every axis must change its intended feature in the stated direction. Revise ineffective, redundant, or disruptive bindings. Narrow the range or explain approximations where the deformation cannot reproduce the intended construction faithfully.
+Record an assessment for each axis and the combinations. Revise ineffective, redundant, or disruptive bindings, then prepare and validate again. Present controls only after accepting the current evidence. The tool tracks pending work and invalidates evidence when the model or bindings change; do not substitute formula samples or self-authored tests for its comparisons.
 
-Read [interactive-controls](../interactive-controls/SKILL.md) to choose widgets and labels. Call \`viewer_controls\` with explicit \`controls\`, \`values\`, and the current model’s exact \`path\`, \`revision\`, and \`url\`. Field values start at zero. For built-in deformations, amount .5 leaves the geometry unchanged; choose the other starting values as described in \`analog-shaping\`. Briefly explain what changes and what stays fixed.
+Read [interactive-controls](../interactive-controls/SKILL.md) to choose widgets and labels. Field values start at zero. For built-in deformations, amount .5 leaves the geometry unchanged; choose the other starting values as described in \`analog-shaping\`. Briefly explain what changes and what stays fixed.
 
 Only \`rendered\` confirms visibility. For \`viewer_hidden\`, bring the window forward; the viewer retries. For \`render_failed\`, fix the reported binding or model error. A timeout does not establish that the requested edit is unsupported.
 
@@ -388,6 +513,22 @@ Keep controls open during exploration. Satisfaction or moving to another task re
 3. For explicit cancel or revert, close the current \`id\` to restore the saved preview. If the source changes, reread state and reopen controls.
 
 Failed previews preserve the last successful geometry and values. Failed execution leaves the original untouched on disk; report the error and allow reopening with the saved values. Unresolved controls are not a saved edit. A saved shape is not certified print-ready.
+
+## Worked examples
+
+**Exploration versus instruction.** "Make the nose 2 mm longer" is a direct source edit; do not build controls for it. "Let me try a few nose lengths" is a control request: one \`slider\` axis bound to nose length, range around the current value, neutral at the start. The wording decides which path.
+
+**Choosing the axes.** "I want to change how tall and how wide the ears are." Two independent numerics: a \`slider\` for height and one for width, or a \`pad\` if they should move together as a two-axis feel. Protect the root where the ear meets the head by pinning it at zero travel rather than exposing a fourth control.
+
+**A profile edit.** "Make the lid dome deeper but keep the rim flat." Use \`surface\`, place stations from the measured cross-section, pin the rim stations at zero travel, and link the dome stations to move together. Validate both endpoints and the combination, then check the rim has not bowed.
+
+**An unsupported request.** "Add three more holes in a row." Live reconstruction of new topology is not supported. Explain what is unavailable and offer an alternative: a source edit producing a new revision, or a single hole with adjustable diameter if that covers the intent. Do not ship a static variant and call it a control.
+
+**Rejected controls.** The person says the slider "does nothing". Distinguish the cases: no visible movement means a bad range or binding; visible movement in the wrong place means a bad region; visible wrong-shape movement means the deformation does not match the intent. Inspect before relabelling, because a new name on the same bad binding changes nothing.
+
+## Deciding what is fixed
+
+Before preparing anything, name the protected set. Typical protected features are mating surfaces, connector bores, wall thickness on shells, symmetry planes, and adjacent parts that must not move. A control that silently moves a protective feature is a defect even if it looks right in the preview.
 ",
   "printer": "---
 name: printer-awareness
@@ -414,6 +555,23 @@ Pass \`buildVolume\` to \`viewer_load\` or \`mesh_open\` only from an applicable
 Do not scale or split a design to satisfy an assumed envelope. Separate the measured model dimensions from the printer constraints. A material preset describes slicing settings, not a loaded spool. Report AMS material/color/remaining values as printer-reported; unavailable remaining amounts, external-spool details and physical plate identity stay unknown. Tray IDs may repeat across AMS units in the current tool output; do not guess a physical slot or nozzle mapping from an ambiguous ID. Ask the user to identify the intended filament when that choice matters.
 
 Checking status does not authorize heating, motion, filament loading, calibration or printing. Preserve the existing confirmation flow for sending a prepared print. Present the relevant facts and uncertainties in plain language rather than dumping raw telemetry.
+
+## Tools and parameters
+
+- \`print_studio_status\` takes no arguments. It returns \`configured\` (the saved printer model and serial), \`devices\` (discovered on the LAN), \`reachable\`, \`lanAccessOk\`, \`nextSteps\`, and \`slicer.profiles.root\`. Read \`nextSteps\` first and act on it; it names the one thing blocking setup.
+- \`print_studio_progress\` takes no arguments. It returns live \`temperatures\` keyed by heater, \`nozzleDiameter\`, \`jobs\` with state and progress, \`ams\` trays with material, colour and remaining amount, and \`errors\`. Any field may be null when the printer did not report it.
+- \`viewer_load\` and \`mesh_open\` accept \`buildVolume\` as a three-number array of millimetres. Supply it only from a resolved profile or an explicit user statement, and name the source when you report fit.
+- The machine profile is a Bambu Studio JSON file under \`slicer.profiles.root\`. Read it with the file tools; \`printable_area\`, \`printable_height\`, \`bed_exclude_area\`, \`nozzle_diameter\` and \`inherits\` are the fields that decide fit.
+
+## Worked examples
+
+**"Is my printer on?"** Call \`print_studio_status\`, then \`print_studio_progress\`. If both answer, it is on and reachable — report the state with a timestamp. If the probe fails, say the printer is unreachable and its power state is unknown. Do not conclude it is switched off.
+
+**"What filament is loaded?"** Call \`print_studio_progress\` and read \`ams\`. Report material and colour per tray, and say "the printer did not report a remaining amount" when that field is null. If two trays share an ID across AMS units, say the slot is ambiguous and ask which one they mean.
+
+**"Will this fit my print bed?"** Read the machine profile for the confirmed model and nozzle, resolve \`inherits\`, and take the usable region from \`printable_area\` minus \`bed_exclude_area\`. Compare against the model's measured dimensions from \`meshState\`, not the viewer box. Report the dimension, the limit, and the margin. If the model is not selected, say fit is unverified.
+
+**A request that must not use this skill.** "Make this bigger" is a modelling and edit request; it belongs to [blender-modeling](../blender-modeling/SKILL.md) and [mesh-edit-controls](../mesh-edit-controls/SKILL.md). Only retrieve printer facts when the answer depends on the machine — fit, feature size, clearance, material, or live state.
 ",
   "setup": "---
 name: print-studio-setup
@@ -477,6 +635,22 @@ Bambu Studio is too old for the H2D: ask the adult to update it, then re-run
 Speak in plain language and name the one next step. Do not dump raw JSON at the person;
 translate the status into "Bambu Studio is installed, the printer is not connected yet",
 and so on.
+
+## Worked examples
+
+**First run, nothing installed.** The person says "I want to print something." Call \`print_studio_status\`, read \`nextSteps\`, and report only the first step: "Bambu Studio isn't installed yet — press Set up Bambu Studio in Plugins → Print Studio, and I'll check again." Do not list every later step.
+
+**Installed but no printer.** "Is the printer ready?" The probe finds Bambu Studio but no configured printer. Say: "Bambu Studio is installed. I can see the printer on your network but it isn't connected yet — sign in with Bambu once and I'll take it from there." Never ask for the access code or password in chat.
+
+**Access code rejected.** The sign-in completed but local access fails. Say the code was rejected and offer the printer-side step: enable LAN Only Mode, and Developer Mode if the firmware shows that switch. Do not retry the same probe unchanged and do not fall back to cloud printing.
+
+**Profiles too old.** The probe finds no H2D profiles. Say the installed Bambu Studio predates the H2D and ask the adult to update it, then re-check. Do not attempt to install or patch a slicer.
+
+**A print request, not a setup request.** "Print this." Setup is already complete, so this is a job, not a repair. Follow the Before any print checks, and use [fdm-design](../fdm-design/SKILL.md) for the geometry side. Do not re-run installation steps.
+
+## Checking a print job before it is sent
+
+After the setup checks pass, the order that prevents mistakes is: confirm the printer is reachable, confirm the selected machine profile matches the physical machine, confirm the filament that will actually be used, then confirm the model dimensions fit the usable region. Only then prepare the job and ask for confirmation. A job prepared against an assumed printer or an assumed spool is the failure this sequence exists to stop.
 ",
   "shaping": "---
 name: analog-shaping
@@ -518,9 +692,137 @@ Open controls before applying the requested cut. To restore material below an al
 ## Change an open edit
 
 \`meshState\` contains the last released values. Cursor snapshots and measurements during an edit do not describe a trustworthy deformed selection. Close the edit before changing its region; open a fresh session for a new direction, operation, or region. Follow \`mesh-edit-controls\` to preserve wanted adjustments or discard a rejected preview. Close restores the saved original and clears the region highlight.
+
+## Worked examples
+
+**Bulge an eye.** "Make the eyes bulge out a bit." Read \`meshState\`, then open \`operation: bulge\` with a \`center\` at the eye region in model-local millimetres, \`direction\` as the outward normal, and \`radii\` covering the eye but stopping short of the socket rim. Expose \`amount\` only, max 1, starting at .5, with \`limit\` set to the smallest radius and no more. Check the rim has not moved and both eyes match.
+
+**Bend a flat panel.** "Curve this sign panel." Use \`operation: bend\` with \`direction\` along the bend axis, a region spanning the panel, and \`values\` supplied for all six fields with unused ones at .5. Expose \`amount\` and expose \`falloff\` only if the person wants to tune how local the bend is. Verify the panel's mounting edge stayed planar.
+
+**Taper a post.** "Make the post thinner at the top." \`operation: taper\` with a vertical region and radii reaching past the post's section. Amount below .5 narrows positively along the shaping direction; confirm which way the geometry moved before presenting. Check the base where it meets the plate has not thinned.
+
+**A planar cut.** "Cut the bottom off flat." Use \`operation: cut\`, \`direction: [0,0,1]\` to keep the upper side, \`center\` at the proposed height, and radii at least as large as \`limit\` for every part that should share the edge. Amount .5 is the proposed height. Confirm the guide traces one continuous teal plane before the person commits.
+
+**A request that needs a field instead.** "Squeeze the waist in but keep the ribs sharp." A bulge would round the ribs, and spread alone cannot keep an edge. Point to the displacement-field workflow in [mesh-edit-controls](../mesh-edit-controls/SKILL.md) rather than relabelling a bulge.
+
+**Wrong region after opening.** The person says "not that part, the other one". Close first; the region cannot be changed on an open edit. Then reopen with a new region and the same operation and starting values.
 ",
   "stateToolAvailable": false,
   "working": "Declare which existing model you are actively inspecting or editing. Shows a green dot without changing the user selection. Use a path from meshState.models; call before work and when changing targets. Omit path to clear before clarification or unrelated work. The host also clears it when your agent stops or is disposed. This declaration does not authorize edits or resolve ambiguous references.",
+}
+`;
+
+exports[`explains omitted field values and accepts the same controls when zero values are supplied 1`] = `[Error: Missing values object. Provide an initial numeric value for every control axis, for example values: {"width": 0}. For displacement fields, start every value at 0.]`;
+
+exports[`freezes the latest released field values and invalidates controls when the source changes 1`] = `
+{
+  "fields": [
+    {
+      "dimensions": [
+        3,
+        3,
+        3,
+      ],
+      "key": "crown",
+      "offsets": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        10,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+      ],
+      "origin": [
+        -10,
+        -10,
+        -10,
+      ],
+      "spacing": [
+        10,
+        10,
+        10,
+      ],
+    },
+  ],
+  "operation": "fields",
+  "values": {
+    "crown": -0.75,
+  },
 }
 `;
 
@@ -605,7 +907,16 @@ exports[`loads editable source and exposes placement, camera and revision-scoped
 exports[`publishes the analog workflow in model instructions and removes it on unload 1`] = `
 "You are an AI agent powered by DeepSeek Harness.
 
-For each new interactive mesh edit or correction, load the current mesh-edit-controls skill even if earlier conversation turns contain control advice. Design the interaction from their intent and the current model: identify the feature, useful degrees of freedom, and what must stay fixed before choosing an operation. Use built-in operations only when their actual geometry math matches that edit; otherwise generate model-specific displacement fields for supported connectivity-preserving variations. Do not require prepared controls files, subject-specific presets, or special user wording. Test neutral, individual ranges, useful combinations and protected features before opening a small set of meaningful controls. A rendered receipt confirms delivery, not suitability. When the person says controls are wrong or ineffective, re-read the skill, inspect the binding and revise the interaction; do not re-label the same operation or silently make a static edit. Preserve wanted unsaved adjustments and never bake a rejected preview. Executable JavaScript previews remain disabled. Keep controls open while exploring; freeze the latest visible values and apply the frozen recipe in Blender only when resolving an accepted edit. Close on explicit cancel. Verify the published revision before claiming a save."
+For each new interactive mesh edit or correction, load the current mesh-edit-controls skill even if earlier conversation turns contain control advice. Design the interaction from their intent and the current model: identify the feature, useful degrees of freedom, and what must stay fixed before choosing an operation. Use surface profiles for connected outline changes and target-plane facets for flat patches when appropriate. Measure their effect and preserve interfaces; moving two parts together does not establish fit or wall thickness. Use built-in operations only when their actual geometry math matches that edit; otherwise generate model-specific displacement fields for supported connectivity-preserving variations. Do not require prepared controls files, subject-specific presets, or special user wording. Prepare a small set of meaningful controls with expected effects and preserved features. Run viewer_controls validation, inspect every returned before/after and displacement image, assess each axis and combined extremes, then present. Follow the pending-review context; generating evidence is not a quality pass. Revise unsuitable controls and revalidate. A rendered receipt confirms delivery, not suitability. When the person says controls are wrong or ineffective, re-read the skill, inspect the binding and revise the interaction; do not re-label the same operation or silently make a static edit. Preserve wanted unsaved adjustments and never bake a rejected preview. Executable JavaScript previews remain disabled. Keep controls open while exploring; freeze the latest visible values and apply the frozen recipe in Blender only when resolving an accepted edit. Close on explicit cancel. Verify the published revision before claiming a save."
+`;
+
+exports[`records a refused presentation and repeats the pending review in the next agent request 1`] = `
+[
+  {
+    "text": "Error: Validate the controls and review the images before presenting them",
+    "type": "text",
+  },
+]
 `;
 
 exports[`records explicit validation tools and their results within one agent turn > explicit validation instructions 1`] = `"For multi-part or movable prints, read blender-modeling and joints, build connectors from the joints recipes, and publish a complete assembly with every physical mesh, root fixture, connection, axis, pivot and full movement range. Moving parts must print separately and assemble afterward; publish with mode="separate" and connectors with practical insertion and retention. Legacy print-in-place movement requires redesign, not just relabeling. Include pins, caps and axles. JavaScript models export assembly and bind every motionControls axis to its connection; controls use degrees or millimetres. Blender publish preserves assembly metadata. Preserve requested features, connectors, controls and ranges during repairs. After each build, read the RUMI_CHECKS line that publish prints and repair blocking findings. When the design is ready, follow blender-modeling: call validation_mechanics once for the costly Bullet test, then validation_accept with the returned fingerprint. The bundled Bullet checker holds only the root, without ideal joints. The open viewer refreshes checks for the selected saved revision automatically; explicit validation tools reuse completed stages. No automatic repair turns run. Read the matching meshState.validation report before claiming acceptance. Missing descriptions, disconnected pieces and blocked movement require repair. Unavailable, unsupported or incomplete checks remain unverified. A passing rigid-contact test does not certify assembly accessibility, deformation, material strength or slicer readiness."`;
@@ -622,5 +933,28 @@ exports[`records explicit validation tools and their results within one agent tu
     "stage": "accepted",
     "status": "accepted",
   },
+]
+`;
+
+exports[`records retained retry instructions and reports when controls have been cleared 1`] = `
+[
+  [
+    {
+      "text": "Error: No complete evidence arrived within 1 ms. Prepared controls <review-id> are retained. Retry viewer_controls validate with this id; reloading the model is unnecessary.",
+      "type": "text",
+    },
+  ],
+  [
+    {
+      "text": "Error: No complete evidence arrived within 1 ms. Prepared controls <review-id> are retained. Retry viewer_controls validate with this id; reloading the model is unnecessary.",
+      "type": "text",
+    },
+  ],
+  [
+    {
+      "text": "Error: Controls changed or are no longer staged. Read the current meshState; prepare and validate again before presenting controls.",
+      "type": "text",
+    },
+  ],
 ]
 `;

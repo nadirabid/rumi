@@ -2,12 +2,57 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { authenticateWebHost, forwardWebRequest, serveWebDocument } from '../src/web-document.ts'
+import { createServer } from 'node:http'
+import { once } from 'node:events'
+import { authenticateWebHost, DesktopUpdateReadGate, forwardWebRequest, serveWebDocument } from '../src/web-document.ts'
 
 const roots: string[] = []
 afterEach(async () => {
   vi.unstubAllGlobals()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+})
+
+it('releases an idle long poll for update admission, preserves a write, and admits reads after recovery', async () => {
+  const readEntered = Promise.withResolvers<undefined>()
+  const readClosed = Promise.withResolvers<undefined>()
+  const writeEntered = Promise.withResolvers<undefined>()
+  const finishWrite = Promise.withResolvers<undefined>()
+  let reads = 0
+  const server = createServer((request, response) => {
+    if (request.method === 'POST') {
+      writeEntered.resolve(undefined)
+      void finishWrite.promise.then(() => { response.end('saved') })
+    } else if (++reads === 1) {
+      response.once('close', () => { readClosed.resolve(undefined) })
+      readEntered.resolve(undefined)
+    } else response.end('resumed')
+  })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('Missing TCP address')
+  const host = `http://127.0.0.1:${address.port}`
+  const gate = new DesktopUpdateReadGate()
+  const reading = gate.forward(new Request('dsh-app://app/events'), host, 'session=test')
+  const writing = gate.forward(new Request('dsh-app://app/save', { method: 'POST', body: 'edit' }), host, 'session=test')
+  try {
+    await Promise.all([readEntered.promise, writeEntered.promise])
+    gate.pause()
+    expect((await reading).status).toBe(503)
+    await readClosed.promise
+    expect((await gate.forward(new Request('dsh-app://app/events'), host, 'session=test')).status).toBe(503)
+    expect(reads).toBe(1)
+    finishWrite.resolve(undefined)
+    expect(await (await writing).text()).toBe('saved')
+    gate.resume()
+    expect(await (await gate.forward(new Request('dsh-app://app/events'), host, 'session=test')).text()).toBe('resumed')
+  } finally {
+    gate.pause()
+    finishWrite.resolve(undefined)
+    await Promise.allSettled([reading, writing])
+    server.closeAllConnections()
+    await new Promise<void>((resolve, reject) => { server.close((error) => { if (error) reject(error); else resolve() }) })
+  }
 })
 
 it('serves the Web entry and assets without starting or contacting a Host', async () => {

@@ -85,6 +85,10 @@ The `Release Rumi` workflow builds Apple Silicon releases on pushes to `main` in
 
 Configure these repository Actions secrets before enabling release builds: `RUMI_CERTIFICATE_BASE64` (base64-encoded Developer ID `.p12` containing its private key), `RUMI_CERTIFICATE_PASSWORD`, `RUMI_SIGNING_IDENTITY`, `RUMI_APPLE_TEAM_ID`, `RUMI_APPLE_ID`, and `RUMI_APPLE_APP_PASSWORD` (an Apple app-specific password for notarization). Signing configuration is written outside the checkout with private file permissions and removed at job completion. GitHub's job token publishes releases; no personal access token is needed. These credentials allow trusted code on `main` to sign releases, so restrict who can push to that branch. Clients use the download and installation behavior described above.
 
+After installation is confirmed, Rumi cancels renderer reads, including viewer long polls, before draining the Host’s admitted writes and rechecking active work. Failed installation resumes reads; it does not discard an in-flight write to meet the shutdown deadline.
+
+Every push to `main` starts **Release Rumi**. A push is available to installed apps only after that workflow publishes its signed release and update feed. Check the run for the exact commit before reporting delivery. Print Studio release checks use `apps/rumi/tests/print-studio.spec.ts` and `apps/rumi/tests/print-studio-viewer.client.spec.tsx`; their snapshots live beside those entry points. Focused plugin-file runs use separate snapshots and do not substitute for these release checks.
+
 ## Install and run
 
 ```sh

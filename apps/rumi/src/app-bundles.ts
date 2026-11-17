@@ -16,6 +16,7 @@ export interface AppBundleSource {
  * manager and the Plugins page reports it as installation-provided.
  */
 export const RUMI_APP_BUNDLES: readonly AppBundleSource[] = [
+  { name: '@rumi/model-picker', directory: join('brand', 'model-picker') },
   { name: '@rumi/brand', directory: 'brand' },
   { name: '@rumi/client-events', directory: join('brand', 'client-events') },
   { name: '@rumi/settings', directory: join('brand', 'settings') },

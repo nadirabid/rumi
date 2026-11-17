@@ -1,0 +1,4 @@
+- insert:
+    - id: rumi-model-picker
+      name: '@rumi/model-picker'
+      config: {}

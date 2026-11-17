@@ -49,3 +49,19 @@ Keep controls open during exploration. Satisfaction or moving to another task re
 3. For explicit cancel or revert, close the current `id` to restore the saved preview. If the source changes, reread state and reopen controls.
 
 Failed previews preserve the last successful geometry and values. Failed execution leaves the original untouched on disk; report the error and allow reopening with the saved values. Unresolved controls are not a saved edit. A saved shape is not certified print-ready.
+
+## Worked examples
+
+**Exploration versus instruction.** "Make the nose 2 mm longer" is a direct source edit; do not build controls for it. "Let me try a few nose lengths" is a control request: one `slider` axis bound to nose length, range around the current value, neutral at the start. The wording decides which path.
+
+**Choosing the axes.** "I want to change how tall and how wide the ears are." Two independent numerics: a `slider` for height and one for width, or a `pad` if they should move together as a two-axis feel. Protect the root where the ear meets the head by pinning it at zero travel rather than exposing a fourth control.
+
+**A profile edit.** "Make the lid dome deeper but keep the rim flat." Use `surface`, place stations from the measured cross-section, pin the rim stations at zero travel, and link the dome stations to move together. Validate both endpoints and the combination, then check the rim has not bowed.
+
+**An unsupported request.** "Add three more holes in a row." Live reconstruction of new topology is not supported. Explain what is unavailable and offer an alternative: a source edit producing a new revision, or a single hole with adjustable diameter if that covers the intent. Do not ship a static variant and call it a control.
+
+**Rejected controls.** The person says the slider "does nothing". Distinguish the cases: no visible movement means a bad range or binding; visible movement in the wrong place means a bad region; visible wrong-shape movement means the deformation does not match the intent. Inspect before relabelling, because a new name on the same bad binding changes nothing.
+
+## Deciding what is fixed
+
+Before preparing anything, name the protected set. Typical protected features are mating surfaces, connector bores, wall thickness on shells, symmetry planes, and adjacent parts that must not move. A control that silently moves a protective feature is a defect even if it looks right in the preview.

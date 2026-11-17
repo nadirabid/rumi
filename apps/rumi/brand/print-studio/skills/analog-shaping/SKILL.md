@@ -38,3 +38,17 @@ Open controls before applying the requested cut. To restore material below an al
 ## Change an open edit
 
 `meshState` contains the last released values. Cursor snapshots and measurements during an edit do not describe a trustworthy deformed selection. Close the edit before changing its region; open a fresh session for a new direction, operation, or region. Follow `mesh-edit-controls` to preserve wanted adjustments or discard a rejected preview. Close restores the saved original and clears the region highlight.
+
+## Worked examples
+
+**Bulge an eye.** "Make the eyes bulge out a bit." Read `meshState`, then open `operation: bulge` with a `center` at the eye region in model-local millimetres, `direction` as the outward normal, and `radii` covering the eye but stopping short of the socket rim. Expose `amount` only, max 1, starting at .5, with `limit` set to the smallest radius and no more. Check the rim has not moved and both eyes match.
+
+**Bend a flat panel.** "Curve this sign panel." Use `operation: bend` with `direction` along the bend axis, a region spanning the panel, and `values` supplied for all six fields with unused ones at .5. Expose `amount` and expose `falloff` only if the person wants to tune how local the bend is. Verify the panel's mounting edge stayed planar.
+
+**Taper a post.** "Make the post thinner at the top." `operation: taper` with a vertical region and radii reaching past the post's section. Amount below .5 narrows positively along the shaping direction; confirm which way the geometry moved before presenting. Check the base where it meets the plate has not thinned.
+
+**A planar cut.** "Cut the bottom off flat." Use `operation: cut`, `direction: [0,0,1]` to keep the upper side, `center` at the proposed height, and radii at least as large as `limit` for every part that should share the edge. Amount .5 is the proposed height. Confirm the guide traces one continuous teal plane before the person commits.
+
+**A request that needs a field instead.** "Squeeze the waist in but keep the ribs sharp." A bulge would round the ribs, and spread alone cannot keep an edge. Point to the displacement-field workflow in [mesh-edit-controls](../mesh-edit-controls/SKILL.md) rather than relabelling a bulge.
+
+**Wrong region after opening.** The person says "not that part, the other one". Close first; the region cannot be changed on an open edit. Then reopen with a new region and the same operation and starting values.

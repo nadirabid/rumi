@@ -23,3 +23,20 @@ Pass `buildVolume` to `viewer_load` or `mesh_open` only from an applicable profi
 Do not scale or split a design to satisfy an assumed envelope. Separate the measured model dimensions from the printer constraints. A material preset describes slicing settings, not a loaded spool. Report AMS material/color/remaining values as printer-reported; unavailable remaining amounts, external-spool details and physical plate identity stay unknown. Tray IDs may repeat across AMS units in the current tool output; do not guess a physical slot or nozzle mapping from an ambiguous ID. Ask the user to identify the intended filament when that choice matters.
 
 Checking status does not authorize heating, motion, filament loading, calibration or printing. Preserve the existing confirmation flow for sending a prepared print. Present the relevant facts and uncertainties in plain language rather than dumping raw telemetry.
+
+## Tools and parameters
+
+- `print_studio_status` takes no arguments. It returns `configured` (the saved printer model and serial), `devices` (discovered on the LAN), `reachable`, `lanAccessOk`, `nextSteps`, and `slicer.profiles.root`. Read `nextSteps` first and act on it; it names the one thing blocking setup.
+- `print_studio_progress` takes no arguments. It returns live `temperatures` keyed by heater, `nozzleDiameter`, `jobs` with state and progress, `ams` trays with material, colour and remaining amount, and `errors`. Any field may be null when the printer did not report it.
+- `viewer_load` and `mesh_open` accept `buildVolume` as a three-number array of millimetres. Supply it only from a resolved profile or an explicit user statement, and name the source when you report fit.
+- The machine profile is a Bambu Studio JSON file under `slicer.profiles.root`. Read it with the file tools; `printable_area`, `printable_height`, `bed_exclude_area`, `nozzle_diameter` and `inherits` are the fields that decide fit.
+
+## Worked examples
+
+**"Is my printer on?"** Call `print_studio_status`, then `print_studio_progress`. If both answer, it is on and reachable — report the state with a timestamp. If the probe fails, say the printer is unreachable and its power state is unknown. Do not conclude it is switched off.
+
+**"What filament is loaded?"** Call `print_studio_progress` and read `ams`. Report material and colour per tray, and say "the printer did not report a remaining amount" when that field is null. If two trays share an ID across AMS units, say the slot is ambiguous and ask which one they mean.
+
+**"Will this fit my print bed?"** Read the machine profile for the confirmed model and nozzle, resolve `inherits`, and take the usable region from `printable_area` minus `bed_exclude_area`. Compare against the model's measured dimensions from `meshState`, not the viewer box. Report the dimension, the limit, and the margin. If the model is not selected, say fit is unverified.
+
+**A request that must not use this skill.** "Make this bigger" is a modelling and edit request; it belongs to [blender-modeling](../blender-modeling/SKILL.md) and [mesh-edit-controls](../mesh-edit-controls/SKILL.md). Only retrieve printer facts when the answer depends on the machine — fit, feature size, clearance, material, or live state.

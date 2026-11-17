@@ -60,3 +60,19 @@ Bambu Studio is too old for the H2D: ask the adult to update it, then re-run
 Speak in plain language and name the one next step. Do not dump raw JSON at the person;
 translate the status into "Bambu Studio is installed, the printer is not connected yet",
 and so on.
+
+## Worked examples
+
+**First run, nothing installed.** The person says "I want to print something." Call `print_studio_status`, read `nextSteps`, and report only the first step: "Bambu Studio isn't installed yet — press Set up Bambu Studio in Plugins → Print Studio, and I'll check again." Do not list every later step.
+
+**Installed but no printer.** "Is the printer ready?" The probe finds Bambu Studio but no configured printer. Say: "Bambu Studio is installed. I can see the printer on your network but it isn't connected yet — sign in with Bambu once and I'll take it from there." Never ask for the access code or password in chat.
+
+**Access code rejected.** The sign-in completed but local access fails. Say the code was rejected and offer the printer-side step: enable LAN Only Mode, and Developer Mode if the firmware shows that switch. Do not retry the same probe unchanged and do not fall back to cloud printing.
+
+**Profiles too old.** The probe finds no H2D profiles. Say the installed Bambu Studio predates the H2D and ask the adult to update it, then re-check. Do not attempt to install or patch a slicer.
+
+**A print request, not a setup request.** "Print this." Setup is already complete, so this is a job, not a repair. Follow the Before any print checks, and use [fdm-design](../fdm-design/SKILL.md) for the geometry side. Do not re-run installation steps.
+
+## Checking a print job before it is sent
+
+After the setup checks pass, the order that prevents mistakes is: confirm the printer is reachable, confirm the selected machine profile matches the physical machine, confirm the filament that will actually be used, then confirm the model dimensions fit the usable region. Only then prepare the job and ask for confirmation. A job prepared against an assumed printer or an assumed spool is the failure this sequence exists to stop.

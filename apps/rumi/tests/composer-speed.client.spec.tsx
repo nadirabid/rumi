@@ -59,8 +59,10 @@ function fixture(provider = 'rumi-chatgpt') {
   new Function('window', source)({ addEventListener: window.addEventListener.bind(window),
     removeEventListener: window.removeEventListener.bind(window), innerWidth: 900, innerHeight: 700,
     __ModuleLoader__: { load(entry: { factory: (get: (id: string) => object) => {
+      inject: readonly string[]
       apply: (context: object) => void } }) {
       const plugin = entry.factory(id => modules[id]!)
+      expect(plugin.inject).toEqual(expect.arrayContaining(['modelDirectories', 'sessions', 'remote', 'remote.session']))
       plugin.apply({ ...ctx, effect: (setup: () => void) => setup(),
         locale: { register: (_ns: string, value: { en: Record<string, string> }) => { copy = value.en } } })
     } } })

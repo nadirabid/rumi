@@ -9,14 +9,16 @@
     "./client": "./client.js",
     "./package.json": "./package.json",
     "./preset": "./preset.js",
-    "./image-budget": "./image-budget.js"
+    "./image-budget": "./image-budget.js",
+    "./chatgpt": "./chatgpt.js"
   },
   "files": [
     "index.js",
     "client.js",
     "cordis.patch.yml",
     "preset.js",
-    "image-budget.js"
+    "image-budget.js",
+    "chatgpt.js"
   ],
   "dsh": {
     "bundle": {

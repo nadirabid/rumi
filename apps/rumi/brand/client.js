@@ -314,12 +314,12 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
 
     /** Edit new-conversation defaults without changing an existing Session. */
     function registerDefaultModel(ctx) {
-      const { SettingsForm, SettingsFormModel, Button, Menu } = require('@deepseek-ai/dsh-client-ui-primitives');
+      const { SettingsForm, SettingsFormModel, SettingsSecretField, Button, Menu } = require('@deepseek-ai/dsh-client-ui-primitives');
       const { createSnapshotStore } = require('@deepseek-ai/dsh-client-store');
       const ns = 'rumi.default-model';
       const dictionaries = {
-        en: { plan: 'ChatGPT plan', planInfo: 'Sign in for project conversations, then choose your default model below. Live voice uses your separately billed OpenAI API key.', signIn: 'Sign in with ChatGPT', continueLogin: 'Continue in browser', disconnect: 'Disconnect ChatGPT', cancelLogin: 'Cancel sign-in', planError: 'Could not connect to ChatGPT. Retry sign-in.', title: 'Default model', intro: 'Used for new conversations. Existing conversations keep their model and effort.', model: 'Model', effort: 'Reasoning effort', automatic: 'Model default', choose: 'Choose a model', unavailableModel: 'Saved model unavailable', empty: 'No models available. Configure a provider above.', loadFailed: 'Could not load all models. Retry to refresh the list.', retry: 'Retry', unavailable: 'Default model settings are unavailable.', readOnly: 'These settings are read-only.', saveFailed: 'Could not save the default. Check your connection and try again.', save: 'Save default', saving: 'Saving…', saved: 'Default saved.', invalidEffort: 'Choose an effort supported by this model.' },
-        zh: { plan: 'ChatGPT 套餐', planInfo: '登录后可在下方选择项目对话的默认模型。实时语音使用单独计费的 OpenAI API 密钥。', signIn: '使用 ChatGPT 登录', continueLogin: '在浏览器中继续', disconnect: '断开 ChatGPT', cancelLogin: '取消登录', planError: '无法连接 ChatGPT，请重试。', title: '默认模型', intro: '用于新对话。现有对话保留各自的模型和推理强度', model: '模型', effort: '推理强度', automatic: '模型默认值', choose: '选择模型', unavailableModel: '已保存的模型不可用', empty: '没有可用模型。请先在上方配置服务商', loadFailed: '无法加载全部模型。请重试刷新列表', retry: '重试', unavailable: '默认模型设置不可用', readOnly: '这些设置为只读', saveFailed: '无法保存默认值。请检查连接后重试', save: '保存默认值', saving: '正在保存…', saved: '默认值已保存', invalidEffort: '请选择此模型支持的推理强度' },
+        en: { advanced: 'Advanced provider settings', connections: 'Provider connections', removeKey: 'Disconnect', confirmRemove: 'Confirm disconnect',  direct: 'DeepSeek API', baseten: 'DeepSeek via Baseten', manage: 'Manage', connect: 'Connect', close: 'Close', connected: 'Configured', missing: 'Not configured', checking: 'Checking…', key: 'API key', saveKey: 'Save key', keyHint: 'Enter a new key to update this connection.', voice: 'Live voice', voiceInfo: 'Uses a separately billed OpenAI API key.', plan: 'ChatGPT plan', planInfo: 'Sign in for project conversations, then choose your default model below. Live voice uses your separately billed OpenAI API key.', signIn: 'Sign in with ChatGPT', continueLogin: 'Continue in browser', disconnect: 'Disconnect ChatGPT', cancelLogin: 'Cancel sign-in', planError: 'Could not connect to ChatGPT. Retry sign-in.', title: 'Project conversations', intro: 'Used for new conversations. Existing conversations keep their model and effort.', model: 'Model', effort: 'Reasoning effort', automatic: 'Model default', choose: 'Choose a model', unavailableModel: 'Saved model unavailable', empty: 'No models available. Connect a provider below.', loadFailed: 'Could not load all models. Retry to refresh the list.', retry: 'Retry', unavailable: 'Default model settings are unavailable.', readOnly: 'These settings are read-only.', saveFailed: 'Could not save the default. Check your connection and try again.', save: 'Save default', saving: 'Saving…', saved: 'Default saved.', invalidEffort: 'Choose an effort supported by this model.' },
+        zh: { advanced: '高级服务商设置', connections: '服务商连接', removeKey: '断开连接', confirmRemove: '确认断开连接',  direct: 'DeepSeek API', baseten: '通过 Baseten 使用 DeepSeek', manage: '管理', connect: '连接', close: '关闭', connected: '已配置', missing: '未配置', checking: '正在检查…', key: 'API 密钥', saveKey: '保存密钥', keyHint: '输入新密钥以更新此连接。', voice: '实时语音', voiceInfo: '使用单独计费的 OpenAI API 密钥。', plan: 'ChatGPT 套餐', planInfo: '登录后可在下方选择项目对话的默认模型。实时语音使用单独计费的 OpenAI API 密钥。', signIn: '使用 ChatGPT 登录', continueLogin: '在浏览器中继续', disconnect: '断开 ChatGPT', cancelLogin: '取消登录', planError: '无法连接 ChatGPT，请重试。', title: '项目对话', intro: '用于新对话。现有对话保留各自的模型和推理强度', model: '模型', effort: '推理强度', automatic: '模型默认值', choose: '选择模型', unavailableModel: '已保存的模型不可用', empty: '没有可用模型。请先在下方配置服务商', loadFailed: '无法加载全部模型。请重试刷新列表', retry: '重试', unavailable: '默认模型设置不可用', readOnly: '这些设置为只读', saveFailed: '无法保存默认值。请检查连接后重试', save: '保存默认值', saving: '正在保存…', saved: '默认值已保存', invalidEffort: '请选择此模型支持的推理强度' },
       };
       ctx.effect(() => ctx.locale.register(ns, dictionaries), 'rumi-brand: default model copy');
       const scope = ctx.configForms.get('agent-default-model');
@@ -353,8 +353,78 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
       }, 'rumi-brand: default model state');
       ctx.on('connection/reset', () => { catalog.set({ value: null, failed: false, loading: true }); void refresh(); });
       const keyOf = (provider, id) => JSON.stringify([provider, id]);
-      function ChatGPTSettings({ t }) {
+      const voiceCopy = ctx.locale.bind(NS);
+      function checked(response) {
+        if (!response.ok) throw new Error(response.error.code);
+        return response.value;
+      }
+      async function keyRoute(kind) {
+        const settings = checked(await ctx.remote.settings.describe());
+        const space = settings.namespaces.find(entry => entry.ns === (kind === 'direct' ? 'llm-deepseek' : 'llm-pi-ai'));
+        if (!space) throw new Error('Provider settings unavailable');
+        const profile = kind === 'direct' ? space.value : space.value.providers?.baseten;
+        const ref = profile?.apiKeyEnv ?? (kind === 'baseten' ? 'BASETEN_API_KEY' : undefined);
+        if (!ref) throw new Error('Missing credential reference');
+        return { space, profile, ref };
+      }
+      function KeyConnection({ kind, isDefault, t }) {
+        const [info, setInfo] = React.useState(null);
+        const [editing, setEditing] = React.useState(false);
+        const [confirm, setConfirm] = React.useState(false);
+        const [text, setText] = React.useState('');
+        const [busy, setBusy] = React.useState(false);
+        const [failed, setFailed] = React.useState(false);
+        const [revision, reload] = React.useReducer(n => n + 1, 0);
+        React.useEffect(() => {
+          let active = true;
+          async function load() {
+            const { ref, profile } = await keyRoute(kind);
+            const value = checked(await ctx.remote.credentials.describe([ref]))[ref];
+            if (active) { setInfo({ ...value, configured: Boolean(profile && value.configured) }); setFailed(false); }
+          }
+          void load().catch(() => { if (active) setFailed(true); });
+          const off = ctx.remote.$on('credentials/reference-updated', reload);
+          return () => { active = false; off(); };
+        }, [kind, revision]);
+        async function disconnect() {
+          if (!confirm) { setConfirm(true); return; }
+          setBusy(true);
+          try {
+            const { ref } = await keyRoute(kind);
+            checked(await ctx.remote.credentials.unset(ref));
+            setEditing(false); setConfirm(false); setText(''); reload(); void refresh();
+          } catch (error) { setFailed(true); } finally { setBusy(false); }
+        }
+        async function save() {
+          setBusy(true); setFailed(false);
+          try {
+            const { ref, space, profile } = await keyRoute(kind);
+            if (kind === 'baseten' && !profile?.apiKeyEnv) {
+              const op = profile ? { path: ['providers', 'baseten', 'apiKeyEnv'], value: ref }
+                : { path: ['providers', 'baseten'], value: { displayName: 'DeepSeek via Baseten', apiKeyEnv: ref,
+                    models: [{ id: 'deepseek-ai/DeepSeek-V4.1-Flash' }, { id: 'deepseek-ai/DeepSeek-V4-Pro' }] } };
+              checked(await ctx.remote.settings.mutate(space.ns, [{ op: 'set', ...op }], space.revision));
+            }
+            checked(await ctx.remote.credentials.set(ref, text.trim()));
+            setText(''); setEditing(false); reload(); void refresh();
+          } catch (error) { setFailed(true); } finally { setBusy(false); }
+        }
+        return h('div', { className: 'rumi-connection' },
+          h('div', { className: 'rumi-default-model-row' },
+            h('div', null, h('strong', null, t(kind)), h('p', null, t(info ? info.configured ? 'connected' : 'missing' : 'checking'))),
+            h(Button, { variant: 'outline', disabled: busy || !info, onClick: () => { setText(''); setConfirm(false); setEditing(!editing); } }, t(editing ? 'close' : info?.configured ? 'manage' : 'connect'))),
+          editing && h(SettingsForm, { state: { available: true, writable: info.writable, dirty: Boolean(text.trim()), invalid: !info.writable, saving: busy, failed },
+            labels: { unavailable: t('unavailable'), readOnly: t('readOnly'), saveFailed: t('saveFailed'), save: t('saveKey'), saving: t('saving') },
+            onSave: save, onDiscard: () => {} },
+            h(SettingsSecretField, { id: 'rumi-key-' + kind, label: t('key'), hint: t('keyHint'), configured: info.configured,
+              stateLabel: t(info.configured ? 'connected' : 'missing'), text, onEdit: setText, disabled: busy || !info.writable })),
+          editing && !isDefault && info.configured && info.writable && info.source === 'file' && h(Button, { disabled: busy, onClick: disconnect }, t(confirm ? 'confirmRemove' : 'removeKey')),
+          failed && !editing && h(Button, { onClick: reload }, t('retry')));
+      }
+      function ChatGPTSettings({ t, isDefault }) {
         const [state, setState] = React.useState({});
+        const [managing, setManaging] = React.useState(false);
+        const [confirm, setConfirm] = React.useState(false);
         const [busy, setBusy] = React.useState(false);
         const generation = React.useRef(0);
         async function update(action) {
@@ -380,16 +450,21 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
           const id = setTimeout(() => { void update(); }, 800);
           return () => clearTimeout(id);
         }, [state, busy]);
-        return h('section', null, h('h3', null, t('plan')), h('p', null, t('planInfo')),
+        return h('div', { className: 'rumi-connection' }, h('div', { className: 'rumi-default-model-row' }, h('div', null, h('strong', null, t('plan')), h('p', null, t(state.connected === undefined ? 'checking' : state.connected ? 'connected' : 'missing'))), h(Button, { variant: 'outline', onClick: () => { setManaging(!managing); setConfirm(false); } }, t(managing ? 'close' : state.connected ? 'manage' : 'connect'))),
           state.failed ? h('p', { role: 'alert' }, t('planError')) : null,
           state.url ? h('a', { href: state.url, target: '_blank', rel: 'noopener noreferrer' }, t('continueLogin')) : null,
-          h(Button, { disabled: busy, onClick: () => update(state.pending ? 'cancel' : state.connected ? 'disconnect' : 'start') },
-            t(state.pending ? 'cancelLogin' : state.connected ? 'disconnect' : 'signIn')));
+          (managing || state.pending) && h(Button, { disabled: busy || (isDefault && state.connected && !state.pending), onClick: () => {
+              if (state.connected && !state.pending && !confirm) { setConfirm(true); return; }
+              setConfirm(false); void update(state.pending ? 'cancel' : state.connected ? 'disconnect' : 'start');
+            } },
+            t(state.pending ? 'cancelLogin' : state.connected ? (confirm ? 'confirmRemove' : 'disconnect') : 'signIn')));
       }
       function DefaultModelSettings({ useForm, useCatalog, t, operations }) {
         const state = useForm(value => value);
+        const persistedProvider = scope.getSnapshot().value?.provider;
         const directory = useCatalog(value => value);
         const [open, setOpen] = React.useState(null);
+        const [advanced, setAdvanced] = React.useState(false);
         const [saved, setSaved] = React.useState(false);
         const groups = directory.value?.groups ?? [];
         const provider = groups.find(group => group.id === state.provider);
@@ -397,8 +472,9 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
         const efforts = selected?.reasoning?.efforts ?? [];
         const invalidEffort = Boolean(state.effort) && !efforts.some(item => item.id === state.effort);
         const blocked = !state.shell.writable || state.shell.saving || directory.loading;
+        const groupName = group => group.id === 'baseten' ? t('baseten') : group.id === 'deepseek' ? t('direct') : group.name;
         const items = groups.flatMap(group => [
-          { type: 'label', id: keyOf(group.id, ''), text: group.name },
+          { type: 'label', id: keyOf(group.id, ''), text: groupName(group) },
           ...group.models.map(item => ({ id: keyOf(group.id, item.id), label: item.name })),
         ]);
         const choose = id => {
@@ -410,8 +486,8 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
           operations.edit('reasoningEffort', next.reasoning?.defaultEffort ?? '');
           setSaved(false); setOpen(null);
         };
-        return h('section', { 'aria-label': t('title'), className: 'rumi-default-model' },
-          h(ChatGPTSettings, { t }), h('h3', null, t('title')), h('p', null, t('intro')),
+        return h('section', { 'aria-label': t('title'), className: 'rumi-default-model', 'data-advanced': advanced },
+          h('h3', null, t('title')), h('p', null, t('intro')),
           directory.failed ? h('p', { role: 'status' }, t('loadFailed'), ' ', h(Button, { onClick: operations.refresh, disabled: directory.loading }, t('retry'))) : null,
           h(SettingsForm, {
             state: { ...state.shell, invalid: state.shell.invalid || !selected || invalidEffort || blocked },
@@ -422,18 +498,24 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
           h('div', { className: 'rumi-default-model-row' }, h('span', { id: 'rumi-default-model-label' }, t('model')),
             h(Menu, { open: open === 'model', portal: true, items, selectedId: keyOf(state.provider, state.model), onSelect: choose, onClose: () => setOpen(null),
               anchor: h(Button, { variant: 'outline', disabled: blocked || items.length === 0, 'aria-labelledby': 'rumi-default-model-label rumi-default-model-value', 'aria-haspopup': 'menu', 'aria-expanded': open === 'model', onClick: () => setOpen(open === 'model' ? null : 'model') },
-                h('span', { id: 'rumi-default-model-value' }, selected ? `${provider.name} · ${selected.name}` : state.model ? t('unavailableModel') : t('choose'))) })),
+                h('span', { id: 'rumi-default-model-value' }, selected ? `${groupName(provider)} · ${selected.name}` : state.model ? t('unavailableModel') : t('choose'))) })),
           items.length === 0 && !directory.loading ? h('p', { role: 'status' }, t('empty')) : null,
           selected && (efforts.length > 0 || state.effort) ? h('div', { className: 'rumi-default-model-row' }, h('span', { id: 'rumi-default-effort-label' }, t('effort')),
             h(Menu, { open: open === 'effort', portal: true, selectedId: state.effort, items: [{ id: '', label: t('automatic') }, ...efforts.map(item => ({ id: item.id, label: item.name }))],
               onSelect: id => { operations.edit('reasoningEffort', id); setSaved(false); setOpen(null); }, onClose: () => setOpen(null),
               anchor: h(Button, { variant: 'outline', disabled: blocked, 'aria-labelledby': 'rumi-default-effort-label rumi-default-effort-value', 'aria-haspopup': 'menu', 'aria-expanded': open === 'effort', onClick: () => setOpen(open === 'effort' ? null : 'effort') }, h('span', { id: 'rumi-default-effort-value' }, efforts.find(item => item.id === state.effort)?.name ?? (state.effort || t('automatic')))) })) : null,
           invalidEffort && selected ? h('p', { role: 'status' }, t('invalidEffort')) : null,
-          saved && !state.shell.dirty ? h('p', { role: 'status' }, t('saved')) : null));
+          saved && !state.shell.dirty ? h('p', { role: 'status' }, t('saved')) : null),
+          h('h3', null, t('connections')), h(ChatGPTSettings, { t, isDefault: persistedProvider === 'rumi-chatgpt' }),
+          h(KeyConnection, { kind: 'direct', isDefault: persistedProvider === 'deepseek', t }), h(KeyConnection, { kind: 'baseten', isDefault: persistedProvider === 'baseten', t }),
+          h('h3', null, t('voice')), h('details', { className: 'rumi-connection' }, h('summary', null, h(LiveVoiceSettings, { view: 'summary', t: voiceCopy })), h('p', null, t('voiceInfo')), h(LiveVoiceSettings, { view: 'page', t: voiceCopy })),
+          h(Button, { variant: 'outline', 'aria-expanded': advanced, onClick: () => setAdvanced(!advanced) }, t('advanced')));
       }
       ctx.effect(() => {
         const style = document.createElement('style');
-        style.textContent = '.rumi-default-model{border-top:1px solid var(--dsw-alias-border-l2);padding-top:var(--dsw-spacing-4,16px)}.rumi-default-model h3{font-size:inherit;font-weight:500}.rumi-default-model p{color:var(--dsw-alias-label-secondary);font-size:13px}.rumi-default-model-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}.rumi-default-model-row button{max-width:100%;height:auto;min-height:36px;white-space:normal;overflow-wrap:anywhere}';
+        style.textContent = '.rumi-connection{padding:12px 14px;border:.5px solid var(--dsw-alias-settings-card-stroke);border-radius:var(--dsw-radius-xl);background:var(--dsw-alias-settings-card-fill);margin-bottom:8px}.rumi-connection p{margin:3px 0}.rumi-connection strong{font-weight:500}.rumi-default-model h3{margin:20px 0 10px}.rumi-default-model h3:first-child{margin-top:0}.rumi-default-model h3{font-size:inherit;font-weight:500}.rumi-default-model p{color:var(--dsw-alias-label-secondary);font-size:13px}.rumi-default-model-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}.rumi-default-model-row button{max-width:100%;height:auto;min-height:36px;white-space:normal;overflow-wrap:anywhere}';
+        const footer = '[data-slot="settings.models.footer"]';
+        style.textContent += `div:has(> ${footer} .rumi-default-model[data-advanced="false"]) > :not(${footer}){display:none}.rumi-default-model{order:-1}`;
         document.head.append(style);
         return () => style.remove();
       }, 'rumi-brand: default model styles');
@@ -445,7 +527,7 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
     return {
       inject: ['slots', 'locale', 'layout'],
       apply(ctx) {
-        ctx.inject(['configForms', 'remote', 'remote.session'], registerDefaultModel);
+        ctx.inject(['configForms', 'remote', 'remote.session', 'remote.credentials', 'remote.settings'], registerDefaultModel);
         ctx.effect(styleViewerLayout, 'rumi-brand: responsive viewer layout');
         ctx.effect(hideChrome, 'rumi-brand: hide developer chrome');
         ctx.effect(styleDocumentTabs, 'rumi-brand: document tab glass');

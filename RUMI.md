@@ -126,6 +126,8 @@ A package that ships skills keeps them at `skills/<name>/SKILL.md` and publishes
 
 Custom UI packages that are not shipped this way go in `~/.rumi/profiles/rumi/package.json`.
 
+Settings → Models includes **Default model** and **Reasoning effort** for new conversations. Save writes `agent-default-model` in the profile patch; existing conversations retain their selections. The controls work when the chat model picker is hidden. Model choices come from configured providers, and effort choices follow the selected model.
+
 ## Terms
 
 | Term | Meaning |

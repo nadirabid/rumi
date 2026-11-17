@@ -312,9 +312,107 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
       );
     }
 
+    /** Edit new-conversation defaults without changing an existing Session. */
+    function registerDefaultModel(ctx) {
+      const { SettingsForm, SettingsFormModel, Button, Menu } = require('@deepseek-ai/dsh-client-ui-primitives');
+      const { createSnapshotStore } = require('@deepseek-ai/dsh-client-store');
+      const ns = 'rumi.default-model';
+      const dictionaries = {
+        en: { title: 'Default model', intro: 'Used for new conversations. Existing conversations keep their model and effort.', model: 'Model', effort: 'Reasoning effort', automatic: 'Model default', choose: 'Choose a model', unavailableModel: 'Saved model unavailable', empty: 'No models available. Configure a provider above.', loadFailed: 'Could not load all models. Retry to refresh the list.', retry: 'Retry', unavailable: 'Default model settings are unavailable.', readOnly: 'These settings are read-only.', saveFailed: 'Could not save the default. Check your connection and try again.', save: 'Save default', saving: 'Saving…', saved: 'Default saved.', invalidEffort: 'Choose an effort supported by this model.' },
+        zh: { title: '默认模型', intro: '用于新对话。现有对话保留各自的模型和推理强度', model: '模型', effort: '推理强度', automatic: '模型默认值', choose: '选择模型', unavailableModel: '已保存的模型不可用', empty: '没有可用模型。请先在上方配置服务商', loadFailed: '无法加载全部模型。请重试刷新列表', retry: '重试', unavailable: '默认模型设置不可用', readOnly: '这些设置为只读', saveFailed: '无法保存默认值。请检查连接后重试', save: '保存默认值', saving: '正在保存…', saved: '默认值已保存', invalidEffort: '请选择此模型支持的推理强度' },
+      };
+      ctx.effect(() => ctx.locale.register(ns, dictionaries), 'rumi-brand: default model copy');
+      const scope = ctx.configForms.get('agent-default-model');
+      const model = new SettingsFormModel(scope, ['provider', 'model', 'reasoningEffort'].map(field => ({
+        field,
+        format: value => typeof value === 'string' ? value : '',
+        parse: text => text ? { kind: 'set', value: text } : field === 'reasoningEffort' ? { kind: 'clear' } : undefined,
+      })));
+      const actions = model.actions();
+      const form = model.bind(() => ({ shell: model.shell(), provider: model.field('provider').text, model: model.field('model').text, effort: model.field('reasoningEffort').text }));
+      const catalog = createSnapshotStore({ value: null, failed: false, loading: true });
+      let generation = 0;
+      let disposed = false;
+      async function refresh() {
+        const request = ++generation;
+        catalog.set({ ...catalog.getSnapshot(), loading: true });
+        try {
+          const result = await ctx.remote.session.modelCatalog();
+          if (disposed || request !== generation) return;
+          if (!result.ok) throw new Error(result.error.code);
+          catalog.set({ value: result.value, failed: result.value.failures.length > 0, loading: false });
+        } catch (error) {
+          // The retained catalog stays visible; the page owns retry feedback.
+          if (!disposed && request === generation) catalog.set({ ...catalog.getSnapshot(), failed: true, loading: false });
+        }
+      }
+      ctx.effect(() => {
+        const off = ['settings/document-updated', 'credentials/record-updated', 'credentials/reference-updated', 'llm/adapters-updated'].map(event => ctx.remote.$on(event, refresh));
+        void refresh();
+        return () => { disposed = true; generation++; off.forEach(dispose => dispose()); model.dispose(); };
+      }, 'rumi-brand: default model state');
+      ctx.on('connection/reset', () => { catalog.set({ value: null, failed: false, loading: true }); void refresh(); });
+      const keyOf = (provider, id) => JSON.stringify([provider, id]);
+      function DefaultModelSettings({ useForm, useCatalog, t, operations }) {
+        const state = useForm(value => value);
+        const directory = useCatalog(value => value);
+        const [open, setOpen] = React.useState(null);
+        const [saved, setSaved] = React.useState(false);
+        const groups = directory.value?.groups ?? [];
+        const provider = groups.find(group => group.id === state.provider);
+        const selected = provider?.models.find(item => item.id === state.model);
+        const efforts = selected?.reasoning?.efforts ?? [];
+        const invalidEffort = Boolean(state.effort) && !efforts.some(item => item.id === state.effort);
+        const blocked = !state.shell.writable || state.shell.saving || directory.loading;
+        const items = groups.flatMap(group => [
+          { type: 'label', id: keyOf(group.id, ''), text: group.name },
+          ...group.models.map(item => ({ id: keyOf(group.id, item.id), label: item.name })),
+        ]);
+        const choose = id => {
+          const [providerId, modelId] = JSON.parse(id);
+          const next = groups.find(group => group.id === providerId)?.models.find(item => item.id === modelId);
+          if (!next) return;
+          operations.edit('provider', providerId);
+          operations.edit('model', modelId);
+          operations.edit('reasoningEffort', next.reasoning?.defaultEffort ?? '');
+          setSaved(false); setOpen(null);
+        };
+        return h('section', { 'aria-label': t('title'), className: 'rumi-default-model' },
+          h('h3', null, t('title')), h('p', null, t('intro')),
+          directory.failed ? h('p', { role: 'status' }, t('loadFailed'), ' ', h(Button, { onClick: operations.refresh, disabled: directory.loading }, t('retry'))) : null,
+          h(SettingsForm, {
+            state: { ...state.shell, invalid: state.shell.invalid || !selected || invalidEffort || blocked },
+            labels: Object.fromEntries(['unavailable', 'readOnly', 'saveFailed', 'save', 'saving'].map(key => [key, t(key)])),
+            onDiscard: operations.discard,
+            onSave: async () => { setSaved(false); if (await operations.save()) setSaved(true); },
+          },
+          h('div', { className: 'rumi-default-model-row' }, h('span', { id: 'rumi-default-model-label' }, t('model')),
+            h(Menu, { open: open === 'model', portal: true, items, selectedId: keyOf(state.provider, state.model), onSelect: choose, onClose: () => setOpen(null),
+              anchor: h(Button, { variant: 'outline', disabled: blocked || items.length === 0, 'aria-labelledby': 'rumi-default-model-label rumi-default-model-value', 'aria-haspopup': 'menu', 'aria-expanded': open === 'model', onClick: () => setOpen(open === 'model' ? null : 'model') },
+                h('span', { id: 'rumi-default-model-value' }, selected ? `${provider.name} · ${selected.name}` : state.model ? t('unavailableModel') : t('choose'))) })),
+          items.length === 0 && !directory.loading ? h('p', { role: 'status' }, t('empty')) : null,
+          selected && (efforts.length > 0 || state.effort) ? h('div', { className: 'rumi-default-model-row' }, h('span', { id: 'rumi-default-effort-label' }, t('effort')),
+            h(Menu, { open: open === 'effort', portal: true, selectedId: state.effort, items: [{ id: '', label: t('automatic') }, ...efforts.map(item => ({ id: item.id, label: item.name }))],
+              onSelect: id => { operations.edit('reasoningEffort', id); setSaved(false); setOpen(null); }, onClose: () => setOpen(null),
+              anchor: h(Button, { variant: 'outline', disabled: blocked, 'aria-labelledby': 'rumi-default-effort-label rumi-default-effort-value', 'aria-haspopup': 'menu', 'aria-expanded': open === 'effort', onClick: () => setOpen(open === 'effort' ? null : 'effort') }, h('span', { id: 'rumi-default-effort-value' }, efforts.find(item => item.id === state.effort)?.name ?? (state.effort || t('automatic')))) })) : null,
+          invalidEffort && selected ? h('p', { role: 'status' }, t('invalidEffort')) : null,
+          saved && !state.shell.dirty ? h('p', { role: 'status' }, t('saved')) : null));
+      }
+      ctx.effect(() => {
+        const style = document.createElement('style');
+        style.textContent = '.rumi-default-model{border-top:1px solid var(--dsw-alias-border-l2);padding-top:var(--dsw-spacing-4,16px)}.rumi-default-model h3{font-size:inherit;font-weight:500}.rumi-default-model p{color:var(--dsw-alias-label-secondary);font-size:13px}.rumi-default-model-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}.rumi-default-model-row button{max-width:100%;height:auto;min-height:36px;white-space:normal;overflow-wrap:anywhere}';
+        document.head.append(style);
+        return () => style.remove();
+      }, 'rumi-brand: default model styles');
+      ctx.slots.inject('settings.models.footer', () => ctx.slots.register({ name: 'settings.models.footer', id: 'rumi-default-model', locale: ns,
+        inject: () => ({ hooks: { form, catalog }, operations: { ...actions, refresh, save: async () => { await model.save(); return !model.shell().failed; } } }),
+      }, DefaultModelSettings));
+    }
+
     return {
       inject: ['slots', 'locale', 'layout'],
       apply(ctx) {
+        ctx.inject(['configForms', 'remote', 'remote.session'], registerDefaultModel);
         ctx.effect(styleViewerLayout, 'rumi-brand: responsive viewer layout');
         ctx.effect(hideChrome, 'rumi-brand: hide developer chrome');
         ctx.effect(styleDocumentTabs, 'rumi-brand: document tab glass');

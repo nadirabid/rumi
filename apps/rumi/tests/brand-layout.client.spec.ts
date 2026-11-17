@@ -10,6 +10,7 @@ function mount() {
       if (label === 'rumi-brand: responsive viewer layout') dispose = effect()
     },
     slots: { inject() {} },
+    inject() {},
     locale: { bind: () => () => '' },
   }
   const loader = { load: (module: { factory: (require: () => object) => { apply: (ctx: typeof context) => void } }) => {

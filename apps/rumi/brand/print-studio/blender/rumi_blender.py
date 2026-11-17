@@ -314,12 +314,15 @@ def apply_shape_controls(recipe_path):
     """
     import hashlib
     recipe = json.loads(Path(recipe_path).read_text())
-    if recipe.get('version') != 1 or not recipe.get('frozen') or recipe.get('operation') not in ['bulge', 'bend', 'twist', 'taper', 'cut', 'fields']:
+    if recipe.get('version') != 1 or not recipe.get('frozen') or recipe.get('operation') not in ['bulge', 'bend', 'twist', 'taper', 'cut', 'fields', 'surface']:
         raise ValueError('Use a frozen v1 recipe from viewer_controls')
     values = recipe.get('values', {})
     if recipe['operation'] == 'fields':
         field_helpers = runpy.run_path(str(Path(__file__).with_name('fields.py')))
         field_helpers['validate_fields'](recipe)
+    elif recipe['operation'] == 'surface':
+        surface_helpers = runpy.run_path(str(Path(__file__).with_name('surface.py')))
+        surface_helpers['validate_surface'](recipe)
     else:
         for key in ['amount', 'spread', 'peakX', 'peakY', 'falloff', 'angle']:
             if not isinstance(values.get(key), (int, float)) or not math.isfinite(values[key]) or not 0 <= values[key] <= 1:
@@ -338,26 +341,47 @@ def apply_shape_controls(recipe_path):
     objects = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH' and obj.visible_get() and not obj.hide_render and (not parts or obj.name in parts)]
     if not objects:
         raise ValueError('No visible mesh matches the recipe parts')
-    if recipe['operation'] == 'fields' and (not parts or any(name not in [obj.name for obj in objects] for name in parts)):
-        raise ValueError('Field parts must match visible meshes exactly')
+    if recipe['operation'] in ('fields', 'surface') and (not parts or any(name not in [obj.name for obj in objects] for name in parts)):
+        raise ValueError('Field and surface parts must match visible meshes exactly')
     graph = bpy.context.evaluated_depsgraph_get()
     pending = []
     try:
         for obj in objects:
             evaluated = obj.evaluated_get(graph)
             matrix = evaluated.matrix_world.copy()
-            inverse = matrix.inverted()
             mesh = bpy.data.meshes.new_from_object(evaluated, depsgraph=graph)
             pending.append((obj, mesh, matrix))
+        context = None
+        if recipe['operation'] == 'surface':
+            def model_point(matrix, point):
+                return [1000 * (sum(float(matrix[i][j]) * point[j] for j in range(3)) + matrix[i][3]) for i in range(3)]
+            points = [model_point(matrix, vertex.co) for _, mesh, matrix in pending for vertex in mesh.vertices]
+            context = surface_helpers['surface_context'](points, recipe.get('uAt', -90))
+        for index, (obj, mesh, matrix) in enumerate(list(pending)):
+            inverse = matrix.inverted()
             if recipe['operation'] == 'cut':
                 if mesh.vertices:
                     trimmed = cut_mesh(mesh, matrix, recipe)
-                    pending[-1] = (obj, trimmed, matrix)
+                    pending[index] = (obj, trimmed, matrix)
                     bpy.data.meshes.remove(mesh)
             else:
+                normals = [list((matrix.to_3x3().inverted().transposed() @ vertex.normal).normalized()) for vertex in mesh.vertices] if recipe['operation'] == 'surface' else None
                 for vertex in mesh.vertices:
                     point = (matrix @ vertex.co) * 1000
-                    deformed = field_helpers['field_point'](point, recipe) if recipe['operation'] == 'fields' else shape_point(point, recipe)
+                    if recipe['operation'] == 'fields':
+                        deformed = field_helpers['field_point'](point, recipe)
+                    elif recipe['operation'] == 'surface':
+                        # Mathutils vectors round intermediate millimetres to Float32. Keep
+                        # unchanged interfaces exact and round only the final local coordinates.
+                        original = model_point(matrix, vertex.co)
+                        delta = surface_helpers['surface_delta'](original, context, recipe['form'], values, normals[vertex.index])
+                        if all(value == 0 for value in delta):
+                            continue
+                        moved = [(original[i] + delta[i]) / 1000 for i in range(3)]
+                        vertex.co = [sum(float(inverse[i][j]) * moved[j] for j in range(3)) + inverse[i][3] for i in range(3)]
+                        continue
+                    else:
+                        deformed = shape_point(point, recipe)
                     vertex.co = inverse @ (deformed / 1000)
         untouched = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH' and obj.visible_get() and not obj.hide_render and obj not in objects]
         if not any(mesh.polygons for _, mesh, _ in pending) and not any(obj.data.polygons for obj in untouched):

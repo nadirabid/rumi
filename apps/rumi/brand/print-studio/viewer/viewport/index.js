@@ -1,4 +1,5 @@
 import { createFieldPreview } from '../analog/field-preview.js'
+import { createSurfacePreview } from '../analog/surface.js'
 import { printParts, arrangePrintParts, createPrintPreview, layoutIssues } from './print-layout.js'
 import { printLayoutIdentity } from '../print-layout/state.js'
 import { createShapeDeformer } from '../analog/gpu.js'
@@ -382,7 +383,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       if (!design) throw new Error('Load the model before its shape controls')
       if (spec.id !== shapeId) {
         clearShape(); hover.clear(); syncHighlight()
-        shapeDeformer = spec.operation === 'fields' ? createFieldPreview(design.root, spec) : spec.operation === 'parameters' ? createParameterPreview(designRoot, design, spec) : createShapeDeformer(design.root, spec); shapeId = spec.id
+        shapeDeformer = spec.operation === 'fields' ? createFieldPreview(design.root, spec) : spec.operation === 'parameters' ? createParameterPreview(designRoot, design, spec) : spec.operation === 'surface' ? createSurfacePreview(design.root, spec) : createShapeDeformer(design.root, spec); shapeId = spec.id
         shapeOperation = spec.operation
         shapeMetrics.frames = 0; shapeMetrics.maxInputToDrawMs = 0; shapeMetrics.lastDrawMs = 0
       }

@@ -280,8 +280,9 @@ export async function createSource(ctx, path, workspace) {
       if (value.status === 'adjusted' || value.status === 'frozen') {
         if (!Number.isSafeInteger(value.sequence) || value.sequence <= shape.editRevision) return false
         if (value.status === 'frozen' && !shape.freezeRequested) throw new Error('Freeze was not requested')
-        shape.values = controlValues(shape, value.values)
-        if (!['parameters', 'fields'].includes(shape.operation)) normalizeValues(shape.values)
+        const values = controlValues(shape, value.values)
+        if (!['parameters', 'fields', 'surface'].includes(shape.operation)) normalizeValues(values)
+        shape.values = values
         shape.editRevision = value.sequence
         if (value.status === 'frozen') { shape.frozen = true; state.highlight = null }
       } else if (value.status !== 'rendered') throw new Error('Unknown shape feedback')

@@ -165,3 +165,24 @@ it('clips selected parts, updates cap placement without changing buffers, and re
   expect(mesh.material).toBe(highlighted)
   overlay.dispose(); geometry.dispose(); material.dispose()
 })
+
+
+it('accepts signed millimetre surface feedback and rejects invalid values without changing state', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-surface-feedback-')), owner = new Context()
+  try {
+    const path = join(root, 'model.usda'); await writeFile(path, '#usda 1.0\n')
+    const source = await createSource({ effect: owner.effect.bind(owner), connection: { fetch: { register: () => () => {} } } }, path, root)
+    const state = source.state()
+    const open = source.shape({ ...state, operation: 'surface', label: 'Profile', parts: ['Shell'],
+      form: { kind: 'profile', at: [0, .5, 1], pinned: [0, 2] }, values: { p1: 0 },
+      controls: [{ kind: 'slider', label: 'Height', axes: [{ key: 'p1', min: -12, max: 12, step: 1, reset: 0 }] }] })
+    const feedback = { id: open.id, url: state.url, status: 'adjusted', sequence: 1, values: { p1: 12 } }
+    expect(source.shapeFeedback(feedback)).toBe(true)
+    expect(source.state().analog).toMatchObject({ values: { p1: 12 }, editRevision: 1 })
+    expect(() => source.shapeFeedback({ ...feedback, sequence: 2, values: { p1: 13 } })).toThrow()
+    expect(source.state().analog).toMatchObject({ values: { p1: 12 }, editRevision: 1 })
+    source.requestShapeFreeze(open.id)
+    expect(source.shapeFeedback({ ...feedback, status: 'frozen', sequence: 3, values: { p1: -12 } })).toBe(true)
+    expect(source.freezeShape(open.id).values).toEqual({ p1: -12 })
+  } finally { await owner.fiber.dispose(); await rm(root, { recursive: true, force: true }) }
+})

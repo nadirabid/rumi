@@ -47,24 +47,7 @@ export async function runValidationStage(config, input, signal, stage) {
     }), { flag: 'wx', mode: 0o600 })
     const script = fileURLToPath(new URL('./validate.py', import.meta.url)).replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`)
     signal.throwIfAborted()
-    await new Promise((resolve, reject) => {
-      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/KEY|SECRET|TOKEN|PASSWORD|^PYTHON/i.test(key)))
-      const child = spawn(blender.executable, ['--background', '--factory-startup', '--disable-autoexec', '--python-exit-code', '1', '--python', script, '--', request],
-        { env: { ...env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
-      let diagnostic = '', failure
-      const collect = chunk => { diagnostic = (diagnostic + chunk.toString()).slice(-4000) }
-      child.stdout.on('data', collect); child.stderr.on('data', collect)
-      const abort = () => { failure = new Error('Blender validation cancelled'); child.kill('SIGKILL') }
-      signal.addEventListener('abort', abort, { once: true })
-      const timer = setTimeout(() => { failure = new Error('Blender validation timed out'); child.kill('SIGKILL') }, config.validationTimeoutMs)
-      child.on('error', error => { failure = error })
-      child.on('close', code => {
-        clearTimeout(timer); signal.removeEventListener('abort', abort)
-        if (failure || code !== 0) reject(failure ?? new Error(`Blender validation failed: ${diagnostic}`))
-        else resolve()
-      })
-      if (signal.aborted) abort()
-    })
+    await runBlenderCheck(blender.executable, script, request, config.validationTimeoutMs, signal)
     const report = JSON.parse(await readFile(output, 'utf8'))
     if (report?.version !== 1 || !['passed', 'review', 'needs_repair'].includes(report.status)
       || report.printReady !== false || !Array.isArray(report.checks) || report.checks.length > 32
@@ -106,4 +89,34 @@ export async function runValidationStage(config, input, signal, stage) {
     }
     return report
   } finally { await rm(directory, { recursive: true, force: true }) }
+}
+
+/** Run an owned Blender checker; cancellation and timeouts await process exit.
+ * @param {string} executable Bundled Blender executable.
+ * @param {string} script Owned checker script.
+ * @param {string} request Private request file.
+ * @param {number} timeoutMs Execution budget.
+ * @param {AbortSignal} signal Owner cancellation.
+ * @returns {Promise<void>} Resolves after a successful process exit.
+ */
+export async function runBlenderCheck(executable, script, request, timeoutMs, signal) {
+  signal.throwIfAborted()
+  await new Promise((resolve, reject) => {
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/KEY|SECRET|TOKEN|PASSWORD|^PYTHON/i.test(key)))
+    const child = spawn(executable, ['--background', '--factory-startup', '--disable-autoexec', '--python-exit-code', '1', '--python', script, '--', request],
+      { env: { ...env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
+    let diagnostic = '', failure
+    const collect = chunk => { diagnostic = (diagnostic + chunk.toString()).slice(-4000) }
+    child.stdout.on('data', collect); child.stderr.on('data', collect)
+    const abort = () => { failure = new Error('Blender validation cancelled'); child.kill('SIGKILL') }
+    signal.addEventListener('abort', abort, { once: true })
+    const timer = setTimeout(() => { failure = new Error('Blender validation timed out'); child.kill('SIGKILL') }, timeoutMs)
+    child.on('error', error => { failure = error })
+    child.on('close', code => {
+      clearTimeout(timer); signal.removeEventListener('abort', abort)
+      if (failure || code !== 0) reject(failure ?? new Error(`Blender validation failed: ${diagnostic}`))
+      else resolve()
+    })
+    if (signal.aborted) abort()
+  })
 }

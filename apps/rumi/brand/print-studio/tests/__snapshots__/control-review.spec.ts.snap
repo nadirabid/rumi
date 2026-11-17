@@ -1,0 +1,51 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`blocks surface presentation when new triangle pairs intersect, regardless of agent assessment 1`] = `
+{
+  "assessments": null,
+  "evidenceId": null,
+  "expectations": [
+    {
+      "effect": "Raise crown",
+      "key": "p1",
+      "preserve": "Keep wall intact",
+    },
+  ],
+  "geometry": [
+    {
+      "baselineIntersectionPairs": 52,
+      "id": "p1:min",
+      "intersectionPairs": 52,
+      "newIntersectionPairs": 1,
+    },
+    {
+      "baselineIntersectionPairs": 52,
+      "id": "p1:max",
+      "intersectionPairs": 52,
+      "newIntersectionPairs": 1,
+    },
+    {
+      "baselineIntersectionPairs": 52,
+      "id": "combined:min",
+      "intersectionPairs": 52,
+      "newIntersectionPairs": 1,
+    },
+    {
+      "baselineIntersectionPairs": 52,
+      "id": "combined:max",
+      "intersectionPairs": 52,
+      "newIntersectionPairs": 1,
+    },
+  ],
+  "id": "<prepared-controls>",
+  "identity": {
+    "contentHash": "one",
+    "path": "/project/model.usda",
+    "revision": 1,
+    "url": "/source/one",
+  },
+  "next": "Revise the controls, then prepare and validate again.",
+  "report": null,
+  "status": "needs_revision",
+}
+`;

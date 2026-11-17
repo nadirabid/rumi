@@ -9,6 +9,7 @@ import { usdRequiresSeparatePrint } from './usd.js'
  * resizing never rewrites a mesh, and the browser renders the same geometry it
  * already fetched.
  */
+import { checkControlGeometry } from '../blender/control-geometry.js'
 import { registerPrintLayout } from './print-layout/host.js'
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
@@ -822,7 +823,9 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       revision: { type: 'integer', description: 'Exact design.revision for open.' },
       url: { type: 'string', description: 'Exact design.url for open.' },
       label: { type: 'string', description: 'Short plain-language region label.' },
-      operation: { type: 'string', enum: ['fields', 'parameters', 'bulge', 'bend', 'twist', 'taper', 'cut'], description: 'fields blends data-only displacement lattices on USD meshes. Other adapters are fixed USD edits. JavaScript parameters are disabled.' },
+      operation: { type: 'string', enum: ['surface', 'fields', 'parameters', 'bulge', 'bend', 'twist', 'taper', 'cut'], description: 'surface supports connected side-view profiles, radial bands, grooves, and explicit planar patches. fields blends displacement lattices. Other adapters are fixed USD edits. JavaScript parameters are disabled.' },
+      form: { type: 'object', additionalProperties: true, description: 'For surface: profile {kind:"profile", at:[t,...], pinned?:[stationIndex,...], links?:{stationIndex:earlierStationIndex}, directions?:[[front,up],...], lateral?} binds p0,p1,... for unpinned stations; pinned stations stay at zero and have no control. Linked stations share the earlier station control and do not get a separate value. directions supplies unit vectors in the side-view plane; defaults point outward at each station. Equal linked directions create a rigid section. Values are travel in mm to 2–8 rising stations: t=.25 front mid-height, .5 crown, .75 back mid-height. Station displacements blend smoothly across the outline, including Z; the underside seam at 0/1 is pinned. lateral is 1–8, default 1. ring {kind:"ring",from,to,millimetres} binds amount. channel {kind:"channel",at:[degrees],from,to,widthMillimetres} binds depth in mm; width is arc length. facet {kind:"facet",from,to,planes:[{normal:[x,y,z],offset}],wallThickness?} binds amount in 0..1. Planes use unit outward normals and offsets in model mm; 1–12 planes must be opposing or perpendicular. At amount=1, points beyond each plane project onto it inside the band core. For oriented hollow shells, wallThickness in mm offsets inward-facing surfaces onto separate inner planes; ambiguous rim edges are rejected. Without it, only shallow patches or solid parts are suitable. from/to are normalized selection height, with edge fade .01–.5 (default .08). Every axis requires a control with reset 0 and range within ±1000. Verify thickness and fit; these mappings do not certify them.' },
+      uAt: { type: 'number', description: 'For surface: front direction around model Z in degrees, default -90 (-Y). All selected parts share one bounds-derived frame.' },
       finish: { type: 'string', enum: ['parameters', 'blender'], description: 'For parameter controls: parameters saves a final JavaScript model; blender finishes a temporary preview on a preserved original.' },
       original: { type: 'string', description: 'Preserved source path for a Blender-finished preview.' },
       edit: { type: 'string', description: 'Semantic Blender edit recipe, including how parameter values affect the original and what must be preserved.' },
@@ -850,7 +853,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       return [{ type: 'text', text: value }, ...(result.images ?? []).map(image => ({ type: 'image', attachment: image }))]
     } },
     presentCall: args => ({ card: 'generic', title: args.action === 'open' ? 'Shape controls' : 'Update shape controls', kind: 'write' }),
-    isConcurrencySafe: () => false, timeoutMs: (validationConfig?.validationTimeoutMs ?? loadTimeoutMs) + 15_000,
+    isConcurrencySafe: () => false, timeoutMs: (validationConfig?.validationTimeoutMs ?? loadTimeoutMs) * 2 + 15_000,
     async execute(args, exec) {
       const sessionId = exec.agent.session.id, record = sessions.get(sessionId)
       if (!record?.source) throw new Error('Load a model first')
@@ -864,6 +867,17 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         if (args.action === 'validate') {
           const release = record.source.retainSnapshot()
           try {
+            const geometryRequest = record.source.controlReview.geometryRequest(args.id)
+            if (geometryRequest) {
+              if (!validationConfig) throw new Error('Control geometry validation requires the bundled Blender configuration')
+              const geometry = await checkControlGeometry(validationConfig, record.source.snapshotBytes(), geometryRequest, exec.signal)
+              await record.source.poll({ force: true })
+              const checked = record.source.controlReview.geometry(args.id, geometry)
+              if (checked.status === 'needs_revision') {
+                events.notify(sessionId)
+                return JSON.stringify({ ...checked, message: 'New intersecting triangle pairs block presentation. Existing defects nearby do not excuse new pairs. Protect the region, revise the deformation or range, or repair the source; then prepare and validate again.' })
+              }
+            }
             const work = record.source.controlReview.validate(args.id, exec.signal, validationConfig?.validationTimeoutMs ?? loadTimeoutMs)
             events.notify(sessionId)
             const result = await work

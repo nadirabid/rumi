@@ -36,16 +36,27 @@ export function createControlReview() {
     state() {
       if (!draft) return null
       return { id: draft.id, status: draft.status, identity: draft.identity, expectations: draft.expectations,
-        evidenceId: draft.evidenceId ?? null, report: draft.report ?? null, assessments: draft.assessments ?? null,
+        evidenceId: draft.evidenceId ?? null, report: draft.report ?? null, geometry: draft.geometry ?? null, assessments: draft.assessments ?? null,
         next: draft.status === 'validation_required' ? 'Call viewer_controls validate with this id.'
           : draft.status === 'awaiting_review' ? 'Inspect every evidence image, then call review with an assessment for every axis and combined effects.'
           : draft.status === 'approved' ? 'Call viewer_controls present with this id.'
           : draft.status === 'needs_revision' ? 'Revise the controls, then prepare and validate again.' : 'Wait for validation to finish.' }
     },
+    geometryRequest(id) {
+      requireDraft(id)
+      return draft.spec.operation === 'surface' ? { spec: draft.spec, cases: draft.cases } : null
+    },
+    geometry(id, cases) {
+      requireDraft(id)
+      draft.geometry = cases
+      if (cases.some(item => item.newIntersectionPairs > 0)) draft.status = 'needs_revision'
+      return this.state()
+    },
     request() { return pending ? { id: pending.id, draftId: draft.id, identity: draft.identity, spec: draft.spec, cases: draft.cases, neutral: draft.neutral } : null },
     validate(id, signal, timeoutMs) {
       requireDraft(id)
       if (pending) throw new Error('Control validation is already running')
+      if (draft.spec.operation === 'surface' && (!draft.geometry || draft.geometry.some(item => item.newIntersectionPairs > 0))) throw new Error('Surface controls require passing host geometry checks before image validation')
       signal.throwIfAborted()
       draft.status = 'validating'; delete draft.report; delete draft.assessments; delete draft.evidenceId
       return new Promise(resolve => {

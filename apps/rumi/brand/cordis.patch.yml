@@ -36,4 +36,5 @@
 - insert:
     - id: rumi-chatgpt
       name: '@rumi/brand/chatgpt'
-      config: {}
+      config:
+        solServiceTier: ultrafast

@@ -1,17 +1,20 @@
 /** Local ChatGPT plan login and account-scoped Responses models. */
+import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import { LlmError, resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
 
+/** Processing tier requested for GPT-6.2 Sol on the ChatGPT account route. */
+export const Config = z.object({ solServiceTier: z.enum(['auto', 'ultrafast']).default('auto') })
 export const inject = ['connection', 'credentials', 'llm']
 const route = 'rumi-chatgpt'
 const account = credentialKey(route, 'account')
 const install = credentialKey(route, 'installation')
 
 /** Mount the provider and its local settings actions. */
-export async function apply(ctx) {
+export async function apply(ctx, config) {
   const native = openaiProvider()
   const oauth = native.auth.oauth
   const models = native.getModels()
@@ -26,6 +29,7 @@ export async function apply(ctx) {
     getModels: () => choices,
     streamSimple: (model, context, options) => native.streamSimple({ ...model, provider: 'openai' }, context, {
       ...options, onPayload(payload) {
+        if (model.id === 'gpt-6.2-sol' && config.solServiceTier === 'ultrafast') payload.service_tier = 'ultrafast'
         if (payload.tools?.length) {
           payload.input.unshift({ type: 'additional_tools', role: 'developer', tools: payload.tools })
           delete payload.tools

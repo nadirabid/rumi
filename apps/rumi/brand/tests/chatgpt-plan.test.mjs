@@ -1,8 +1,8 @@
 import { test as it } from 'node:test'
 import assert from 'node:assert/strict'
-import { apply } from '../chatgpt.js'
+import { apply, Config } from '../chatgpt.js'
 
-function mount(record) {
+function mount(record, settings = {}) {
   let adapter
   let endpoint
   return apply({
@@ -10,7 +10,7 @@ function mount(record) {
     llm: { registerAdapter: (_routes, registered) => { adapter = registered } },
     effect: setup => setup(),
     connection: { fetch: { register: route => { endpoint = route.fetch } } },
-  }).then(() => ({ adapter, endpoint }))
+  }, Config.parse(settings)).then(() => ({ adapter, endpoint }))
 }
 
 it('keeps a metered environment key out of the disconnected plan route', async () => {
@@ -37,11 +37,15 @@ it('restores account models and removes them on disconnect', async () => {
   assert.deepEqual(await adapter.listModels('rumi-chatgpt'), [])
 })
 
-it('sends the subscription bearer and Rumi tools to the public Responses endpoint', async () => {
+for (const [model, settings, tier] of [
+  ['gpt-6.2-sol', { solServiceTier: 'ultrafast' }, 'ultrafast'],
+  ['gpt-6.2-sol', {}, undefined],
+  ['gpt-6.1-sol', { solServiceTier: 'ultrafast' }, undefined],
+]) it(`sends the plan bearer and tools for ${model} with tier ${tier ?? 'auto'}`, async () => {
   const { adapter } = await mount({ kind: 'grant', payload: {
     token: { type: 'oauth', access: 'plan-test-token', expires: Date.now() + 60000 },
-    models: [{ id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' }],
-  } })
+    models: [{ id: model, name: model }],
+  } }, settings)
   let wire
   const original = globalThis.fetch
   globalThis.fetch = async (url, options) => {
@@ -50,12 +54,13 @@ it('sends the subscription bearer and Rumi tools to the public Responses endpoin
     return Response.json({ error: { message: 'fixture ends here' } }, { status: 403 })
   }
   try {
-    for await (const chunk of adapter.stream({ provider: 'rumi-chatgpt', model: 'gpt-6.2-sol', messages: [],
+    for await (const chunk of adapter.stream({ provider: 'rumi-chatgpt', model, messages: [],
       tools: [{ name: 'measure', description: 'Measure the project', inputSchema: { type: 'object', properties: {} } }],
     })) { if (chunk.type === 'finish') break }
   } finally { globalThis.fetch = original }
   assert.equal(wire?.url, 'https://api.openai.com/v1/responses')
   assert.equal(wire.bearer, 'Bearer plan-test-token')
+  assert.equal(wire.body.service_tier, tier)
   assert.equal(wire.body.store, false)
   assert.equal(wire.body.stream, true)
   assert.equal(wire.body.input[0].tools[0].name, 'measure')

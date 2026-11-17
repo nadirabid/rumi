@@ -318,8 +318,8 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
       const { createSnapshotStore } = require('@deepseek-ai/dsh-client-store');
       const ns = 'rumi.default-model';
       const dictionaries = {
-        en: { title: 'Default model', intro: 'Used for new conversations. Existing conversations keep their model and effort.', model: 'Model', effort: 'Reasoning effort', automatic: 'Model default', choose: 'Choose a model', unavailableModel: 'Saved model unavailable', empty: 'No models available. Configure a provider above.', loadFailed: 'Could not load all models. Retry to refresh the list.', retry: 'Retry', unavailable: 'Default model settings are unavailable.', readOnly: 'These settings are read-only.', saveFailed: 'Could not save the default. Check your connection and try again.', save: 'Save default', saving: 'Saving…', saved: 'Default saved.', invalidEffort: 'Choose an effort supported by this model.' },
-        zh: { title: '默认模型', intro: '用于新对话。现有对话保留各自的模型和推理强度', model: '模型', effort: '推理强度', automatic: '模型默认值', choose: '选择模型', unavailableModel: '已保存的模型不可用', empty: '没有可用模型。请先在上方配置服务商', loadFailed: '无法加载全部模型。请重试刷新列表', retry: '重试', unavailable: '默认模型设置不可用', readOnly: '这些设置为只读', saveFailed: '无法保存默认值。请检查连接后重试', save: '保存默认值', saving: '正在保存…', saved: '默认值已保存', invalidEffort: '请选择此模型支持的推理强度' },
+        en: { plan: 'ChatGPT plan', planInfo: 'Sign in for project conversations, then choose your default model below. Live voice uses your separately billed OpenAI API key.', signIn: 'Sign in with ChatGPT', continueLogin: 'Continue in browser', disconnect: 'Disconnect ChatGPT', cancelLogin: 'Cancel sign-in', planError: 'Could not connect to ChatGPT. Retry sign-in.', title: 'Default model', intro: 'Used for new conversations. Existing conversations keep their model and effort.', model: 'Model', effort: 'Reasoning effort', automatic: 'Model default', choose: 'Choose a model', unavailableModel: 'Saved model unavailable', empty: 'No models available. Configure a provider above.', loadFailed: 'Could not load all models. Retry to refresh the list.', retry: 'Retry', unavailable: 'Default model settings are unavailable.', readOnly: 'These settings are read-only.', saveFailed: 'Could not save the default. Check your connection and try again.', save: 'Save default', saving: 'Saving…', saved: 'Default saved.', invalidEffort: 'Choose an effort supported by this model.' },
+        zh: { plan: 'ChatGPT 套餐', planInfo: '登录后可在下方选择项目对话的默认模型。实时语音使用单独计费的 OpenAI API 密钥。', signIn: '使用 ChatGPT 登录', continueLogin: '在浏览器中继续', disconnect: '断开 ChatGPT', cancelLogin: '取消登录', planError: '无法连接 ChatGPT，请重试。', title: '默认模型', intro: '用于新对话。现有对话保留各自的模型和推理强度', model: '模型', effort: '推理强度', automatic: '模型默认值', choose: '选择模型', unavailableModel: '已保存的模型不可用', empty: '没有可用模型。请先在上方配置服务商', loadFailed: '无法加载全部模型。请重试刷新列表', retry: '重试', unavailable: '默认模型设置不可用', readOnly: '这些设置为只读', saveFailed: '无法保存默认值。请检查连接后重试', save: '保存默认值', saving: '正在保存…', saved: '默认值已保存', invalidEffort: '请选择此模型支持的推理强度' },
       };
       ctx.effect(() => ctx.locale.register(ns, dictionaries), 'rumi-brand: default model copy');
       const scope = ctx.configForms.get('agent-default-model');
@@ -353,6 +353,39 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
       }, 'rumi-brand: default model state');
       ctx.on('connection/reset', () => { catalog.set({ value: null, failed: false, loading: true }); void refresh(); });
       const keyOf = (provider, id) => JSON.stringify([provider, id]);
+      function ChatGPTSettings({ t }) {
+        const [state, setState] = React.useState({});
+        const [busy, setBusy] = React.useState(false);
+        const generation = React.useRef(0);
+        async function update(action) {
+          const version = ++generation.current;
+          if (action) setBusy(true);
+          try {
+            const response = await fetch('/api/rumi-chatgpt', action ? {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Rumi-Settings': '1' },
+              body: JSON.stringify({ action }),
+            } : { cache: 'no-store' });
+            if (!response.ok) throw new Error(String(response.status));
+            const next = await response.json();
+            if (version === generation.current) setState(next);
+          } catch (error) {
+            if (version === generation.current) setState(previous => ({ ...previous, failed: true }));
+          } finally {
+            if (version === generation.current) setBusy(false);
+          }
+        }
+        React.useEffect(() => { void update(); return () => { generation.current++; }; }, []);
+        React.useEffect(() => {
+          if (!state.pending || busy) return;
+          const id = setTimeout(() => { void update(); }, 800);
+          return () => clearTimeout(id);
+        }, [state, busy]);
+        return h('section', null, h('h3', null, t('plan')), h('p', null, t('planInfo')),
+          state.failed ? h('p', { role: 'alert' }, t('planError')) : null,
+          state.url ? h('a', { href: state.url, target: '_blank', rel: 'noopener noreferrer' }, t('continueLogin')) : null,
+          h(Button, { disabled: busy, onClick: () => update(state.pending ? 'cancel' : state.connected ? 'disconnect' : 'start') },
+            t(state.pending ? 'cancelLogin' : state.connected ? 'disconnect' : 'signIn')));
+      }
       function DefaultModelSettings({ useForm, useCatalog, t, operations }) {
         const state = useForm(value => value);
         const directory = useCatalog(value => value);
@@ -378,7 +411,7 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
           setSaved(false); setOpen(null);
         };
         return h('section', { 'aria-label': t('title'), className: 'rumi-default-model' },
-          h('h3', null, t('title')), h('p', null, t('intro')),
+          h(ChatGPTSettings, { t }), h('h3', null, t('title')), h('p', null, t('intro')),
           directory.failed ? h('p', { role: 'status' }, t('loadFailed'), ' ', h(Button, { onClick: operations.refresh, disabled: directory.loading }, t('retry'))) : null,
           h(SettingsForm, {
             state: { ...state.shell, invalid: state.shell.invalid || !selected || invalidEffort || blocked },

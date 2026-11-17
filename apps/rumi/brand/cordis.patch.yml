@@ -32,3 +32,8 @@
       name: '@rumi/brand/image-budget'
       config:
         maxImages: 20
+
+- insert:
+    - id: rumi-chatgpt
+      name: '@rumi/brand/chatgpt'
+      config: {}

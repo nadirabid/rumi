@@ -367,6 +367,15 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
         if (!ref) throw new Error('Missing credential reference');
         return { space, profile, ref };
       }
+      const basetenFlashFast = {
+        id: 'deepseek-ai/DeepSeek-V4.1-Flash-1017-Fast',
+        name: 'DeepSeek V4.1 Flash 1017 Fast',
+        contextWindow: 1048576,
+        input: ['text', 'image'],
+        reasoningEfforts: { off: 'none', low: 'low', high: 'high', max: 'max' },
+        compat: { supportsDeveloperRole: false, supportsStore: false, supportsReasoningEffort: true,
+          requiresReasoningContentOnAssistantMessages: true, thinkingFormat: 'openai', maxTokensField: 'max_tokens' },
+      };
       function KeyConnection({ kind, isDefault, t }) {
         const [info, setInfo] = React.useState(null);
         const [editing, setEditing] = React.useState(false);
@@ -402,7 +411,7 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
             if (kind === 'baseten' && !profile?.apiKeyEnv) {
               const op = profile ? { path: ['providers', 'baseten', 'apiKeyEnv'], value: ref }
                 : { path: ['providers', 'baseten'], value: { displayName: 'DeepSeek via Baseten', apiKeyEnv: ref,
-                    models: [{ id: 'deepseek-ai/DeepSeek-V4.1-Flash' }, { id: 'deepseek-ai/DeepSeek-V4-Pro' }] } };
+                    models: [basetenFlashFast, { id: 'deepseek-ai/DeepSeek-V4-Pro' }] } };
               checked(await ctx.remote.settings.mutate(space.ns, [{ op: 'set', ...op }], space.revision));
             }
             checked(await ctx.remote.credentials.set(ref, text.trim()));

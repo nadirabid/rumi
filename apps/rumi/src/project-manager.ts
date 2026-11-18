@@ -252,6 +252,41 @@ export function migrateProjectIsolationPolicy(patch: string): string {
   return patch.slice(0, start) + owned + patch.slice(end)
 }
 
+/**
+ * Upgrade the Baseten route created by Rumi's original connection form.
+ * @param patch - Existing profile patch text.
+ * @returns Patch with Flash 1017 Fast available, retaining the old model for resumed chats.
+ */
+export function migrateBasetenFlash(patch: string): string {
+  const rows = patch.split(/(?=^- id: )/mu)
+  const route = rows.findLastIndex(row => /^- id: llm-pi-ai\r?\n/u.test(row))
+  if (route < 0) return patch
+  const legacy = /^      baseten:\r?\n        displayName: DeepSeek via Baseten\r?\n        apiKeyEnv: BASETEN_API_KEY\r?\n        models:\r?\n(?=          - id: deepseek-ai\/DeepSeek-V4\.1-Flash\r?\n          - id: deepseek-ai\/DeepSeek-V4-Pro(?:\r?\n(?! {10}\S)|$))/mu
+  const row = rows[route]!
+  if (!legacy.test(row)) return patch
+  const model = 'deepseek-ai/DeepSeek-V4.1-Flash-1017-Fast'
+  const fast = [
+    `          - id: ${model}`,
+    '            name: DeepSeek V4.1 Flash 1017 Fast',
+    '            contextWindow: 1048576',
+    '            input: [text, image]',
+    '            reasoningEfforts: {off: none, low: low, high: high, max: max}',
+    '            compat:',
+    '              supportsDeveloperRole: false',
+    '              supportsStore: false',
+    '              supportsReasoningEffort: true',
+    '              requiresReasoningContentOnAssistantMessages: true',
+    '              thinkingFormat: openai',
+    '              maxTokensField: max_tokens',
+  ]
+  rows[route] = row.replace(legacy, header => header + fast.concat('').join(header.endsWith('\r\n') ? '\r\n' : '\n'))
+  const defaultRow = rows.findLastIndex(entry => /^- id: agent-default-model\r?\n/u.test(entry))
+  if (defaultRow >= 0 && /^    provider: baseten\r?$/mu.test(rows[defaultRow]!)) {
+    rows[defaultRow] = rows[defaultRow]!.replace(/^    model: deepseek-ai\/DeepSeek-V4\.1-Flash(?=\r?$)/mu, `    model: ${model}`)
+  }
+  return rows.join('')
+}
+
 /** Append the product policy to a profile patch once, leaving user rows alone. */
 function ensureProfilePolicy(projectDir: string): void {
   const path = join(projectDir, PROFILE_PATCH_FILENAME)
@@ -261,13 +296,14 @@ function ensureProfilePolicy(projectDir: string): void {
   } catch {
     return
   }
-  if (current.includes(RUMI_POLICY_MARKER)) {
-    const migrated = migrateProjectIsolationPolicy(current)
+  const baseten = migrateBasetenFlash(current)
+  if (baseten.includes(RUMI_POLICY_MARKER)) {
+    const migrated = migrateProjectIsolationPolicy(baseten)
     if (migrated !== current) writeFileSync(path, migrated, { mode: 0o600 })
     return
   }
   // The template's lone `[]` is an empty layer; replacing it keeps the seeded rows parseable.
-  const body = current.replace(/(?:^|\n)\[\]\s*$/u, '').trimEnd()
+  const body = baseten.replace(/(?:^|\n)\[\]\s*$/u, '').trimEnd()
   writeFileSync(path, `${body === '' ? '' : `${body}\n\n`}${RUMI_PROFILE_PATCH}`, { mode: 0o600 })
 }
 

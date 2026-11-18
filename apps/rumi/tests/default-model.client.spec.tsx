@@ -214,7 +214,13 @@ it('creates a scoped Baseten route on first connection without changing the defa
   expect(f.configureRoute).toHaveBeenCalledWith('llm-pi-ai', [{
     op: 'set', path: ['providers', 'baseten'], value: {
       displayName: 'DeepSeek via Baseten', apiKeyEnv: 'BASETEN_API_KEY',
-      models: [{ id: 'deepseek-ai/DeepSeek-V4.1-Flash' }, { id: 'deepseek-ai/DeepSeek-V4-Pro' }],
+      models: [{
+        id: 'deepseek-ai/DeepSeek-V4.1-Flash-1017-Fast', name: 'DeepSeek V4.1 Flash 1017 Fast',
+        contextWindow: 1048576, input: ['text', 'image'],
+        reasoningEfforts: { off: 'none', low: 'low', high: 'high', max: 'max' },
+        compat: { supportsDeveloperRole: false, supportsStore: false, supportsReasoningEffort: true,
+          requiresReasoningContentOnAssistantMessages: true, thinkingFormat: 'openai', maxTokensField: 'max_tokens' },
+      }, { id: 'deepseek-ai/DeepSeek-V4-Pro' }],
     },
   }], 7)
   expect(f.storeKey).toHaveBeenCalledWith('BASETEN_API_KEY', 'demo')

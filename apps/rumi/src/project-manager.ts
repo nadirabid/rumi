@@ -192,7 +192,7 @@ export function createDevelopmentProjectMetadata(projectDir: string, release: De
 
 /**
  * Profile policy this app owns, appended once when the profile is created so a
- * fresh install starts in the same shape as an upgraded one: no mode/model/access
+ * fresh install starts in the same shape as an upgraded one: no mode/access
  * selectors, project-confined access for every Session, its own brand seats, and the panel
  * launchers folded into the bottom More menu.
  *
@@ -201,10 +201,8 @@ export function createDevelopmentProjectMetadata(projectDir: string, release: De
  */
 const RUMI_PROFILE_PATCH = `# Rumi profile policy, seeded by the app. Edit below this block.
 
-# Nobody picks a mode, a model, or an access level in this app.
+# Hide the mode and access selectors.
 - id: ui-agent-preset
-  disabled: true
-- id: ui-model-selection
   disabled: true
 - id: ui-permission
   disabled: true
@@ -237,15 +235,17 @@ const RUMI_PROFILE_PATCH = `# Rumi profile policy, seeded by the app. Edit below
 const RUMI_POLICY_MARKER = '# Rumi profile policy, seeded by the app.'
 
 /**
- * Update only the app-owned permission block; custom rows retain their contents.
+ * Update app-owned profile defaults; custom rows retain their contents.
  * @param patch - Existing profile patch text.
- * @returns Patch with the project-confined default, or unchanged text without the owned block.
+ * @returns Patch with the current profile defaults, or unchanged text without the owned block.
  */
 export function migrateProjectIsolationPolicy(patch: string): string {
   const start = patch.indexOf(RUMI_POLICY_MARKER)
   const end = patch.indexOf('# Rumi owns the sidebar brand seats.', start)
   if (start < 0 || end < 0) return patch
   const owned = patch.slice(start, end)
+    .replace('# Nobody picks a mode, a model, or an access level in this app.', '# Hide the mode and access selectors.')
+    .replace('- id: ui-model-selection\n  disabled: true\n', '')
     .replace('# Every Session runs with full access.', '# Every Session starts confined to its project.')
     .replace('    defaultPreset: danger-full-access', '    defaultPreset: workspace-write')
     .replace('sandbox: workspace-write\n        approval: ask', 'sandbox: workspace-write\n        approval: never')

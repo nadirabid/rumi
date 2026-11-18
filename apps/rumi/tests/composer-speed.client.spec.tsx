@@ -62,8 +62,12 @@ function fixture(provider = 'rumi-chatgpt') {
       inject: readonly string[]
       apply: (context: object) => void } }) {
       const plugin = entry.factory(id => modules[id]!)
-      expect(plugin.inject).toEqual(expect.arrayContaining(['modelDirectories', 'sessions', 'remote', 'remote.session']))
-      plugin.apply({ ...ctx, effect: (setup: () => void) => setup(),
+      expect(plugin.inject).toEqual(expect.arrayContaining(['sessions', 'remote', 'remote.session']))
+      expect(plugin.inject).not.toContain('modelDirectories')
+      plugin.apply({ ...ctx, inject: (services: string[], setup: (scope: typeof ctx) => void) => {
+        expect(services).toEqual(['modelDirectories'])
+        setup(ctx)
+      }, effect: (setup: () => void) => setup(),
         locale: { register: (_ns: string, value: { en: Record<string, string> }) => { copy = value.en } } })
     } } })
   const view = () => render(<Picker {...props} locked={false} t={key => copy[key] ?? key}

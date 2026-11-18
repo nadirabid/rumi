@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { initProfile } from '@deepseek-ai/dsh-app-boot'
 import { RUMI_APP_BUNDLE_NAMES } from '../src/app-bundles.ts'
-import { createPluginProfile } from '../src/project-manager.ts'
+import { createPluginProfile, migrateProjectIsolationPolicy } from '../src/project-manager.ts'
 
 const roots: string[] = []
 
@@ -33,6 +33,13 @@ function writeProfileBundles(profileDir: string, bundles: readonly string[]): vo
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+it('removes the seeded model directory disable while preserving a user override', () => {
+  const disabled = '- id: ui-model-selection\n  disabled: true\n'
+  const marker = '# Rumi profile policy, seeded by the app.\n'
+  const sidebar = '# Rumi owns the sidebar brand seats.\n'
+  expect(migrateProjectIsolationPolicy(marker + disabled + sidebar + disabled)).toBe(marker + sidebar + disabled)
 })
 
 it('seeds every app bundle into a new profile', () => {

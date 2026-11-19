@@ -5,7 +5,6 @@ import { dirname, extname, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { validateUsd, USD_MAX_BYTES } from './usd.js'
 import { readMotion } from './motion.js'
-import { normalizeHighlight } from './highlight.js'
 import { normalizePlacement } from './transform.js'
 import { normalizeShape, normalizeValues } from './analog/spec.js'
 import { controlValues, parameterValues } from './analog/control-spec.js'
@@ -40,8 +39,8 @@ export function createSourcePresentation(initial) {
 }
 
 function applyHighlight(state, value) {
-  const next = normalizeHighlight(value)
-  state.highlight = next.blobs.length ? { ...next, id: randomUUID() } : null
+  if (typeof value.label !== 'string' || value.label.length > 200 || (value.meshPath && !value.label.trim())) throw new Error('Supply a descriptive highlight label of up to 200 characters')
+  state.highlight = value.meshPath ? { label: value.label.trim(), meshPath: value.meshPath, triangleCount: value.triangleCount, id: randomUUID() } : null
   return { status: state.highlight ? 'queued' : 'cleared', highlight: state.highlight,
     message: 'Presentation state updated; viewer display and user confirmation are not acknowledged.' }
 }

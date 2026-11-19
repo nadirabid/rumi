@@ -443,6 +443,14 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
     },
   }), 'print viewer: validation geometry')
 
+  route('/highlight-mesh', async request => {
+    const query = new URL(request.url).searchParams
+    const record = sessions.get(query.get('sessionId'))
+    const mesh = record?.highlightMesh
+    if (!mesh || mesh.id !== query.get('id') || displaySource(record)?.state().highlight?.id !== mesh.id) return json({ error: 'highlight_not_found' }, 404)
+    return new Response(mesh.bytes.slice(0), { headers: MESH_HEADERS })
+  })
+
   route('/model', async (request) => {
     const query = new URL(request.url).searchParams
     const sessionId = query.get('sessionId')
@@ -549,7 +557,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   ctx.inject(['liveVoice'], scoped => {
     scoped.effect(() => scoped.liveVoice.register({
       id: 'print-studio-pointing',
-      instructions: () => 'Cursor driven mesh highlighting responds directly to short selection phrases: local patch, whole panel, whole part, just the edge, larger selection, smaller selection. These refine a visual reference only; they never edit geometry. Still delegate the request. Use the attached refined reference and have the modeling assistant confirm it in teal with viewer_highlight, copying region.selection and modelLocalBlob. Do not claim a preview succeeded without its result. When mesh shaping controls are active, delegate satisfaction, completion, cancellation, and changes of topic so the modeling assistant can resolve the current edit and clear its controls and highlight before proceeding. Do not merely acknowledge that it is done.',
+      instructions: () => 'Cursor driven mesh highlighting responds directly to short selection phrases: local patch, whole panel, whole part, just the edge, larger selection, smaller selection. These refine a visual reference only; they never edit geometry. Still delegate the request. Use the attached refined reference and have the modeling assistant confirm it in teal with viewer_highlight, using surface triangles from the referenced model. Do not claim a preview succeeded without its result. When mesh shaping controls are active, delegate satisfaction, completion, cancellation, and changes of topic so the modeling assistant can resolve the current edit and clear its controls and highlight before proceeding. Do not merely acknowledge that it is done.',
       refineRequest: async ({ sessionId, text, content, signal }) => {
         const command = cursorCommand(text)
         if (!command) return content
@@ -607,7 +615,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_cursor_snapshot',
-    description: 'Ask the open 3D viewer for a PNG and the pinned blue cursor region or a fresh hover hit. A pin can be captured while the window is hidden. Prefer an attached cursor-at-start-of-spoken-request reference for that utterance. The result includes model identity, camera, capture time, part, point and radius in millimetres, selection scope, and anchorId. For an editable model, copy region.selection and modelLocalBlob into viewer_highlight with identity.design path/revision/url to show the proposed area in teal. Read the image and region before highlighting or editing. On no_hit, ask the person to pin a surface. On viewer_unavailable, read reason. Bring the preview into view for viewer_hidden, reset Movement for movement_preview, resolve controls for temporary_edit, or leave the print layout for print_layout. Ask the person to check the preview on response_timeout. Treat the region as a soft reference.',
+    description: 'Ask the open 3D viewer for a PNG and the pinned blue cursor region or a fresh hover hit. A pin can be captured while the window is hidden. Prefer an attached cursor-at-start-of-spoken-request reference for that utterance. The result includes model identity, camera, capture time, part, point and radius in millimetres, selection scope, and anchorId. For an editable model, use the part, scope and local coordinates to generate a surface STL for viewer_highlight with the same design identity to show the proposed area in teal. Read the image and region before highlighting or editing. On no_hit, ask the person to pin a surface. On viewer_unavailable, read reason. Bring the preview into view for viewer_hidden, reset Movement for movement_preview, resolve controls for temporary_edit, or leave the print layout for print_layout. Ask the person to check the preview on response_timeout. Treat the region as a soft reference.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => {
       const { image, ...snapshot } = JSON.parse(value)
@@ -718,24 +726,13 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_highlight',
-    description: 'Replace temporary Gaussian wireframe regions on the editable model loaded by viewer_load. Read displayedDesign in the current meshState context (design when validation is unavailable) for the visible path, revision and url; inspect model source to locate regions. Coordinates are model-local millimetres before viewer_transform, including part transforms. Rotation uses XYZ Euler degrees. Up to eight ellipsoids combine by maximum influence, with a fixed soft fade. All intersected surfaces, including the back, may be highlighted. Empty blobs clears. Does not edit geometry or exports. Waits for the visible viewer to acknowledge the matching highlight. Returns rendered only after acknowledgment; not_rendered or superseded is not success. Rendering is not user confirmation. Use this tool to visually ground region-specific edits and explanations of named parts. Follow the user’s requested action and clarify ambiguous intent; no special confirmation phrase is required. Use clarify-mesh-changes for guidance.',
+    description: 'Draw a temporary teal triangle mesh on the editable model. Generate an ASCII or binary STL in the project (outside the watched model directory). Copy evaluated surface triangles, or clip them to the desired boundary. Include part transforms and use model-local millimetres, Z up, before viewer placement. Disconnected patches are supported. Triangles are drawn directly and depth-tested. Use the current displayedDesign identity. Empty meshPath clears. Wait for rendered before describing the overlay as visible. See clarify-mesh-changes.',
     parameters: {
       path: { type: 'string', required: true, description: 'Exact design.path from the current meshState context.' },
       revision: { type: 'integer', required: true, description: 'Exact design.revision from the current meshState context.' },
       url: { type: 'string', required: true, description: 'Exact design.url from the current meshState context; identifies the loaded instance.' },
       label: { type: 'string', required: true, description: 'Short description of the proposed region, at most 200 characters. May be empty when clearing.' },
-      selection: { type: 'object', additionalProperties: false, description: 'Optional exact surface restriction from cursor region.selection. Copy with modelLocalBlob to visually confirm cursor driven mesh highlighting.', properties: {
-        partPath: { type: 'array', required: true, items: { type: 'string' }, description: 'Exact hierarchy path from region.selection.' },
-        surfaceId: { type: 'integer', required: true, description: 'Exact surfaceId from region.selection for this revision.' },
-        mode: { type: 'string', required: true, enum: ['patch', 'surface', 'part', 'edge'], description: 'Local patch, connected surface, whole mesh part, or nearby boundary edge.' },
-      } },
-      blobs: { type: 'array', required: true, description: 'Zero to eight ellipsoids; an empty array clears the highlight.', items: {
-        type: 'object', additionalProperties: false, properties: {
-          center: { type: 'array', required: true, items: { type: 'number' }, description: 'Exactly three coordinates [x,y,z] in millimetres.' },
-          radii: { type: 'array', required: true, items: { type: 'number' }, description: 'Exactly three positive nominal extents [x,y,z] in millimetres, at least 0.001. Influence is exp(-1.5 * squared normalized distance), fading out near 1.3 times these extents.' },
-          rotationDegrees: { type: 'array', required: true, items: { type: 'number' }, description: 'Exactly three XYZ Euler angles in degrees; [0,0,0] aligns with model axes.' },
-        },
-      } },
+      meshPath: { type: 'string', required: true, description: 'Project-relative STL containing the exact surface triangles to color. Empty string clears the overlay.' },
     },
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     isConcurrencySafe: () => false, timeoutMs: 10_000,
@@ -749,12 +746,26 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
           exec.signal.throwIfAborted()
           await record.source.poll()
           exec.signal.throwIfAborted()
-          const result = displaySource(record)?.highlight(args) ?? { status: 'awaiting_validation', message: 'No accepted model is displayed yet.' }
+          if (typeof args.meshPath !== 'string') throw new Error('Supply a project-relative STL meshPath, or an empty string to clear')
+          let bytes = null
+          if (args.meshPath) {
+            if (isAbsolute(args.meshPath) || extname(args.meshPath).toLowerCase() !== '.stl') throw new Error('Supply a project-relative STL meshPath')
+            const cwd = await ctx.workingDirectory.ensure(exec.agent, exec.signal)
+            const target = await realpath(resolve(cwd, args.meshPath))
+            const part = relative(await realpath(cwd), target)
+            if (part === '..' || part.startsWith('..' + sep) || isAbsolute(part)) throw new Error('Highlight mesh must be inside this project')
+            const file = await ctx.fs.resolve(target, { cwd, signal: exec.signal })
+            bytes = encodeStl(parseStl(await ctx.fs.readBytes(file, exec.signal, STL_LIMITS.maxBytes)))
+            exec.signal.throwIfAborted()
+          }
+          const result = displaySource(record)?.highlight({ ...args, triangleCount: bytes ? (bytes.byteLength - 84) / 50 : 0 }) ?? { status: 'awaiting_validation', message: 'No accepted model is displayed yet.' }
           let receipt = null
           if (result.status === 'queued') {
+            record.highlightMesh = { id: result.highlight.id, bytes }
             receipt = receipts.wait(exec.agent.session.id, result.highlight.id, exec.signal)
-            diagnostics.record(exec.agent.session.id, 'highlight.requested', { highlightId: result.highlight.id, revision: args.revision, blobCount: args.blobs.length })
+            diagnostics.record(exec.agent.session.id, 'highlight.requested', { highlightId: result.highlight.id, revision: args.revision, triangleCount: result.highlight.triangleCount })
           }
+          if (result.status === 'cleared') record.highlightMesh = null
           events.notify(exec.agent.session.id)
           return { result, receipt }
         })

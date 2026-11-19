@@ -246,11 +246,16 @@ it('captures loaded geometry at cover size and restores the viewport even when e
 it('owns a temporary overlay separately from design geometry and excludes it from covers', async () => {
   const viewport = createViewport(container(), vi.fn())
   const url = await boxUrl(10, 20, 30, 'highlight-subject')
-  const spec = { format: 'usd', url, transform: {}, highlight: { id: 'region-1', label: 'Top', blobs: [
-    { center: [0, 0, 15], radii: [10, 10, 3], rotationDegrees: [0, 0, 0] },
-  ] } }
+  const spec = { format: 'usd', url, transform: {}, highlight: { id: 'region-1', label: 'Top', positions: new Float32Array([
+    -5, -10, 15, -2, -10, 15, -5, -8, 15, 2, 8, 15, 5, 8, 15, 5, 10, 15,
+  ]) } }
   const report = await viewport.applyDesign(spec, null)
   const design = rendered().getObjectByName('highlight-subject')
+  const overlay = rendered().getObjectByName('Rumi highlight overlay')
+  expect(overlay.geometry.getAttribute('position').array).toEqual(spec.highlight.positions)
+  expect(overlay.material.depthTest).toBe(true)
+  expect(overlay.material.polygonOffset).toBe(true)
+  const disposed = vi.spyOn(overlay.geometry, 'dispose')
   const copy = design.geometry
   const material = design.material
   expect(report.dimensions).toEqual({ x: 10, y: 20, z: 30 })
@@ -261,6 +266,7 @@ it('owns a temporary overlay separately from design geometry and excludes it fro
   expect(shader.fragmentShader).toContain('vec3(0.18, 0.40, 0.37)')
   viewport.setHighlightVisible(false)
   expect(viewport.renderedHighlight()).toBeNull()
+  expect(overlay.visible).toBe(false)
   expect(shader.uniforms.rumiReveal.value).toBe(0)
   viewport.setHighlightVisible(true)
   const visibility: number[] = []
@@ -271,6 +277,8 @@ it('owns a temporary overlay separately from design geometry and excludes it fro
   const disposeGeometry = vi.spyOn(copy, 'dispose')
   const disposeMaterial = vi.spyOn(material, 'dispose')
   await viewport.applyDesign({ ...spec, highlight: null }, null)
+  expect(rendered().getObjectByName('Rumi highlight overlay')).toBeUndefined()
+  expect(disposed).toHaveBeenCalledOnce()
   expect(disposeGeometry).not.toHaveBeenCalled()
   expect(disposeMaterial).not.toHaveBeenCalled()
   expect(design.geometry).toBe(copy)

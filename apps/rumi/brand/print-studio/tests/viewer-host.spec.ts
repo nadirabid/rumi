@@ -335,8 +335,9 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
     expect(loaded.volume).toEqual({ x: 300, y: 320, z: 320 })
     expect(loaded.design).toMatchObject({ revision: 1, error: null, report: null })
     expect((await f.request(loaded.design.url)).headers.get('content-type')).toContain('javascript')
+    await writeFile(join(root, 'overlay.stl'), stl(box()))
     const reference = { path: loaded.design.path, revision: loaded.design.revision, url: loaded.design.url,
-      label: 'Upper region', blobs: [{ center: [0, 0, 3], radii: [2, 2, 1], rotationDegrees: [0, 0, 0] }] }
+      label: 'Upper region', meshPath: 'overlay.stl' }
     const highlighting = f.run('viewer_highlight', reference)
     let scene
     await expect.poll(async () => { scene = await f.state(); return scene.design.highlight?.id }).toBeTruthy()
@@ -344,6 +345,9 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
     await f.routes.get('/api/print-studio/viewer/feedback')!(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
       method: 'POST', body: JSON.stringify({ revision: design.revision, url: design.url, transform: design.transform, highlightId: design.highlight.id }),
     }))
+    const meshRoute = '/api/print-studio/viewer/highlight-mesh?sessionId=session-a&id=' + design.highlight.id
+    expect(parseStl(await (await f.request(meshRoute)).arrayBuffer())).toEqual(box())
+    expect((await f.request(meshRoute.replace('session-a', 'session-b'))).status).toBe(404)
     const highlighted = await highlighting
     expect({ status: highlighted.status, reason: highlighted.reason, message: highlighted.message }).toMatchSnapshot('acknowledged highlight result')
     expect(highlighted.status).toBe('rendered')
@@ -358,7 +362,7 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
     expect((await f.meshState()).design.highlight).toEqual(highlighted.highlight)
     expect((await f.run('viewer_highlight', reference, 'another-session')).status).toBe('model_required')
     expect((await f.run('viewer_highlight', { ...reference, revision: 99 })).status).toBe('stale_model')
-    expect((await f.run('viewer_highlight', { ...reference, blobs: [], label: '' })).status).toBe('cleared')
+    expect((await f.run('viewer_highlight', { ...reference, meshPath: '', label: '' })).status).toBe('cleared')
     const placed = await f.run('viewer_transform', { scale: 2, rotate: { z: 90 } })
     expect(placed.design.transform).toMatchObject({ scale: 2, rotate: { z: 90 } })
     const camera = await f.run('viewer_camera', { azimuth: 45, elevation: 30 })
@@ -779,7 +783,8 @@ it('routes pointing, highlights and feedback to current edits regardless of vali
     const send = (route: string, value: object) => f.routes.get(`/api/print-studio/viewer/${route}`)!(new Request(`http://rumi/api/print-studio/viewer/${route}?sessionId=session-a`, { method: 'POST', body: JSON.stringify(value) }))
     expect((await send('cursor', { requestId: response.cursorRequest.id, snapshot })).status).toBe(200)
     expect((await pending).status).toBe('captured')
-    const highlighting = f.run('viewer_highlight', { path: displayed.path, revision: displayed.revision, url: displayed.url, label: 'Body', blobs: [blob] })
+    await writeFile(join(root, 'overlay.stl'), stl(box()))
+    const highlighting = f.run('viewer_highlight', { path: displayed.path, revision: displayed.revision, url: displayed.url, label: 'Body', meshPath: 'overlay.stl' })
     let highlighted: any // Viewer route is an untyped JSON boundary in this fixture.
     await expect.poll(async () => { highlighted = (await f.state()).design; return highlighted.highlight?.id }).toBeTruthy()
     const report = { status: 'ok', dimensions: { x: 2, y: 2, z: 2 }, checks: [] }

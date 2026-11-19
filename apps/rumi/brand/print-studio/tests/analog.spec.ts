@@ -63,7 +63,7 @@ it('rejects stale feedback and freezes a live capture newer than the last releas
     expect(source.shapeFeedback({ ...feedback, sequence: 1, values: INITIAL_VALUES })).toBe(false)
     expect(() => source.shapeFeedback({ ...feedback, status: 'frozen', sequence: 3 })).toThrow('not requested')
     expect(source.state().analog.editRevision).toBe(2)
-    const highlight = { ...state, label: 'Back', blobs: [{ center: [0, 0, 0], radii: [20, 20, 20], rotationDegrees: [0, 0, 0] }] }
+    const highlight = { ...state, label: 'Back', meshPath: 'back.stl', triangleCount: 2 }
     source.highlight(highlight)
     expect(source.state().highlight).not.toBeNull()
     source.requestShapeFreeze(spec.id)

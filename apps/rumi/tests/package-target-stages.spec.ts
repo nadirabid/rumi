@@ -113,6 +113,43 @@ it('checks the assembled macOS runtime before notarizing and recording the relea
   expect(writeFileSync).toHaveBeenCalledOnce()
 })
 
+it('packs the existing official build without rebuilding it', async () => {
+  const { run, stages } = supervisor()
+  const invocation = parseDesktopPackageInvocation(['mac-arm64', '--reuse-official-build'], 'darwin', 'arm64')
+  await packageTarget(invocation, environment, run)
+  expect(stages[0]).toMatch(/^run release:pack --family dsh /u)
+  expect(stages).not.toContain('run build:official')
+  expect(stages.at(-1)).toBe('exec tsx scripts/smoke-packaged-runtime.ts')
+  expect(packageMacOSArtifacts).toHaveBeenCalledOnce()
+})
+
+it('prepares the macOS runtime while packing and drains it before reporting a pack failure', async () => {
+  const { run } = supervisor()
+  const runtime = Promise.withResolvers<void>()
+  const pack = Promise.withResolvers<void>()
+  run.run.mockImplementation(async (stage) => {
+    if (stage.startsWith('run release:pack --family dsh')) await pack.promise
+    if (stage === 'run prepare:runtime') await runtime.promise
+  })
+  const outcome = packageTarget(parseDesktopPackageInvocation(['mac-arm64', '--prepare-only'], 'darwin', 'arm64'), environment, run)
+    .then(() => undefined, (error: unknown) => error)
+  const settled = vi.fn()
+  void outcome.then(settled)
+  try {
+    await vi.waitFor(() => expect(run.run.mock.calls.map(([stage]) => stage)).toContain('run prepare:runtime'))
+    pack.reject(new Error('pack failed'))
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(settled).not.toHaveBeenCalled()
+  } finally {
+    pack.resolve()
+    runtime.resolve()
+    await outcome
+  }
+  expect(await outcome).toMatchObject({ errors: [new Error('pack failed')] })
+  expect(run.run.mock.calls.map(([stage]) => stage)).not.toContain('run prepare:packages')
+  expect(writeFileSync).not.toHaveBeenCalled()
+})
+
 it.each([
   ['mac-arm64', false], ['mac-arm64', true], ['mac-x64', false], ['mac-x64', true],
 ] as const)('builds unsigned %s with directory=%s without Apple credentials, notarization, or a release record', async (target, directory) => {

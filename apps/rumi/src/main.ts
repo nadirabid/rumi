@@ -848,6 +848,13 @@ async function main(): Promise<void> {
           state = await updateSchedule.check(true)
         }
         if (isMandatory()) { mandatoryUI?.focus(); return }
+        if (state.phase === 'downloading' || state.phase === 'verifying') {
+          await ordinaryMessageBox({ type: 'info', title: locale.messages.updateCheckTitle,
+            message: state.phase === 'verifying' ? locale.messages.updateVerifying
+              : formatDesktopMessage(locale.messages.updateDownloading, { percent: String(Math.floor(state.percent ?? 0)) }),
+            buttons: [locale.messages.later] })
+          return
+        }
         if (state.phase === 'error' && state.failedOperation === 'check') { await showUpdateFailure(state); return }
         if (state.phase === 'idle') {
           await ordinaryMessageBox({ type: 'info', title: locale.messages.updateCheckTitle,

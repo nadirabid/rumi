@@ -94,9 +94,11 @@ export async function packageMacOSArtifacts(
     apple.verifySignature(dmgApp, expected)
     const results = await Promise.allSettled([
       timed('App notarization and ZIP', async () => {
-        await apple.notarize({ appPath: zipApp, ...credentials })
-        apple.verifyNotarization(zipApp, expected)
-        await build({ format: 'zip', appPath: zipApp, output: zipOutput })
+        await timed('App notarization and verification', async () => {
+          await apple.notarize({ appPath: zipApp, ...credentials })
+          apple.verifyNotarization(zipApp, expected)
+        }, secrets)
+        await timed('ZIP and update metadata creation', () => build({ format: 'zip', appPath: zipApp, output: zipOutput }), secrets)
       }, secrets),
       timed('DMG creation and notarization', async () => {
         await build({ format: 'dmg', appPath: dmgApp, output: dmgOutput })

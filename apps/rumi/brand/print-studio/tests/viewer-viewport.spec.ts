@@ -389,6 +389,64 @@ it('captures the same displayed Gaussian in model coordinates and restores scree
   } finally { viewport.dispose() }
 })
 
+it('pins each cursor mode at the click and resumes hover after the next click', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+  vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  try {
+    const spec = { format: 'usd', path: '/model.usda', revision: 1, url: await boxUrl(10, 10, 10), transform: {} }
+    await viewport.applyDesign(spec, null)
+    state.resize()
+    const camera = state.renderer.render.mock.calls.at(-1)[1]
+    camera.lookAt(state.controls.target)
+    const listener = (type: string) => state.renderer.domElement.addEventListener.mock.calls.find(([name]) => name === type)[1]
+    const pointer = { pointerId: 1, isPrimary: true, pointerType: 'mouse', button: 0, clientX: 200, clientY: 150 }
+    const click = (event = pointer) => {
+      listener('pointerdown')(event)
+      listener('pointerup')(event)
+    }
+    const blank = { ...pointer, clientX: 0, clientY: 0 }
+    const shader = { uniforms: {}, vertexShader: '#include <begin_vertex>', fragmentShader: '#include <opaque_fragment>' }
+    meshes()[0].material.onBeforeCompile(shader, state.renderer)
+
+    for (const [index, mode] of ['patch', 'surface', 'part', 'edge'].entries()) {
+      viewport.setCursorMode(mode)
+      listener('pointermove')(blank)
+      click()
+      const pinned = viewport.captureCursor()
+      expect(pinned.status).toBe('captured')
+      expect(pinned.region.selection.mode).toBe(mode)
+      expect(shader.uniforms.rumiCursorMode.value).toBe(index)
+      const scope = shader.uniforms.rumiHover.value.toArray()
+      expect(scope.slice(0, 3)).toEqual(pinned.region.worldPoint)
+      listener('pointerdown')(pointer)
+      listener('pointermove')(blank)
+      listener('pointerup')(pointer)
+      listener('pointerleave')()
+      vi.mocked(window.addEventListener).mock.calls.find(([name]) => name === 'blur')![1](new Event('blur'))
+      expect(viewport.captureCursor().region.worldPoint).toEqual(pinned.region.worldPoint)
+      expect(shader.uniforms.rumiHover.value.toArray()).toEqual(scope)
+      click(blank)
+      expect(viewport.captureCursor()).toEqual({ status: 'no_hit' })
+      listener('pointermove')(pointer)
+      expect(viewport.captureCursor().status).toBe('captured')
+    }
+
+    listener('pointermove')({ ...pointer, clientX: 220 })
+    const previous = viewport.captureCursor()
+    click()
+    const pinned = viewport.captureCursor()
+    viewport.setCursorMode('part')
+    expect(viewport.captureCursor().region).toMatchObject({ worldPoint: pinned.region.worldPoint, selection: { mode: 'part' } })
+    expect(previous.region.worldPoint).not.toEqual(pinned.region.worldPoint)
+    const refined = viewport.captureCursor({ command: 'surface', anchorId: previous.region.anchorId })
+    expect(refined.region).toMatchObject({ worldPoint: previous.region.worldPoint, selection: { mode: 'surface' } })
+    expect(shader.uniforms.rumiHover.value.toArray().slice(0, 3)).toEqual(pinned.region.worldPoint)
+    await viewport.applyDesign({ ...spec, transform: { scale: 2 } }, null)
+    expect(viewport.captureCursor()).toEqual({ status: 'no_hit' })
+  } finally { await viewport.dispose() }
+})
+
 it('reuses measured geometry and GPU resources for highlight-only changes', async () => {
   const viewport = createViewport(container(), vi.fn())
   try {

@@ -419,7 +419,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     renderedHighlight() {
       return !closed && !printPreview && !document.hidden && highlightVisible && designUrl === designSpec?.url ? highlightId : null
     },
-    /** Capture the live cursor region and current camera view; no previous hover is reused. */
+    /** Capture the pinned region or a fresh hover hit with the current camera view. */
     captureCursor(request = {}) {
       if (closed || document.hidden || shapeDeformer || motionPreview || printPreview) return { status: 'viewer_unavailable' }
       if (design && designUrl !== designSpec?.url) return { status: 'stale_view' }
@@ -460,6 +460,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       } finally {
         renderer.setPixelRatio(ratio)
         renderer.setSize(size.x, size.y, false)
+        if (request.command) hover.restorePinned()
         render()
       }
       return {
@@ -470,7 +471,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         image,
       }
     },
-    /** Refine the cursor locally; the next pointer hit uses this selection scope. */
+    /** Change the cursor scope at the pinned point or the next pointer hit. */
     setCursorMode(command) { hover.refine(command) },
     /** Set local presentation visibility without confirming the proposed region. */
     setHighlightVisible(visible) {
@@ -522,7 +523,9 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     },
     async applyDesign(spec, volume) {
       if (closed) return null
-      if (designUrl !== spec?.url) { hover.clear(); cursorAnchors.clear() }
+      if (designSpec?.url !== spec?.url || JSON.stringify(designSpec?.transform) !== JSON.stringify(spec?.transform)) {
+        hover.clear(); cursorAnchors.clear()
+      }
       if (printLayout && (!spec || spec.url !== designUrl || printLayout.identity !== printLayoutIdentity(spec, volume ?? printLayout.volume))) clearPrint(true)
       designSpec = spec
       designVolume = volume
@@ -557,7 +560,10 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
           if (closed || request !== generation) { disposeDesign(next); return null }
           // Validate placement before replacing the last successful design.
           clearShape(); clearMotion(); clearHighlight()
-          if (design) { designRoot.remove(design.root); clearShape(); disposeDesign(design) }
+          if (design) {
+            hover.clear(); cursorAnchors.clear()
+            designRoot.remove(design.root); disposeDesign(design)
+          }
           design = next
           motion = next.motion ?? null
           designUrl = spec.url

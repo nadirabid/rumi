@@ -31,7 +31,7 @@ Start with zero deformation unless the person requested an initial change. Defin
 
 For a bottom cut, use `operation: cut`, `direction: [0,0,1]` to retain the upper side, and `center` at the proposed height. Amount moves the plane by `(amount*2-1)*limit` along direction; .5 is the proposed height. Angle tilts along V and spread leans along U, each spanning -60 to +60 degrees with .5 untilted. Positive tilt raises the plane toward positive V; positive lean raises it toward positive U. Set every radius at least as large as limit; radii do not clip the cut footprint. Select all parts that should share the edge.
 
-Opening a cut clears prior Gaussian highlights and displays a continuous teal guide at the actual plane. A rendered cut receipt confirms the guide and controls. The guide disappears on freeze or close; other region highlights are rejected until the cut resolves. The viewer previews capped cross-sections; saving uses a Blender intersection that preserves cavity openings.
+Opening a cut clears prior mesh overlays and displays a continuous teal guide at the actual plane. A rendered cut receipt confirms the guide and controls. The guide disappears on freeze or close; other region highlights are rejected until the cut resolves. The viewer previews capped cross-sections; saving uses a Blender intersection that preserves cavity openings.
 
 Open controls before applying the requested cut. To restore material below an already cut edge, use the matching earlier revision.
 

@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest'
 import { createHighlight } from '../viewer/viewport/highlight.js'
 import { createSurfaceIndex } from '../viewer/viewport/surfaces.js'
 import { cursorCommand } from '../viewer/cursor-commands.js'
-import { normalizeHighlight } from '../viewer/highlight.js'
+import { normalizeSelection } from '../viewer/highlight.js'
 
 it('joins coplanar triangles, stops at creases, and preserves triangle identity when picking', () => {
   const geometry = new THREE.BoxGeometry(2, 2, 2).toNonIndexed()
@@ -76,10 +76,10 @@ it('recognizes only short selection requests, never embedded geometry edits or n
   }
 })
 
-it('retains a captured selection for exact agent confirmation and rejects malformed references', () => {
+it('retains a captured selection in a cursor snapshot and rejects malformed references', () => {
   const selection = { partPath: ['helmet', 'faceplate'], surfaceId: 5, mode: 'surface' }
-  expect(normalizeHighlight({ label: 'faceplate', blobs: [], selection }).selection).toEqual(selection)
-  expect(() => normalizeHighlight({ label: '', blobs: [], selection: { ...selection, surfaceId: -1 } })).toThrow()
+  expect(normalizeSelection(selection)).toEqual(selection)
+  expect(() => normalizeSelection({ ...selection, surfaceId: -1 })).toThrow()
 })
 
 it.each(['curved', 'flat', 'shuffled'])('matches native picking across a subdivided %s mesh', (kind) => {

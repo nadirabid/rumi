@@ -322,7 +322,7 @@ it('captures only on an agent request without rebuilding an unchanged scene', as
 })
 
 it('acknowledges a highlight when the document becomes visible without another scene change', async () => {
-  const design = { url: '/source/one/model.js', revision: 1, transform: { scale: 1 }, highlight: { id: 'region-one', blobs: [] } }
+  const design = { url: '/source/one/model.js', revision: 1, transform: { scale: 1 }, highlight: { id: 'region-one', meshPath: 'overlay.stl' } }
   const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
   viewport.applyDesign.mockResolvedValue({ status: 'ok', dimensions: { x: 10, y: 20, z: 30 }, checks: [] })
   viewport.renderedHighlight.mockImplementation(() => document.hidden ? null : 'region-one')
@@ -341,7 +341,7 @@ it('acknowledges a highlight when the document becomes visible without another s
 })
 
 it('reports the rendered identity and client timing for a visible highlight', async () => {
-  const design = { url: '/source/one/model.js', revision: 1, transform: { scale: 1 }, highlight: { id: 'region-visible', blobs: [] } }
+  const design = { url: '/source/one/model.js', revision: 1, transform: { scale: 1 }, highlight: { id: 'region-visible', meshPath: 'overlay.stl' } }
   viewport.applyDesign.mockResolvedValue({ status: 'ok', dimensions: { x: 10, y: 20, z: 30 }, checks: [] })
   viewport.renderedHighlight.mockReturnValue('region-visible')
   const view = fixture({ scene: { ...scene([]), design } })
@@ -350,6 +350,7 @@ it('reports the rendered identity and client timing for a visible highlight', as
   expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/feedback?sessionId=session-a', expect.objectContaining({
     body: expect.stringContaining('"highlightId":"region-visible"'),
   }))
+  expect(viewport.applyDesign).toHaveBeenCalledWith({ ...design, highlight: { ...design.highlight, positions: positions() } }, null)
   const delivered = view.fetch.mock.calls.find(([url]) => String(url).includes('/feedback?'))!
   expect(JSON.parse(String(delivered[1]?.body))).toMatchObject({
     revision: 1, url: design.url, transform: design.transform, volume: null,

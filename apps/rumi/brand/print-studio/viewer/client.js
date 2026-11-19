@@ -386,11 +386,22 @@ export function installViewer(ctx, React, primitives) {
         return () => { active = false; controller.abort() }
       }
       trace('apply_started')
-      designReady.current = viewport.current.applyDesign(view?.design ?? null, view?.volume ?? null)
+      let spec = view.design
+      designReady.current = (async () => {
+        if (spec.highlight?.meshPath) {
+          const query = new URLSearchParams({ sessionId: view.sessionId, id: spec.highlight.id })
+          const response = await fetch(`${ROUTE}/highlight-mesh?${query}`, { signal: controller.signal })
+          if (!response.ok) throw new Error(`Highlight mesh unavailable (${response.status})`)
+          const positions = parseStl(await response.arrayBuffer())
+          if (!active) return null
+          spec = { ...spec, highlight: { ...spec.highlight, positions } }
+        }
+        return viewport.current.applyDesign(spec, view.volume ?? null)
+      })()
       const reportRendered = async () => {
         await designReady.current
         if (!active) return
-        const report = await viewport.current.applyDesign(view?.design ?? null, view?.volume ?? null)
+        const report = await viewport.current.applyDesign(spec, view.volume ?? null)
         if (!active || !report) return
         const highlightId = viewport.current?.renderedHighlight?.() ?? null
         await feedback({ report, parameters: viewport.current.modelParameters(), motion: viewport.current.motionControls?.() ?? null, loadStatus: document.hidden ? 'viewer_hidden' : 'ready', highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })

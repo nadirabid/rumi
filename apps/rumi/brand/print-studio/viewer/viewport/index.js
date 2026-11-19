@@ -87,7 +87,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     if (controls) controls.enabled = true
     if (forget) { printableParts = null; printLayout = null; printUndo.length = 0; printSelected = null; printPlate = 0 }
     if (restore) {
-      highlightOverlay?.resume(); highlightOverlay?.setVisible(highlightVisible)
+      highlightOverlay?.resume(); showOverlay(highlightVisible)
       clearVolume()
       if (designVolume) buildVolume(designVolume)
       volumeKey = designVolume ? `${designVolume.x},${designVolume.y},${designVolume.z}` : 'none'
@@ -215,7 +215,21 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   controls.addEventListener('change', cameraChanged)
   renderer.domElement.addEventListener('webglcontextlost', lost)
 
+  let surfaceOverlay = null
+  function clearSurfaceOverlay() {
+    if (!surfaceOverlay) return
+    surfaceOverlay.removeFromParent()
+    surfaceOverlay.geometry.dispose()
+    surfaceOverlay.material.dispose()
+    surfaceOverlay = null
+  }
+  function showOverlay(visible) {
+    highlightOverlay?.setVisible(visible)
+    if (surfaceOverlay) surfaceOverlay.visible = visible
+  }
+
   function clearHighlight() {
+    clearSurfaceOverlay()
     if (highlightOverlay) { highlightOverlay.dispose() }
     highlightOverlay = null
     highlightId = null
@@ -226,9 +240,21 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     const highlight = !printPreview && !motionPreview && designUrl === designSpec?.url ? designSpec?.highlight : null
     if (highlightOverlay && highlightId === (highlight?.id ?? null)) return
     if (!design) { clearHighlight(); return }
-    if (highlightOverlay) highlightOverlay.update(highlight ?? { blobs: [] })
-    else highlightOverlay = createHighlight(motionPreview?.root ?? design.root, highlight ?? { blobs: [] }, hover, activity.uniform)
-    highlightOverlay.setVisible(highlightVisible)
+    clearSurfaceOverlay()
+    if (highlight?.positions) {
+      const geometry = new THREE.BufferGeometry()
+      geometry.setAttribute('position', new THREE.BufferAttribute(highlight.positions, 3))
+      const material = new THREE.MeshBasicMaterial({ color: 0x29b59d, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, depthWrite: false })
+      surfaceOverlay = new THREE.Mesh(geometry, material)
+      surfaceOverlay.name = 'Rumi highlight overlay'
+      surfaceOverlay.renderOrder = 1
+      surfaceOverlay.matrixAutoUpdate = false
+      surfaceOverlay.matrix = designRoot.matrix
+      scene.add(surfaceOverlay)
+    }
+    if (highlightOverlay) highlightOverlay.update(highlight?.blobs ? highlight : { blobs: [] })
+    else highlightOverlay = createHighlight(motionPreview?.root ?? design.root, highlight?.blobs ? highlight : { blobs: [] }, hover, activity.uniform)
+    showOverlay(highlightVisible)
     highlightId = highlight?.id ?? null
   }
 
@@ -324,7 +350,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     /** Enter a print-only preview; an absent saved layout creates deterministic placement. */
     openPrintLayout(saved, options) {
       if (activity.mode !== 'idle' || !design || designUrl !== designSpec?.url || shapeDeformer || objects.size) throw new Error('Load a canonical model and finish editing before arranging')
-      clearMotion(); syncHighlight(); highlightOverlay?.setVisible(false)
+      clearMotion(); syncHighlight(); showOverlay(false)
       try {
         if (!printableParts) printableParts = printParts(design)
         const identity = printLayoutIdentity(designSpec, options.volume)
@@ -482,7 +508,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     setHighlightVisible(visible) {
       highlightVisible = visible
       shapeDeformer?.setGuideVisible?.(visible && !designSpec?.analog?.frozen)
-      if (highlightOverlay) highlightOverlay.setVisible(visible)
+      showOverlay(visible)
       render()
     },
     /** Capture a fitted 480 × 320 PNG using the loaded geometry; restore the interactive viewport. */
@@ -510,7 +536,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       try {
         hover.sphere.value.w = 0
         activity.uniform.value.x = 0
-        if (highlightOverlay) highlightOverlay.setVisible(false)
+        showOverlay(false)
         for (const node of volumeNodes) node.visible = false
         renderer.setPixelRatio(1)
         renderer.setSize(480, 320, false)
@@ -519,7 +545,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       } finally {
         activity.uniform.value.x = activityMode
         hover.sphere.value.w = hoverRadius
-        if (highlightOverlay) highlightOverlay.setVisible(overlayVisible)
+        showOverlay(overlayVisible)
         volumeNodes.forEach((node, index) => { node.visible = visibility[index] })
         renderer.setPixelRatio(ratio)
         renderer.setSize(size.x, size.y, false)

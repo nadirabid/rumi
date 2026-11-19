@@ -1,18 +1,108 @@
 import { test as it } from 'node:test'
 import assert from 'node:assert/strict'
+import { get } from 'node:http'
 import { apply, Config } from '../chatgpt.js'
+
+const provider = 'rumi-chatgpt'
+const account = `${provider}/account`
+const model = 'gpt-6.2-sol'
+const planModels = [{ id: model, name: 'GPT-6.2 Sol', tiers: ['auto'] }]
+const expiredGrant = { kind: 'grant', payload: { models: planModels, token: {
+  type: 'oauth', access: 'old-access', refresh: 'old-refresh', clientId: 'first-client', expires: 0,
+} } }
+const endpointRequest = (action) => new Request('http://localhost/api/rumi-chatgpt', action ? {
+  method: 'POST', headers: { 'x-rumi-settings': '1' }, body: JSON.stringify({ action }),
+} : undefined)
 
 function mount(record, settings = {}, selections = new Map()) {
   let adapter
   let endpoint, speed
+  const records = new Map(record ? [[account, record]] : [])
+  let writes = Promise.resolve()
   return apply({
     storageDomain: { open: async () => ({ close() {}, table: () => ({ get: key => selections.get(key), put: async (key, value) => selections.set(key, value) }) }) },
-    credentials: { readRecord: async () => record, modifyRecord: async (_key, mutate) => mutate(undefined), deleteRecord: async () => { record = undefined } },
+    credentials: { readRecord: async key => records.get(key), modifyRecord(key, mutate) {
+      const operation = writes.then(async () => {
+        const current = records.get(key)
+        const next = await mutate(current)
+        if (next !== undefined) records.set(key, next)
+        return next ?? current
+      })
+      writes = operation.then(() => undefined, () => undefined)
+      return operation
+    }, deleteRecord: async key => { records.delete(key) } },
     llm: { registerAdapter: (_routes, registered) => { adapter = registered } },
     effect: setup => setup(),
     connection: { fetch: { register: route => { if (route.path.endsWith('/speed')) speed = route.fetch; else endpoint = route.fetch } } },
-  }, Config.parse(settings)).then(() => ({ adapter, endpoint, speed }))
+  }, Config.parse(settings)).then(() => ({ adapter, endpoint, speed, accountRecord: () => records.get(account) }))
 }
+
+async function send(adapter) {
+  for await (const chunk of adapter.stream({ provider, model, messages: [] })) {
+    if (chunk.type === 'finish') break
+  }
+}
+
+it('only renews on inference and atomically stores the replacement for concurrent requests', async (t) => {
+  const { adapter, accountRecord, endpoint, speed } = await mount(expiredGrant)
+  const refresh = Promise.withResolvers()
+  const allowRefresh = Promise.withResolvers()
+  const sent = []
+  let inferenceStarted = false
+  let refreshRequests = 0
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    const request = new Request(url, options)
+    if (request.url === 'https://auth.openai.com/api/accounts/oauth/token') {
+      assert.ok(inferenceStarted, 'Opening the model catalog must not rotate the grant')
+      refreshRequests++
+      assert.deepEqual(Object.fromEntries(await request.formData()), { grant_type: 'refresh_token',
+        client_id: 'first-client', refresh_token: 'old-refresh', resource: 'https://api.openai.com/v1' })
+      refresh.resolve()
+      await allowRefresh.promise
+      return Response.json({ access_token: 'new-access', refresh_token: 'new-refresh', expires_in: 3600,
+        scope: 'chatgpt.tokens.use.direct offline_access' })
+    }
+    assert.equal(request.url, 'https://api.openai.com/v1/responses')
+    sent.push(request.headers.get('authorization'))
+    return Response.json({ error: { message: 'fixture' } }, { status: 403 })
+  })
+  assert.equal((await adapter.listModels(provider)).length, 1)
+  assert.equal((await (await endpoint(endpointRequest())).json()).connected, true)
+  assert.equal((await speed(new Request(`http://localhost/api/rumi-chatgpt/speed?sessionId=one&model=${model}`))).status, 200)
+  assert.equal(refreshRequests, 0)
+  inferenceStarted = true
+  const first = send(adapter)
+  await Promise.race([refresh.promise, first])
+  const second = send(adapter)
+  allowRefresh.resolve()
+  await Promise.all([first, second])
+  assert.equal(refreshRequests, 1)
+  assert.deepEqual(sent, ['Bearer new-access', 'Bearer new-access'])
+  assert.equal(accountRecord().payload.token.refresh, 'new-refresh')
+})
+
+it('retains the grant on an outage and stops using it after an explicit token rejection', async (t) => {
+  const { adapter, accountRecord, endpoint } = await mount(expiredGrant)
+  let refreshRequests = 0
+  const fetch = t.mock.method(globalThis, 'fetch', async (url) => {
+    assert.equal(url, 'https://auth.openai.com/api/accounts/oauth/token')
+    return refreshRequests++ === 0 ? new Response(null, { status: 503 })
+      : Response.json({ error: 'invalid_grant' }, { status: 400 })
+  })
+  await assert.rejects(send(adapter), { code: 'UPSTREAM' })
+  assert.deepEqual(accountRecord(), expiredGrant)
+  assert.equal((await (await endpoint(endpointRequest())).json()).reauthRequired, false)
+  await assert.rejects(send(adapter), { code: 'AUTH', message: /Sign in again/ })
+  assert.equal(accountRecord().payload.token, undefined)
+  assert.deepEqual(accountRecord().payload.models, planModels)
+  const reopened = await mount(accountRecord())
+  assert.deepEqual(await (await reopened.endpoint(endpointRequest())).json(), {
+    connected: false, reauthRequired: true, pending: false, failed: false,
+  })
+  await assert.rejects(reopened.adapter.listModels(provider), { code: 'AUTH', message: /Sign in again/ })
+  await assert.rejects(send(reopened.adapter), { code: 'AUTH' })
+  assert.equal(fetch.mock.callCount(), 2)
+})
 
 it('keeps a metered environment key out of the disconnected plan route', async () => {
   const original = process.env.OPENAI_API_KEY
@@ -67,26 +157,58 @@ for (const [model, settings, tier] of [
   assert.equal(wire.body.input[0].tools[0].name, 'measure')
 })
 
-it('opens a local callback for the Rumi installation and releases it on cancellation', async () => {
-  const { endpoint } = await mount()
-  const address = 'http://localhost/api/rumi-chatgpt'
-  const post = action => endpoint(new Request(address, { method: 'POST',
-    headers: { 'x-rumi-settings': '1' }, body: JSON.stringify({ action }) }))
-  try {
-    await post('start')
-    let status
+it('replaces a rejected grant through browser sign-in without disconnecting', async (t) => {
+  const record = { kind: 'grant', payload: { models: planModels, clientId: 'first-client', reauthRequired: true } }
+  const { adapter, endpoint, accountRecord } = await mount(record)
+  async function waitForState(ready) {
     for (let i = 0; i < 100; i++) {
-      status = await (await endpoint(new Request(address))).json()
-      if (status.url || status.failed) break
+      const state = await (await endpoint(endpointRequest())).json()
+      assert.equal(state.failed, false)
+      if (ready(state)) return state
       await new Promise(resolve => setTimeout(resolve, 10))
     }
-    assert.equal(status.failed, false)
-    const url = new URL(status.url)
-    assert.equal(url.hostname, 'auth.openai.com')
-    assert.equal(url.searchParams.get('agent_name_hint'), 'Rumi')
-    assert.equal(url.searchParams.get('code_challenge_method'), 'S256')
+    assert.fail('ChatGPT sign-in did not reach the expected state')
+  }
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    const request = new Request(url, options)
+    if (request.url === 'https://auth.openai.com/api/accounts/oauth/token') {
+      const body = await request.formData()
+      assert.equal(body.get('grant_type'), 'authorization_code')
+      assert.equal(body.get('client_id'), 'replacement-client')
+      return Response.json({ access_token: 'replacement-access', refresh_token: 'replacement-refresh',
+        id_token: 'fixture', expires_in: 3600, scope: 'chatgpt.tokens.use.direct offline_access' })
+    }
+    assert.equal(request.url, 'https://api.openai.com/v1/models')
+    assert.equal(request.headers.get('authorization'), 'Bearer replacement-access')
+    return Response.json({ models: [{ slug: model, display_name: 'Sol from this account', visibility: 'list' }] })
+  })
+  try {
+    await endpoint(endpointRequest('start'))
+    await waitForState(state => Boolean(state.url))
+    assert.equal((await (await endpoint(endpointRequest('cancel'))).json()).pending, false)
+    assert.deepEqual(accountRecord(), record)
+
+    await endpoint(endpointRequest('start'))
+    const { url } = await waitForState(state => Boolean(state.url))
+    const authorize = new URL(url)
+    assert.equal(authorize.hostname, 'auth.openai.com')
+    assert.equal(authorize.searchParams.get('agent_name_hint'), 'Rumi')
+    assert.equal(authorize.searchParams.get('code_challenge_method'), 'S256')
+    const callback = new URL(authorize.searchParams.get('redirect_uri'))
+    callback.search = new URLSearchParams({ state: authorize.searchParams.get('state'), code: 'browser-code',
+      client_id: 'replacement-client' })
+    await new Promise((resolve, reject) => {
+      get(callback, response => {
+        response.resume()
+        response.on('end', () => response.statusCode === 200 ? resolve() : reject(new Error(`Callback responded ${response.statusCode}`)))
+      }).on('error', reject)
+    })
+    await waitForState(state => state.connected && !state.pending)
+    assert.equal(accountRecord().payload.token.refresh, 'replacement-refresh')
+    assert.equal(accountRecord().payload.reauthRequired, undefined)
+    assert.equal((await adapter.listModels(provider))[0].name, 'Sol from this account')
   } finally {
-    assert.equal((await (await post('cancel')).json()).pending, false)
+    await endpoint(endpointRequest('cancel'))
   }
 })
 

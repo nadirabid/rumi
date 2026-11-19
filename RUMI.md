@@ -104,6 +104,8 @@ First launch opens Projects without signing in or entering a key. Configure the 
 
 Under **Settings → Models → Provider connections**, configure ChatGPT plan, DeepSeek API, and DeepSeek via Baseten independently. For ChatGPT, choose **Connect → Sign in with ChatGPT** and continue in your browser. Under **Project conversations**, select a provider and model, then save the default for new conversations. The picker shows compatible models from your account. In the composer’s model picker, **Requested speed** lists the service tiers advertised by the signed-in ChatGPT account for the selected model. Rumi remembers the choice for that conversation and model. GPT-6.2 Sol defaults to Ultrafast when available. Set `solServiceTier: auto` on the `rumi-chatgpt` profile entry to use the account default. OpenAI determines the tier served for each request. Live voice uses its separately billed OpenAI API key. Disconnecting ChatGPT removes the grant from Rumi’s local credential store.
 
+Rumi renews ChatGPT access when a model request needs it. Model pickers read the saved catalog. If OpenAI rejects renewal and requires fresh authorization, choose **Sign in again** on the ChatGPT plan row. After browser sign-in, Rumi restores the account’s model list and keeps saved conversation selections.
+
 ## Moving an earlier install
 
 Builds before Rumi owned `~/.rumi` kept their profile and state under `~/.dsh`, beside DeepSeek Harness. Move that data once before launching a newer build, or the app opens empty:

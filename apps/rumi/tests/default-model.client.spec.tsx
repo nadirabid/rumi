@@ -12,9 +12,13 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 const disposers: (() => void)[] = []
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); disposers.splice(0).reverse().forEach(dispose => dispose()) })
 
-async function fixture(options: { writable?: boolean; failSave?: boolean; freshBaseten?: boolean } = {}) {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(
-    url.endsWith('rumi-chatgpt') ? { connected: true } : { hasKey: true, hint: '1234' })))
+async function fixture(options: { writable?: boolean; failSave?: boolean; freshBaseten?: boolean; reauthRequired?: boolean } = {}) {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (!url.endsWith('rumi-chatgpt')) return Response.json({ hasKey: true, hint: '1234' })
+    const state = { connected: !options.reauthRequired, reauthRequired: options.reauthRequired }
+    return Response.json(init?.method === 'POST' ? { ...state, pending: true, url: 'https://auth.openai.com/' } : state)
+  })
+  vi.stubGlobal('fetch', fetch)
   const configured = new Set(['DIRECT_KEY'])
   const basetenProfiles: Record<string, { apiKeyEnv: string }> = options.freshBaseten ? {} : { baseten: { apiKeyEnv: 'BASETEN_REF' } }
   const configureRoute = vi.fn(async (_ns: string, ops: { value: { apiKeyEnv: string } }[]) => {
@@ -117,8 +121,20 @@ async function fixture(options: { writable?: boolean; failSave?: boolean; freshB
       useCatalog={select => select(React.useSyncExternalStore(injected.hooks.catalog.subscribe, injected.hooks.catalog.getSnapshot))} />
   }
   await act(async () => { render(<View />) })
-  return { scope, mutate, modelCatalog, listeners, catalog, configured, storeKey, configureRoute }
+  return { scope, mutate, modelCatalog, listeners, catalog, configured, storeKey, configureRoute, fetch }
 }
+
+it('offers fresh authorization from a rejected ChatGPT default without disconnecting', async () => {
+  const f = await fixture({ reauthRequired: true })
+  await act(async () => { f.scope.set({ ...f.scope.getSnapshot(), value: { provider: 'rumi-chatgpt', model: 'gpt-6.2-sol', reasoningEffort: 'high' } }) })
+  const row = within(screen.getByText('ChatGPT plan', { selector: 'strong' }).parentElement!.parentElement!.parentElement!)
+  expect(row.getByText('Sign-in required')).toBeTruthy()
+  fireEvent.click(row.getByRole('button', { name: 'Sign in again' }))
+  expect(await row.findByRole('link', { name: 'Continue in browser' })).toBeTruthy()
+  expect(f.fetch.mock.calls.filter(([, init]) => init?.method === 'POST').map(([, init]) => init?.body))
+    .toEqual([JSON.stringify({ action: 'start' })])
+  expect(f.mutate).not.toHaveBeenCalled()
+})
 
 it('stages a new model, clears incompatible effort, and saves the default atomically', async () => {
   const f = await fixture()

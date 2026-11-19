@@ -579,10 +579,10 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   })
 
   async function captureReference(sessionId, signal, refinement = {}) {
-    if (closed) return JSON.stringify({ status: 'viewer_unavailable' })
+    if (closed) return JSON.stringify({ status: 'viewer_unavailable', reason: 'viewer_closed' })
     const capture = (async () => {
         const record = sessions.get(sessionId)
-        if (!record) return JSON.stringify({ status: 'viewer_unavailable' })
+        if (!record) return JSON.stringify({ status: 'viewer_unavailable', reason: 'viewer_not_open' })
         const identity = await serialize(record, async () => { await record.source?.poll(); return displayIdentity(record) })
         if (displaySource(record)?.state().error) return JSON.stringify({ status: 'stale_view' })
         const snapshot = await cursors.request(sessionId, identity, signal, refinement)
@@ -607,7 +607,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_cursor_snapshot',
-    description: 'Ask the open 3D viewer to capture the current cursor Gaussian region and a PNG of the current view. Cursor mesh vision is blue; agent viewer_highlight regions are teal. Captures when the viewer services this request, not when the person last spoke. Prefer an attached cursor-at-start-of-spoken-request reference for that utterance. Returns a revision-specific region.selection (surface/part/edge scope) and anchorId; copy selection together with modelLocalBlob into viewer_highlight to confirm the exact area. Returns the pointed object/part, world-space point and radius in millimetres, model identity, camera and capture time. Editable-model hits include modelLocalBlob ready for viewer_highlight with identity.design path/revision/url. Read the image and region before highlighting or editing. no_hit means no active cursor intersection; viewer_unavailable means no response from an open viewer. Never substitute an earlier hover or treat a soft region as an exact edit mask.',
+    description: 'Ask the open 3D viewer for a PNG and the pinned blue cursor region or a fresh hover hit. A pin can be captured while the window is hidden. Prefer an attached cursor-at-start-of-spoken-request reference for that utterance. The result includes model identity, camera, capture time, part, point and radius in millimetres, selection scope, and anchorId. For an editable model, copy region.selection and modelLocalBlob into viewer_highlight with identity.design path/revision/url to show the proposed area in teal. Read the image and region before highlighting or editing. On no_hit, ask the person to pin a surface. On viewer_unavailable, read reason. Bring the preview into view for viewer_hidden, reset Movement for movement_preview, resolve controls for temporary_edit, or leave the print layout for print_layout. Ask the person to check the preview on response_timeout. Treat the region as a soft reference.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => {
       const { image, ...snapshot } = JSON.parse(value)
@@ -616,7 +616,6 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
     presentCall: () => ({ card: 'generic', title: 'Inspect cursor region', kind: 'read' }),
     isConcurrencySafe: () => true, timeoutMs: 10_000,
     async execute(_args, exec) {
-      if (closed) return JSON.stringify({ status: 'viewer_unavailable' })
       return captureReference(exec.agent?.session.id, exec.signal)
     },
   })), 'print viewer: inspect cursor')

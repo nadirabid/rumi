@@ -432,6 +432,9 @@ it('pins each cursor mode at the click and resumes hover after the next click', 
       expect(viewport.captureCursor().status).toBe('captured')
     }
 
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+    expect(viewport.captureCursor()).toEqual({ status: 'viewer_unavailable', reason: 'viewer_hidden' })
+    Object.defineProperty(document, 'hidden', { value: false })
     listener('pointermove')({ ...pointer, clientX: 220 })
     const previous = viewport.captureCursor()
     click()
@@ -442,7 +445,14 @@ it('pins each cursor mode at the click and resumes hover after the next click', 
     const refined = viewport.captureCursor({ command: 'surface', anchorId: previous.region.anchorId })
     expect(refined.region).toMatchObject({ worldPoint: previous.region.worldPoint, selection: { mode: 'surface' } })
     expect(shader.uniforms.rumiHover.value.toArray().slice(0, 3)).toEqual(pinned.region.worldPoint)
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+    expect(viewport.captureCursor()).toMatchObject({
+      status: 'captured', region: { worldPoint: pinned.region.worldPoint }, image: 'data:image/png;base64,cG5n',
+    })
     await viewport.applyDesign({ ...spec, transform: { scale: 2 } }, null)
+    expect(viewport.captureCursor()).toEqual({ status: 'viewer_unavailable', reason: 'viewer_hidden' })
+    Object.defineProperty(document, 'hidden', { value: false })
     expect(viewport.captureCursor()).toEqual({ status: 'no_hit' })
   } finally { await viewport.dispose() }
 })
@@ -537,7 +547,7 @@ it('highlights the visible moved surface and restores hover after resetting move
       expect(shader.uniforms.rumiHover.value.w).toBeGreaterThan(0)
       expect(shader.uniforms.rumiCursorMesh.value).toBe(door.id)
       expect(shader.uniforms.rumiMeshId.value).toBe(door.id)
-      if (angle !== 0) expect(viewport.captureCursor()).toEqual({ status: 'viewer_unavailable' })
+      if (angle !== 0) expect(viewport.captureCursor()).toEqual({ status: 'viewer_unavailable', reason: 'movement_preview' })
     }
   } finally { await viewport.dispose() }
 })

@@ -40,7 +40,7 @@ it('resolves pending work on timeout, cancellation, eviction and disposal', asyn
   try {
     const timeout = broker.request('a', identity, new AbortController().signal)
     await vi.advanceTimersByTimeAsync(8000)
-    expect(await timeout).toEqual({ status: 'viewer_unavailable' })
+    expect(await timeout).toEqual({ status: 'viewer_unavailable', reason: 'response_timeout' })
     const controller = new AbortController()
     const aborted = broker.request('a', identity, controller.signal)
     controller.abort()
@@ -48,17 +48,20 @@ it('resolves pending work on timeout, cancellation, eviction and disposal', asyn
     expect(() => broker.request('a', identity, controller.signal)).toThrow()
     const evicted = broker.request('a', identity, new AbortController().signal)
     broker.cancel('a')
-    expect(await evicted).toEqual({ status: 'viewer_unavailable' })
+    expect(await evicted).toEqual({ status: 'viewer_unavailable', reason: 'scene_evicted' })
     const closing = broker.request('b', identity, new AbortController().signal)
     broker.dispose()
-    expect(await closing).toEqual({ status: 'viewer_unavailable' })
+    expect(await closing).toEqual({ status: 'viewer_unavailable', reason: 'viewer_closed' })
     expect(vi.getTimerCount()).toBe(0)
-    expect(await broker.request('c', identity, new AbortController().signal)).toEqual({ status: 'viewer_unavailable' })
+    expect(await broker.request('c', identity, new AbortController().signal)).toEqual({ status: 'viewer_unavailable', reason: 'viewer_closed' })
   } finally { broker.dispose() }
 })
 
 it('rejects malformed region/image data and strips fields from non-captures', () => {
   expect(validateCursorSnapshot({ status: 'no_hit', image: 'stale' })).toEqual({ status: 'no_hit' })
+  expect(validateCursorSnapshot({ status: 'viewer_unavailable', reason: 'viewer_hidden', image: 'stale' }))
+    .toEqual({ status: 'viewer_unavailable', reason: 'viewer_hidden' })
+  expect(validateCursorSnapshot({ status: 'viewer_unavailable', reason: 'response_timeout' })).toEqual({ status: 'viewer_unavailable' })
   expect(() => validateCursorSnapshot({ ...snapshot(), image: 'data:text/html;base64,cG5n' })).toThrow('image')
   expect(() => validateCursorSnapshot({ ...snapshot(), region: { ...snapshot().region, worldRadius: NaN } })).toThrow('region')
   expect(() => validateCursorSnapshot({ ...snapshot(), region: { ...snapshot().region, modelLocalBlob: { center: [0, 0, 0], radii: [-1, 1, 1], rotationDegrees: [0, 0, 0] } } })).toThrow('model-local')

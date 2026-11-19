@@ -317,7 +317,7 @@ it('captures only on an agent request without rebuilding an unchanged scene', as
   await settle(2000)
   expect(viewport.captureCursor).toHaveBeenCalledOnce()
   expect(view.fetch).toHaveBeenCalledWith('/api/print-studio/viewer/cursor?sessionId=session-a', expect.objectContaining({
-    body: JSON.stringify({ requestId: 'closed-request', snapshot: { status: 'viewer_unavailable' } }),
+    body: JSON.stringify({ requestId: 'closed-request', snapshot: { status: 'viewer_unavailable', reason: 'viewer_not_open' } }),
   }))
 })
 

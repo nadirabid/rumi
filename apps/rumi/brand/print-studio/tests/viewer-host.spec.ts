@@ -420,7 +420,7 @@ it('returns a durable cursor image with its region through the tool output', asy
   const blocks = f.raw('viewer_cursor_snapshot').output.render({}, JSON.stringify(result))
   expect(blocks[0].type).toBe('text')
   expect(blocks[1]).toEqual({ type: 'image', attachment: result.image })
-  expect(await f.run('viewer_cursor_snapshot', {}, 'other-session')).toEqual({ status: 'viewer_unavailable' })
+  expect(await f.run('viewer_cursor_snapshot', {}, 'other-session')).toEqual({ status: 'viewer_unavailable', reason: 'viewer_not_open' })
 })
 
 it('unloads while a cursor request is waiting without retaining a tool or timer', async () => {
@@ -429,7 +429,7 @@ it('unloads while a cursor request is waiting without retaining a tool or timer'
   const pending = f.run('viewer_cursor_snapshot')
   await expect.poll(async () => (await (await f.request('/api/print-studio/viewer/state?sessionId=session-a')).json()).cursorRequest?.id).toBeTruthy()
   await f.dispose()
-  expect(await pending).toEqual({ status: 'viewer_unavailable' })
+  expect(await pending).toEqual({ status: 'viewer_unavailable', reason: 'viewer_closed' })
   expect(f.routes.size).toBe(0)
 })
 

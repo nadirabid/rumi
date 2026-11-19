@@ -161,8 +161,8 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}) {
     restorePinned() {
       if (pinned) show(pinned)
     },
-    snapshot() {
-      if (pinned) return pinned
+    snapshot({ pinnedOnly = false } = {}) {
+      if (pinned || pinnedOnly) return pinned
       cancelUpdate()
       return update()
     },

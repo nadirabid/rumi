@@ -152,7 +152,7 @@ export function installViewer(ctx, React, primitives) {
       }
       if (response.cursorRequest) {
         let snapshot
-        try { snapshot = captures.get(sessionId)?.(response.cursorRequest) ?? { status: 'viewer_unavailable' } }
+        try { snapshot = captures.get(sessionId)?.(response.cursorRequest) ?? { status: 'viewer_unavailable', reason: 'viewer_not_open' } }
         catch (_error) { snapshot = { status: 'capture_failed' } }
         try {
           const posted = await fetch(`${ROUTE}/cursor?sessionId=${encodeURIComponent(sessionId)}`, {
@@ -326,7 +326,7 @@ export function installViewer(ctx, React, primitives) {
     React.useEffect(() => {
       const sessionId = view?.sessionId
       if (!sessionId) return
-      const capture = request => viewport.current?.captureCursor(request) ?? { status: 'viewer_unavailable' }
+      const capture = request => viewport.current?.captureCursor(request) ?? { status: 'viewer_unavailable', reason: 'viewer_not_open' }
       captures.set(sessionId, capture)
       const controller = new AbortController()
       let timer

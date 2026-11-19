@@ -2,6 +2,8 @@
 import { randomUUID } from 'node:crypto'
 import { normalizeSelection } from './highlight.js'
 
+const rendererUnavailableReasons = new Set(['viewer_not_open', 'viewer_closed', 'viewer_hidden', 'temporary_edit', 'movement_preview', 'print_layout'])
+
 /**
  * Identify the geometry and placement a cursor region refers to.
  * @param {object} record - Viewer session record.
@@ -22,6 +24,7 @@ export function cursorIdentity(record) {
  */
 export function validateCursorSnapshot(value) {
   if (!value || !['captured', 'no_hit', 'viewer_unavailable', 'stale_view', 'capture_failed'].includes(value.status)) throw new Error('Invalid cursor status')
+  if (value.status === 'viewer_unavailable' && rendererUnavailableReasons.has(value.reason)) return { status: value.status, reason: value.reason }
   if (value.status !== 'captured') return { status: value.status }
   const vector = x => Array.isArray(x) && x.length === 3 && x.every(n => Number.isFinite(n) && Math.abs(n) <= 1e9)
   const region = value.region
@@ -60,7 +63,7 @@ export function createCursorRequests(onRequest = () => {}) {
   return {
     request(sessionId, identity, signal, refinement = {}) {
       signal.throwIfAborted()
-      if (closed) return Promise.resolve({ status: 'viewer_unavailable' })
+      if (closed) return Promise.resolve({ status: 'viewer_unavailable', reason: 'viewer_closed' })
       if (pending.has(sessionId)) return Promise.resolve({ status: 'busy' })
       return new Promise(resolve => {
         const id = randomUUID()
@@ -71,7 +74,7 @@ export function createCursorRequests(onRequest = () => {}) {
           resolve(value)
         }
         const abort = () => finish({ status: 'cancelled' })
-        const timer = setTimeout(() => finish({ status: 'viewer_unavailable' }), 8000)
+        const timer = setTimeout(() => finish({ status: 'viewer_unavailable', reason: 'response_timeout' }), 8000)
         pending.set(sessionId, { id, identity, finish, refinement })
         signal.addEventListener('abort', abort, { once: true })
         onRequest(sessionId)
@@ -88,10 +91,10 @@ export function createCursorRequests(onRequest = () => {}) {
       } else request.finish(snapshot)
       return true
     },
-    cancel(sessionId) { pending.get(sessionId)?.finish({ status: 'viewer_unavailable' }) },
+    cancel(sessionId) { pending.get(sessionId)?.finish({ status: 'viewer_unavailable', reason: 'scene_evicted' }) },
     dispose() {
       closed = true
-      for (const request of [...pending.values()]) request.finish({ status: 'viewer_unavailable' })
+      for (const request of [...pending.values()]) request.finish({ status: 'viewer_unavailable', reason: 'viewer_closed' })
     },
   }
 }

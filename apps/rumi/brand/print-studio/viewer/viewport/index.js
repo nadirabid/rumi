@@ -419,15 +419,20 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     renderedHighlight() {
       return !closed && !printPreview && !document.hidden && highlightVisible && designUrl === designSpec?.url ? highlightId : null
     },
-    /** Capture the pinned region or a fresh hover hit with the current camera view. */
+    /** Capture a pin from the mounted preview, or sample hover in a visible viewer. */
     captureCursor(request = {}) {
-      if (closed || document.hidden || shapeDeformer || motionPreview || printPreview) return { status: 'viewer_unavailable' }
+      if (closed) return { status: 'viewer_unavailable', reason: 'viewer_closed' }
+      if (shapeDeformer) return { status: 'viewer_unavailable', reason: 'temporary_edit' }
+      if (motionPreview) return { status: 'viewer_unavailable', reason: 'movement_preview' }
+      if (printPreview) return { status: 'viewer_unavailable', reason: 'print_layout' }
+      const hidden = document.hidden
+      if (hidden && request.command) return { status: 'viewer_unavailable', reason: 'viewer_hidden' }
       if (design && designUrl !== designSpec?.url) return { status: 'stale_view' }
       const anchor = request.anchorId ? cursorAnchors.get(request.anchorId) : null
       const identityKey = JSON.stringify([sceneRevision, designUrl, designSpec?.transform])
       if (request.command && (!anchor || anchor.identityKey !== identityKey)) return { status: 'stale_view' }
-      const hit = request.command ? hover.refine(request.command, anchor.hit) : hover.snapshot()
-      if (!hit) return { status: 'no_hit' }
+      const hit = request.command ? hover.refine(request.command, anchor.hit) : hover.snapshot({ pinnedOnly: hidden })
+      if (!hit) return hidden ? { status: 'viewer_unavailable', reason: 'viewer_hidden' } : { status: 'no_hit' }
       const designIdentity = design ? {
         path: designSpec.path, revision: designSpec.revision, url: designUrl, transform: designSpec.transform,
       } : null

@@ -91,6 +91,10 @@ Every push to `main` starts **Release Rumi**. A push is available to installed a
 
 ## Install and run
 
+For an existing installation, stage the new bundle and verify its signature. Quit Rumi normally, then replace the bundle at the resolved path while preserving any `/Applications/Rumi.app` symlink. Keep the previous bundle until the new build launches successfully.
+
+Use these commands for a first installation.
+
 ```sh
 cp -R apps/rumi/.desktop-build/targets/mac-arm64/unsigned-artifacts/mac-arm64/Rumi.app /Applications/
 open -a /Applications/Rumi.app

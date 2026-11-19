@@ -318,8 +318,8 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
       const { createSnapshotStore } = require('@deepseek-ai/dsh-client-store');
       const ns = 'rumi.default-model';
       const dictionaries = {
-        en: { advanced: 'Advanced provider settings', connections: 'Provider connections', removeKey: 'Disconnect', confirmRemove: 'Confirm disconnect',  direct: 'DeepSeek API', baseten: 'DeepSeek via Baseten', manage: 'Manage', connect: 'Connect', close: 'Close', connected: 'Configured', missing: 'Not configured', checking: 'Checking…', key: 'API key', saveKey: 'Save key', keyHint: 'Enter a new key to update this connection.', voice: 'Live voice', voiceInfo: 'Uses a separately billed OpenAI API key.', plan: 'ChatGPT plan', planInfo: 'Sign in for project conversations, then choose your default model below. Live voice uses your separately billed OpenAI API key.', signIn: 'Sign in with ChatGPT', continueLogin: 'Continue in browser', disconnect: 'Disconnect ChatGPT', cancelLogin: 'Cancel sign-in', planError: 'Could not connect to ChatGPT. Retry sign-in.', title: 'Project conversations', intro: 'Used for new conversations. Existing conversations keep their model and effort.', model: 'Model', effort: 'Reasoning effort', automatic: 'Model default', choose: 'Choose a model', unavailableModel: 'Saved model unavailable', empty: 'No models available. Connect a provider below.', loadFailed: 'Could not load all models. Retry to refresh the list.', retry: 'Retry', unavailable: 'Default model settings are unavailable.', readOnly: 'These settings are read-only.', saveFailed: 'Could not save the default. Check your connection and try again.', save: 'Save default', saving: 'Saving…', saved: 'Default saved.', invalidEffort: 'Choose an effort supported by this model.' },
-        zh: { advanced: '高级服务商设置', connections: '服务商连接', removeKey: '断开连接', confirmRemove: '确认断开连接',  direct: 'DeepSeek API', baseten: '通过 Baseten 使用 DeepSeek', manage: '管理', connect: '连接', close: '关闭', connected: '已配置', missing: '未配置', checking: '正在检查…', key: 'API 密钥', saveKey: '保存密钥', keyHint: '输入新密钥以更新此连接。', voice: '实时语音', voiceInfo: '使用单独计费的 OpenAI API 密钥。', plan: 'ChatGPT 套餐', planInfo: '登录后可在下方选择项目对话的默认模型。实时语音使用单独计费的 OpenAI API 密钥。', signIn: '使用 ChatGPT 登录', continueLogin: '在浏览器中继续', disconnect: '断开 ChatGPT', cancelLogin: '取消登录', planError: '无法连接 ChatGPT，请重试。', title: '项目对话', intro: '用于新对话。现有对话保留各自的模型和推理强度', model: '模型', effort: '推理强度', automatic: '模型默认值', choose: '选择模型', unavailableModel: '已保存的模型不可用', empty: '没有可用模型。请先在下方配置服务商', loadFailed: '无法加载全部模型。请重试刷新列表', retry: '重试', unavailable: '默认模型设置不可用', readOnly: '这些设置为只读', saveFailed: '无法保存默认值。请检查连接后重试', save: '保存默认值', saving: '正在保存…', saved: '默认值已保存', invalidEffort: '请选择此模型支持的推理强度' },
+        en: { advanced: 'Advanced provider settings', connections: 'Provider connections', removeKey: 'Disconnect', confirmRemove: 'Confirm disconnect',  direct: 'DeepSeek API', baseten: 'DeepSeek via Baseten', manage: 'Manage', connect: 'Connect', close: 'Close', connected: 'Configured', missing: 'Not configured', checking: 'Checking…', key: 'API key', saveKey: 'Save key', keyHint: 'Enter a new key to update this connection.', voice: 'Live voice', voiceInfo: 'Uses a separately billed OpenAI API key.', plan: 'ChatGPT plan', planInfo: 'Sign in for project conversations, then choose your default model below. Live voice uses your separately billed OpenAI API key.', signIn: 'Sign in with ChatGPT', signInAgain: 'Sign in again', signInRequired: 'Sign-in required', continueLogin: 'Continue in browser', disconnect: 'Disconnect ChatGPT', cancelLogin: 'Cancel sign-in', planError: 'Could not connect to ChatGPT. Retry sign-in.', title: 'Project conversations', intro: 'Used for new conversations. Existing conversations keep their model and effort.', model: 'Model', effort: 'Reasoning effort', automatic: 'Model default', choose: 'Choose a model', unavailableModel: 'Saved model unavailable', empty: 'No models available. Connect a provider below.', loadFailed: 'Could not load all models. Retry to refresh the list.', retry: 'Retry', unavailable: 'Default model settings are unavailable.', readOnly: 'These settings are read-only.', saveFailed: 'Could not save the default. Check your connection and try again.', save: 'Save default', saving: 'Saving…', saved: 'Default saved.', invalidEffort: 'Choose an effort supported by this model.' },
+        zh: { advanced: '高级服务商设置', connections: '服务商连接', removeKey: '断开连接', confirmRemove: '确认断开连接',  direct: 'DeepSeek API', baseten: '通过 Baseten 使用 DeepSeek', manage: '管理', connect: '连接', close: '关闭', connected: '已配置', missing: '未配置', checking: '正在检查…', key: 'API 密钥', saveKey: '保存密钥', keyHint: '输入新密钥以更新此连接。', voice: '实时语音', voiceInfo: '使用单独计费的 OpenAI API 密钥。', plan: 'ChatGPT 套餐', planInfo: '登录后可在下方选择项目对话的默认模型。实时语音使用单独计费的 OpenAI API 密钥。', signIn: '使用 ChatGPT 登录', signInAgain: '重新登录', signInRequired: '需要登录', continueLogin: '在浏览器中继续', disconnect: '断开 ChatGPT', cancelLogin: '取消登录', planError: '无法连接 ChatGPT，请重试。', title: '项目对话', intro: '用于新对话。现有对话保留各自的模型和推理强度', model: '模型', effort: '推理强度', automatic: '模型默认值', choose: '选择模型', unavailableModel: '已保存的模型不可用', empty: '没有可用模型。请先在下方配置服务商', loadFailed: '无法加载全部模型。请重试刷新列表', retry: '重试', unavailable: '默认模型设置不可用', readOnly: '这些设置为只读', saveFailed: '无法保存默认值。请检查连接后重试', save: '保存默认值', saving: '正在保存…', saved: '默认值已保存', invalidEffort: '请选择此模型支持的推理强度' },
       };
       ctx.effect(() => ctx.locale.register(ns, dictionaries), 'rumi-brand: default model copy');
       const scope = ctx.configForms.get('agent-default-model');
@@ -430,6 +430,11 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
           editing && !isDefault && info.configured && info.writable && info.source === 'file' && h(Button, { disabled: busy, onClick: disconnect }, t(confirm ? 'confirmRemove' : 'removeKey')),
           failed && !editing && h(Button, { onClick: reload }, t('retry')));
       }
+      function onChatGPTConnectionChanged(update) {
+        return ctx.remote.$on('credentials/record-updated', key => {
+          if (key === 'rumi-chatgpt/account') update();
+        });
+      }
       function ChatGPTSettings({ t, isDefault }) {
         const [state, setState] = React.useState({});
         const [managing, setManaging] = React.useState(false);
@@ -453,20 +458,35 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
             if (version === generation.current) setBusy(false);
           }
         }
-        React.useEffect(() => { void update(); return () => { generation.current++; }; }, []);
+        React.useEffect(() => {
+          void update();
+          const off = onChatGPTConnectionChanged(() => { void update(); });
+          return () => { generation.current++; off(); };
+        }, []);
         React.useEffect(() => {
           if (!state.pending || busy) return;
           const id = setTimeout(() => { void update(); }, 800);
           return () => clearTimeout(id);
         }, [state, busy]);
-        return h('div', { className: 'rumi-connection' }, h('div', { className: 'rumi-default-model-row' }, h('div', null, h('strong', null, t('plan')), h('p', null, t(state.connected === undefined ? 'checking' : state.connected ? 'connected' : 'missing'))), h(Button, { variant: 'outline', onClick: () => { setManaging(!managing); setConfirm(false); } }, t(managing ? 'close' : state.connected ? 'manage' : 'connect'))),
+        const { connected, reauthRequired, pending } = state;
+        const status = reauthRequired ? 'signInRequired' : connected === undefined ? 'checking' : connected ? 'connected' : 'missing';
+        return h('div', { className: 'rumi-connection' },
+          h('div', { className: 'rumi-default-model-row' },
+            h('div', null, h('strong', null, t('plan')), h('p', null, t(status))),
+            reauthRequired
+              ? h(Button, { variant: 'outline', disabled: busy || pending, onClick: () => { void update('start'); } }, t('signInAgain'))
+              : h(Button, { variant: 'outline', onClick: () => { setManaging(!managing); setConfirm(false); } },
+                  t(managing ? 'close' : connected ? 'manage' : 'connect'))),
           state.failed ? h('p', { role: 'alert' }, t('planError')) : null,
           state.url ? h('a', { href: state.url, target: '_blank', rel: 'noopener noreferrer' }, t('continueLogin')) : null,
-          (managing || state.pending) && h(Button, { disabled: busy || (isDefault && state.connected && !state.pending), onClick: () => {
-              if (state.connected && !state.pending && !confirm) { setConfirm(true); return; }
-              setConfirm(false); void update(state.pending ? 'cancel' : state.connected ? 'disconnect' : 'start');
-            } },
-            t(state.pending ? 'cancelLogin' : state.connected ? (confirm ? 'confirmRemove' : 'disconnect') : 'signIn')));
+          pending && h(Button, { disabled: busy, onClick: () => { void update('cancel'); } }, t('cancelLogin')),
+          managing && !pending && !reauthRequired && h(Button, { disabled: busy, onClick: () => {
+            setConfirm(false); void update('start');
+          } }, t(connected ? 'signInAgain' : 'signIn')),
+          managing && connected && !pending && h(Button, { disabled: busy || isDefault, onClick: () => {
+            if (!confirm) { setConfirm(true); return; }
+            setConfirm(false); void update('disconnect');
+          } }, t(confirm ? 'confirmRemove' : 'disconnect')));
       }
       function DefaultModelSettings({ useForm, useCatalog, t, operations }) {
         const state = useForm(value => value);

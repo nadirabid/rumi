@@ -18,6 +18,47 @@ const tierSchema = z.enum(['auto', 'priority', 'ultrafast'])
 const speedPreferences = defineDomain({ name: 'rumi_model_speed', version: 1,
   tables: { selections: domainTable(z.object({ requested: tierSchema })) } })
 const address = z.object({ sessionId: z.string().min(1).max(200), model: z.string().min(1).max(200) })
+const refreshedGrant = z.object({ access_token: z.string().min(1), refresh_token: z.string().min(1),
+  expires_in: z.number().positive().finite(), scope: z.string() })
+const unusableRefreshCodes = new Set(['invalid_grant', 'invalid_refresh_token', 'token_expired',
+  'refresh_token_expired', 'refresh_token_invalidated', 'refresh_token_reused'])
+
+/** Return a replacement token set, or undefined when OpenAI requires a new authorization. */
+async function refreshGrant(token) {
+  if (!token.clientId || !token.refresh) return undefined
+  let response
+  try {
+    response = await fetch('https://auth.openai.com/api/accounts/oauth/token', {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
+      headers: { accept: 'application/json' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', client_id: token.clientId,
+        refresh_token: token.refresh, resource: 'https://api.openai.com/v1' }),
+    })
+  } catch (cause) {
+    throw new LlmError('Could not renew the ChatGPT sign-in. Try again.', 'NETWORK', { cause })
+  }
+  const body = await response.json().catch(() => null)
+  if (!response.ok) {
+    const code = typeof body?.error === 'string' ? body.error : body?.error?.code
+    if (response.status >= 400 && response.status < 500 && response.status !== 429 && unusableRefreshCodes.has(code)) return undefined
+    const failure = response.status === 429 ? 'RATE_LIMIT' : response.status >= 500 ? 'UPSTREAM' : 'AUTH'
+    throw new LlmError('Could not renew the ChatGPT sign-in. Try again.', failure, { status: response.status })
+  }
+  const parsed = refreshedGrant.safeParse(body)
+  if (!parsed.success) throw new LlmError('ChatGPT returned an incomplete sign-in renewal. Try again.', 'INVALID_RESPONSE')
+  const scopes = parsed.data.scope.split(/\s+/)
+  if (!scopes.includes('chatgpt.tokens.use.direct')) return undefined
+  return { type: 'oauth', clientId: token.clientId, access: parsed.data.access_token, refresh: parsed.data.refresh_token,
+    expires: Date.now() + parsed.data.expires_in * 1000 - 180000, scopes }
+}
+
+function signInRequired() {
+  return new LlmError('Sign in again to your ChatGPT plan in Settings → Models.', 'AUTH')
+}
+
+function registration(record) {
+  return record?.payload?.token?.clientId ?? record?.payload?.clientId ?? undefined
+}
 
 async function accountCatalog(accessToken, models, signal) {
   const response = await fetch('https://api.openai.com/v1/models', { signal, redirect: 'error',
@@ -67,6 +108,7 @@ export async function apply(ctx, config) {
     }),
   }
   function grant(record) {
+    if (record?.payload?.reauthRequired) throw signInRequired()
     if (record?.payload?.token?.type !== 'oauth' || !record.payload.token.access)
       throw new LlmError('Sign in to your ChatGPT plan in Models.', 'MISSING_CREDENTIAL')
     return record.payload.token
@@ -76,30 +118,43 @@ export async function apply(ctx, config) {
     if (grant(record).expires <= Date.now()) {
       record = await ctx.credentials.modifyRecord(account, async current => {
         const token = grant(current)
-        if (token.expires > Date.now()) return current
-        return { kind: 'grant', payload: { ...current.payload, token: await oauth.refresh(token, AbortSignal.timeout(15000)) } }
+        if (token.expires > Date.now()) return undefined
+        const refreshed = await refreshGrant(token)
+        return { kind: 'grant', payload: refreshed ? { ...current.payload, token: refreshed }
+          : { models: current.payload.models, clientId: token.clientId ?? null, reauthRequired: true } }
       })
     }
     restoreModels(record)
     return grant(record).access
   }
   function restoreModels(record) {
-    choices = record.payload.models.map(item => {
+    choices = (record?.payload?.models ?? []).map(item => {
       const template = models.find(m => m.id === item.id) ?? sol
       return { ...template, provider: route, id: item.id, name: item.name, tiers: item.tiers,
         compat: { ...template.compat, supportsToolSearch: false } }
     })
   }
-  const saved = await ctx.credentials.readRecord(account)
-  if (saved) restoreModels(saved)
+  restoreModels(await ctx.credentials.readRecord(account))
   const profiles = new Map([[route, { provider: route, displayName: provider.name, piProvider: provider,
     modelErrors: new Map(), configuredMaxTokens: new Map(), streamIdleTimeoutMs: 120000,
     maxRequestImageBytes: 32000000, requestImagePixelBudget: 2000000, requestImageMaxBytes: 2000000 }]])
-  ctx.llm.registerAdapter([route], new PiAiAdapter({ profiles: () => profiles, auth: {}, resolveApiKey: access,
+  class ChatGPTAdapter extends PiAiAdapter {
+    /** The saved catalog can be read without rotating the inference credential. */
+    async listModels(providerId) {
+      if (providerId !== route) return super.listModels(providerId)
+      const record = await ctx.credentials.readRecord(account)
+      if (!record) return []
+      grant(record)
+      restoreModels(record)
+      return choices.map(model => ({ provider: route, id: model.id, name: model.name, inputModalities: [...model.input] }))
+    }
+  }
+  ctx.llm.registerAdapter([route], new ChatGPTAdapter({ profiles: () => profiles, auth: {}, resolveApiKey: access,
     resolveAttachments: () => ctx.get('attachments'),
     resolveImageAccess: (attachments, ref) => resolveImageAttachmentAccess(attachments, path => ctx.get('fs')?.processPathFromHostPath(path), ref) }))
   async function login(active) {
     const identity = await ctx.credentials.modifyRecord(install, async previous => previous ?? { kind: 'grant', payload: { id: randomUUID() } })
+    const previous = await ctx.credentials.readRecord(account)
     const signal = active.controller.signal
     signal.throwIfAborted()
     const token = await oauth.login({ signal,
@@ -110,19 +165,22 @@ export async function apply(ctx, config) {
         else prompt.signal.addEventListener('abort', abort, { once: true })
       }) },
     }, { getDeviceId: () => identity.payload.id, agentName: 'Rumi' })
-    const catalog = await accountCatalog(token.access, models, signal)
-    await ctx.credentials.modifyRecord(account, async () => {
+    const catalog = await accountCatalog(token.access, models, AbortSignal.any([signal, AbortSignal.timeout(15000)]))
+    const saved = await ctx.credentials.modifyRecord(account, async current => {
       signal.throwIfAborted()
+      if (registration(current) !== registration(previous)) throw new Error('ChatGPT connection changed during sign-in')
       return { kind: 'grant', payload: { token, models: catalog } }
     })
+    restoreModels(saved)
   }
-  ctx.effect(() => () => attempt?.controller.abort())
+  ctx.effect(() => async () => { attempt?.controller.abort(); await attempt?.done })
   // Earlier grants stored model names only. Refresh their catalog once without a new login.
   async function tiersFor(model) {
     let record = await ctx.credentials.readRecord(account)
-    grant(record)
+    const token = grant(record)
     if (record.payload.models.some(item => !item.tiers)) {
-      const bearer = await access()
+      if (token.expires <= Date.now()) return undefined
+      const bearer = token.access
       const catalog = await accountCatalog(bearer, models, AbortSignal.timeout(15000))
       record = await ctx.credentials.modifyRecord(account, async current => {
         if (grant(current).access !== bearer) throw new Error('ChatGPT account changed')
@@ -146,7 +204,7 @@ export async function apply(ctx, config) {
         if (write) await preferences.put(keyFor(sessionId, model), { requested: tier })
         return Response.json({ tiers, requested: requested(sessionId, model, tiers) }, { headers: { 'Cache-Control': 'no-store' } })
       } catch (error) {
-        return new Response(null, { status: error.code === 'MISSING_CREDENTIAL' ? 401 : 503 })
+        return new Response(null, { status: error.code === 'MISSING_CREDENTIAL' || error.code === 'AUTH' ? 401 : 503 })
       }
     } }))
   ctx.effect(() => ctx.connection.fetch.register({ path: '/api/rumi-chatgpt', methods: ['GET', 'POST'], requestBody: 'buffered',
@@ -166,7 +224,9 @@ export async function apply(ctx, config) {
           failed = false
         }
       }
-      return Response.json({ connected: Boolean(await ctx.credentials.readRecord(account)), pending: Boolean(attempt),
+      const record = await ctx.credentials.readRecord(account)
+      const reauthRequired = record?.payload?.reauthRequired === true
+      return Response.json({ connected: Boolean(record?.payload?.token?.access), reauthRequired, pending: Boolean(attempt),
         url: attempt?.url, failed }, { headers: { 'Cache-Control': 'no-store' } })
     } }))
 }

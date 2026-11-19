@@ -196,6 +196,7 @@ interface DesktopPackageInvocation {
   readonly target: DesktopPackageTarget
   readonly directory: boolean
   readonly prepareOnly: boolean
+  readonly reuseOfficialBuild: boolean
   readonly unsigned: boolean
   readonly skipNotarization: boolean
   readonly check: boolean
@@ -229,6 +230,7 @@ export function parseDesktopPackageInvocation(
     options: {
       dir: { type: 'boolean', default: false },
       'prepare-only': { type: 'boolean', default: false },
+      'reuse-official-build': { type: 'boolean', default: false },
       unsigned: { type: 'boolean', default: false },
       'skip-notarization': { type: 'boolean', default: false },
       check: { type: 'boolean', default: false },
@@ -249,6 +251,7 @@ export function parseDesktopPackageInvocation(
     target: resolveDesktopPackageTarget(name, hostPlatform, hostArch),
     directory: values.dir,
     prepareOnly: values['prepare-only'],
+    reuseOfficialBuild: values['reuse-official-build'],
     unsigned: values.unsigned,
     skipNotarization: values['skip-notarization'],
     check: values.check,
@@ -473,27 +476,29 @@ export async function packageTarget(
         { cwd: APP_ROOT, env: electronBuilderEnv, timeoutMs: 60_000 })
     })
   }
-  await execute(['run', 'build:official'], buildEnv, REPOSITORY_ROOT)
-  await execute(['run', 'release:pack', '--family', 'dsh', '--out', buildPaths.packedDsh, ...packArguments], buildEnv, REPOSITORY_ROOT)
-  await execute([
-    '--dir',
-    'apps/desktop-host',
-    'pack',
-    '--pack-destination',
-    buildPaths.packedDsh,
-  ], buildEnv, REPOSITORY_ROOT)
-  await execute(['run', 'release:pack', '--family', 'vendor', '--out', buildPaths.packedVendor, ...packArguments], buildEnv, REPOSITORY_ROOT)
-  rmSync(buildPaths.packedLandlock, { recursive: true, force: true })
-  mkdirSync(buildPaths.packedLandlock, { recursive: true })
-  await execute(['--dir', 'native/system', 'run', 'build:ts'], buildEnv, REPOSITORY_ROOT)
-  await execute([
-    '--dir',
-    'native/system/packages/entry',
-    'pack',
-    '--pack-destination',
-    buildPaths.packedLandlock,
-  ], buildEnv, REPOSITORY_ROOT)
-  await execute(['run', 'prepare:runtime', ...(signPrimaryRuntime ? ['--defer-primary-runtime-smoke'] : [])], downloadEnv)
+  if (!invocation.reuseOfficialBuild) await execute(['run', 'build:official'], buildEnv, REPOSITORY_ROOT)
+  const packWorkspace = async (): Promise<void> => {
+    await execute(['run', 'release:pack', '--family', 'dsh', '--out', buildPaths.packedDsh, ...packArguments], buildEnv, REPOSITORY_ROOT)
+    await execute(['--dir', 'apps/desktop-host', 'pack', '--pack-destination', buildPaths.packedDsh], buildEnv, REPOSITORY_ROOT)
+    await execute(['run', 'release:pack', '--family', 'vendor', '--out', buildPaths.packedVendor, ...packArguments], buildEnv, REPOSITORY_ROOT)
+    rmSync(buildPaths.packedLandlock, { recursive: true, force: true })
+    mkdirSync(buildPaths.packedLandlock, { recursive: true })
+    await execute(['--dir', 'native/system', 'run', 'build:ts'], buildEnv, REPOSITORY_ROOT)
+    await execute(['--dir', 'native/system/packages/entry', 'pack', '--pack-destination', buildPaths.packedLandlock], buildEnv, REPOSITORY_ROOT)
+  }
+  const prepareRuntime = async (): Promise<void> => {
+    await execute(['run', 'prepare:runtime', ...(signPrimaryRuntime ? ['--defer-primary-runtime-smoke'] : [])], downloadEnv)
+  }
+  if (target.platform === 'darwin') {
+    const results = await Promise.allSettled([packWorkspace(), prepareRuntime()])
+    const failures = results.filter(result => result.status === 'rejected')
+    if (failures.length > 0) {
+      throw new AggregateError(failures.map(result => result.reason), 'desktop macOS packaging: preparation failed')
+    }
+  } else {
+    await packWorkspace()
+    await prepareRuntime()
+  }
   if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime'], electronBuilderEnv)
   await execute(['run', 'prepare:packages'], targetEnv)
   await execute(['run', 'prepare:dsh', ...(signPrimaryRuntime ? ['--defer-runtime-smoke'] : [])], downloadEnv)

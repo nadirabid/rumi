@@ -44,8 +44,8 @@ jobs:
           PY
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build workspace test dependencies
-        run: pnpm run build:artifacts
+      - name: Build official workspace artifacts
+        run: pnpm run build:official
       - name: Verify Rumi behavior
         run: pnpm exec vitest run apps/rumi/tests/print-studio.spec.ts apps/rumi/tests/print-studio-viewer.client.spec.tsx apps/rumi/tests/profile-mcp.spec.ts apps/rumi/tests/github-release.spec.ts apps/rumi/tests/notarize-macos.spec.ts apps/rumi/tests/macos-notarized-application.spec.ts
       - name: Read published version
@@ -71,7 +71,7 @@ jobs:
         run: |
           export npm_execpath="$GITHUB_WORKSPACE/node_modules/pnpm/bin/pnpm.mjs"
           pnpm --filter dsh-rumi run build
-          node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64 --build-version "$RUMI_BUILD_VERSION"
+          node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64 --reuse-official-build --build-version "$RUMI_BUILD_VERSION"
       - name: Publish verified update
         env:
           GH_TOKEN: ${{ github.token }}

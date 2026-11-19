@@ -1604,6 +1604,18 @@ describe('desktop main startup', () => {
     }))
   })
 
+  it.each([
+    [{ phase: 'downloading', percent: 37.8 }, 'Downloading 37%…'],
+    [{ phase: 'verifying' }, 'Verifying update files…'],
+  ] as const)('shows the active background update state %j', async (state, message) => {
+    await readyForUpdate()
+    harness.updateCheck.mockResolvedValueOnce({ ...state, version: '1.1.0' })
+    harness.dialog.showMessageBox.mockResolvedValue({ response: 0 })
+    await invoke(DESKTOP_IPC.updatesOpen, 'app')
+    expect(harness.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({ message }))
+    expect(harness.updateDownload).not.toHaveBeenCalled()
+  })
+
   it('reports a manual check failure without offering a download', async () => {
     await readyForUpdate()
     harness.updateCheck.mockResolvedValueOnce({ phase: 'error', failedOperation: 'check', message: 'Feed unavailable' })

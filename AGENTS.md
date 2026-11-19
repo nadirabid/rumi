@@ -45,6 +45,8 @@ Before changing `apps/rumi/brand/**`, read and follow [Rumi's plugin UI requirem
 
 ### Build and verification
 
+When testing visual requests with Rumi, describe the desired appearance and any visible mismatch in ordinary language. Leave implementation choices to the Rumi agent, including on retries.
+
 Before building, packaging, installing, or verifying Rumi, read and follow [Build](RUMI.md#build), [Package](RUMI.md#package), [Install and run](RUMI.md#install-and-run), [build constraints](RUMI.md#build-constraints), and the [completion checks](RUMI.md#verify-before-claiming-done). These requirements apply to every Rumi change.
 
 After each Rumi product change, package and update the local macOS installation. Launch the installed build and verify the change before reporting completion.

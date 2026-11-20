@@ -1,17 +1,10 @@
 /**
  * Live Voice — browser half.
  *
- * Adds a live-session toggle beside the composer's voice button. While it is
- * on, microphone audio goes to the host's GPT-Live session over the shared
- * `/api` Fetch channel and returned audio plays through a scheduled buffer
- * queue, so speech keeps flowing while the harness works.
- *
- * The transport is Fetch rather than a WebSocket on purpose: the desktop app
- * runs this page on `dsh-app://app`, where only `/api` requests are proxied to
- * the host process (with its auth cookie). A WebSocket cannot be addressed
- * from that origin.
+ * WebRTC carries microphone and speaker tracks. The local host negotiates
+ * the session and publishes transcript and project-agent events over Fetch.
  */
-// bundle marker: 0.8.0
+// bundle marker: 0.9.0
 window.__ModuleLoader__.load({
   id: '@rumi/live-voice',
   factory(require) {
@@ -66,28 +59,6 @@ window.__ModuleLoader__.load({
           };
         })();
 
-        const CAPTURE_RATE = 24_000;
-        const FRAME_SAMPLES = 480; // 20 ms at 24 kHz
-        const FLUSH_MS = 100;
-        const WORKLET_SOURCE = `
-          class LiveVoiceCapture extends AudioWorkletProcessor {
-            constructor() { super(); this.frame = new Float32Array(${FRAME_SAMPLES}); this.filled = 0; }
-            process(inputs) {
-              const channel = inputs[0] && inputs[0][0];
-              if (!channel) return true;
-              for (let i = 0; i < channel.length; i++) {
-                this.frame[this.filled++] = channel[i];
-                if (this.filled === this.frame.length) {
-                  this.port.postMessage(this.frame.slice(0));
-                  this.filled = 0;
-                }
-              }
-              return true;
-            }
-          }
-          registerProcessor('live-voice-capture', LiveVoiceCapture);
-        `;
-
         async function api(path, body, signal) {
           const response = await fetch(`/api/live-voice${path}`, {
             method: 'POST',
@@ -110,252 +81,170 @@ window.__ModuleLoader__.load({
           return payload;
         }
 
-        function resample(input, from, to) {
-          if (from === to) return input;
-          const ratio = from / to;
-          const length = Math.max(1, Math.round(input.length / ratio));
-          const out = new Float32Array(length);
-          for (let i = 0; i < length; i++) {
-            const pos = i * ratio;
-            const base = Math.floor(pos);
-            const frac = pos - base;
-            const a = input[base] ?? 0;
-            const b = input[Math.min(base + 1, input.length - 1)] ?? a;
-            out[i] = a * (1 - frac) + b * frac;
-          }
-          return out;
+        function waitFor(target, type, matches, signal) {
+          return new Promise((resolve, reject) => {
+            signal.throwIfAborted();
+            function cleanup() {
+              target.removeEventListener(type, onEvent);
+              signal.removeEventListener('abort', onAbort);
+            }
+            function onEvent(event) {
+              if (!matches(event)) return;
+              cleanup();
+              resolve();
+            }
+            function onAbort() {
+              cleanup();
+              reject(signal.reason);
+            }
+            target.addEventListener(type, onEvent);
+            signal.addEventListener('abort', onAbort, { once: true });
+          });
         }
 
-        function toPcm16(samples) {
-          const pcm = new Int16Array(samples.length);
-          for (let i = 0; i < samples.length; i++) {
-            const value = Math.max(-1, Math.min(1, samples[i]));
-            pcm[i] = value < 0 ? value * 0x8000 : value * 0x7fff;
-          }
-          return pcm;
-        }
-
-        function pcm16ToBase64(pcm) {
-          const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-          let binary = '';
-          const chunk = 0x8000;
-          for (let offset = 0; offset < bytes.length; offset += chunk) {
-            binary += String.fromCharCode.apply(null, bytes.subarray(offset, offset + chunk));
-          }
-          return btoa(binary);
-        }
-
-        function base64ToFloat(base64) {
-          const binary = atob(base64);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          const pcm = new Int16Array(bytes.buffer, 0, Math.floor(bytes.length / 2));
-          const out = new Float32Array(pcm.length);
-          for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 32768;
-          return out;
-        }
-
-        /** Everything one live session owns, so teardown is one call. */
-        function createEngine({ onAudio, onStatus, onHandoff = () => {}, onTranscript, onError, onClosed, onMuted }) {
-          let liveId = null;
-          let audioContext = null;
-          let worklet = null;
-          let stream = null;
-          let source = null;
-          let flushTimer = null;
-          let pending = [];
-          let nextPlaybackAt = 0;
-          let stopped = false;
-          let polling = false;
-          let startup;
+        /** One renderer's microphone, WebRTC connection, and host session. */
+        function createEngine({ t, onAudio, onStatus, onHandoff, onTranscript, onError, onClosed }) {
+          const lifetime = new AbortController();
+          let liveId;
+          let peer;
+          let microphone;
+          let playback;
+          let negotiation;
           let shutdown;
-          const transport = new AbortController();
-          const tasks = new Set();
-          function track(task) {
-            tasks.add(task);
-            void task.then(() => tasks.delete(task), () => tasks.delete(task));
-            return task;
-          }
 
-          function releaseAudio() {
-            clearInterval(flushTimer);
-            flushTimer = null;
-            for (const track of stream?.getTracks() ?? []) track.stop();
-            stream = null;
-            worklet?.disconnect();
-            source?.disconnect();
-            worklet = null;
-            source = null;
-            const context = audioContext;
-            audioContext = null;
-            pending = [];
-            nextPlaybackAt = 0;
-            return context?.close();
-          }
-
-          function start(sessionId) {
-            startup = acquire(sessionId);
-            return startup;
-          }
-
-          async function acquire(sessionId) {
-            const started = await api('/session', { sessionId }, AbortSignal.timeout(20_000));
-            if (started?.error) throw new Error(started.error);
-            liveId = started.liveId;
-            if (stopped) return;
-
-            audioContext = new AudioContext();
-            await audioContext.resume();
-            if (stopped) return;
-            stream = await navigator.mediaDevices.getUserMedia({
+          async function start(sessionId) {
+            const stream = await navigator.mediaDevices.getUserMedia({
               audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
             });
-            if (stopped) { await releaseAudio(); return; }
-            const moduleUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'text/javascript' }));
-            try {
-              await audioContext.audioWorklet.addModule(moduleUrl);
-            } finally {
-              URL.revokeObjectURL(moduleUrl);
+            if (lifetime.signal.aborted) {
+              for (const track of stream.getTracks()) track.stop();
+              return;
             }
-            if (stopped) return;
-            source = audioContext.createMediaStreamSource(stream);
-            worklet = new AudioWorkletNode(audioContext, 'live-voice-capture');
-            const captureRate = audioContext.sampleRate;
-            worklet.port.onmessage = (event) => {
-              if (stopped) return;
-              pending.push(toPcm16(resample(event.data, captureRate, CAPTURE_RATE)));
-            };
-            source.connect(worklet);
-            const sink = audioContext.createGain();
-            sink.gain.value = 0;
-            worklet.connect(sink).connect(audioContext.destination);
+            [microphone] = stream.getAudioTracks();
+            if (!microphone) throw new Error(t('error.microphone'));
+            microphone.enabled = false;
+            microphone.addEventListener('ended', () => onError(t('error.microphone')), { signal: lifetime.signal });
 
-            flushTimer = setInterval(() => { void track(flush()); }, FLUSH_MS);
-            void track(poll());
-          }
+            peer = new RTCPeerConnection();
+            playback = document.createElement('audio');
+            peer.addEventListener('track', ({ track }) => {
+              playback.srcObject = new MediaStream([track]);
+              void playback.play().catch(() => {
+                if (!lifetime.signal.aborted) onError(t('error.playback'));
+              });
+            }, { signal: lifetime.signal });
+            peer.addEventListener('connectionstatechange', () => {
+              if (peer.connectionState === 'failed') onError(t('error.connection'));
+            }, { signal: lifetime.signal });
+            peer.addTrack(microphone, stream);
+            const events = peer.createDataChannel('oai-events');
+            await peer.setLocalDescription(await peer.createOffer());
+            lifetime.signal.throwIfAborted();
+            if (peer.iceGatheringState !== 'complete') {
+              await waitFor(peer, 'icegatheringstatechange', () => peer.iceGatheringState === 'complete',
+                AbortSignal.any([lifetime.signal, AbortSignal.timeout(10_000)]));
+            }
+            const sdp = peer.localDescription?.sdp;
+            if (!sdp) throw new Error(t('error.connection'));
 
-          async function flush() {
-            if (stopped || !liveId || pending.length === 0) return;
-            const total = pending.reduce((sum, part) => sum + part.length, 0);
-            const merged = new Int16Array(total);
-            let offset = 0;
-            for (const part of pending) {
-              merged.set(part, offset);
-              offset += part.length;
-            }
-            pending = [];
-            try {
-              await api('/audio', { liveId, data: pcm16ToBase64(merged) }, transport.signal);
-            } catch {
-              // a dropped audio chunk is preferable to tearing down the session
-            }
+            // Keep the response to a submitted offer so Stop can close a late host session.
+            negotiation = api('/session', { sessionId, sdp }, AbortSignal.timeout(35_000)).then(result => {
+              if (result?.error) throw new Error(result.error);
+              if (!result?.liveId || !result.sdp) throw new Error(t('error.connection'));
+              liveId = result.liveId;
+              return result.sdp;
+            });
+            const answer = await negotiation;
+            lifetime.signal.throwIfAborted();
+            const ready = waitFor(events, 'message', ({ data }) => {
+              try {
+                return JSON.parse(data)?.type === 'session.started';
+              } catch (error) {
+                // Ignore malformed events on the provider data channel.
+                return false;
+              }
+            }, AbortSignal.any([lifetime.signal, AbortSignal.timeout(15_000)]));
+            await Promise.all([ready, peer.setRemoteDescription({ type: 'answer', sdp: answer })]);
+            lifetime.signal.throwIfAborted();
+            microphone.enabled = true;
+            onStatus('listening');
+            void poll();
           }
 
           async function poll() {
-            if (polling || stopped) return;
-            polling = true;
             let failures = 0;
-            while (!stopped && liveId) {
+            while (!lifetime.signal.aborted) {
               let result;
               try {
-                result = await api('/poll', { liveId }, transport.signal);
+                result = await api('/poll', { liveId }, lifetime.signal);
                 failures = 0;
-              } catch {
-                if (stopped) return;
+              } catch (error) {
+                if (lifetime.signal.aborted) return;
                 failures += 1;
                 if (failures >= 4) {
-                  onError('live voice: connection lost');
-                  void stop('poll-error');
+                  onError(t('error.connection'));
                   return;
                 }
                 await new Promise((resolve) => setTimeout(resolve, 800));
                 continue;
               }
-              if (stopped) return;
-              for (const event of result?.events ?? []) handle(event);
-              if (result?.closed) {
+              if (lifetime.signal.aborted) return;
+              for (const event of result?.events ?? []) {
+                if (lifetime.signal.aborted) return;
+                handle(event);
+              }
+              if (!lifetime.signal.aborted && result?.closed) {
                 void stop('server-closed');
                 onClosed('closed');
-                return;
               }
             }
-            polling = false;
           }
 
           function handle(message) {
-            if (message.type === 'audio') {
-              play(message.data);
-              onStatus('speaking');
-            } else if (message.type === 'ready') {
-              onStatus('listening');
+            if (message.type === 'speaking') {
+              onAudio();
             } else if (message.type === 'handoff') {
               onHandoff(message.state);
             } else if (message.type === 'status') {
               onStatus(message.state === 'thinking' ? 'thinking' : 'listening');
             } else if (message.type === 'transcript') {
               onTranscript(message.role, message.text);
-            } else if (message.type === 'muted') {
-              onMuted(message.muted === true);
             } else if (message.type === 'error') {
               onError(message.message);
             } else if (message.type === 'closed') {
-              void stop();
+              void stop('server-closed');
               onClosed(message.reason);
             }
           }
 
-          function play(base64) {
-            if (!audioContext) return;
-            const samples = base64ToFloat(base64);
-            if (samples.length === 0) return;
-            const buffer = audioContext.createBuffer(1, samples.length, CAPTURE_RATE);
-            buffer.copyToChannel(samples, 0);
-            const player = audioContext.createBufferSource();
-            player.buffer = buffer;
-            player.connect(audioContext.destination);
-            const at = Math.max(audioContext.currentTime + 0.03, nextPlaybackAt);
-            player.start(at);
-            nextPlaybackAt = at + buffer.duration;
-            onAudio();
-          }
-
           function stop(reason = 'user') {
             if (shutdown) return shutdown;
-            stopped = true;
-            transport.abort();
-            const audioReleased = releaseAudio();
+            lifetime.abort();
+            microphone?.stop();
+            if (playback) {
+              playback.pause();
+              playback.srcObject = null;
+            }
             shutdown = (async () => {
-              await audioReleased;
-              await Promise.allSettled([startup, ...tasks]);
-              await releaseAudio();
-              const id = liveId;
-              liveId = null;
-              if (id) {
-                try {
-                  await api('/close', { liveId: id, reason }, AbortSignal.timeout(5_000));
-                } catch (error) {
-                  // Local audio is released; the host session cap bounds a lost close request.
-                  console.warn('Live Voice could not confirm host shutdown', error);
-                }
+              try {
+                if (negotiation) await Promise.allSettled([negotiation]);
+                if (liveId) await api('/close', { liveId, reason }, AbortSignal.timeout(5_000));
+              } catch (error) {
+                console.warn('Live Voice could not confirm host shutdown', error);
+              } finally {
+                peer?.close();
+                engines.delete(engine);
               }
             })();
             return shutdown;
           }
 
-          /** Ask the host to mute or unmute caller audio; the server confirms. */
-          async function setMuted(next) {
-            if (stopped || !liveId) return;
-            try { await track(api('/mute', { liveId, muted: next }, transport.signal)); } catch {}
+          function setMuted(muted) {
+            if (!lifetime.signal.aborted && microphone) microphone.enabled = !muted;
           }
 
           const engine = { start, stop, setMuted };
           engines.add(engine);
-          const ownedStop = engine.stop;
-          engine.stop = (reason) => {
-            const task = ownedStop(reason);
-            void task.then(() => engines.delete(engine), () => engines.delete(engine));
-            return task;
-          };
           return engine;
         }
 
@@ -468,6 +357,7 @@ window.__ModuleLoader__.load({
             setStatus('connecting');
             dictation.start();
             const engine = createEngine({
+              t,
               onHandoff: next => { if (engineRef.current === engine) { setHandoff(next); if (next === 'accepted') dictation.clearUser(); } },
               onAudio: () => { if (engineRef.current !== engine) return; setStatus('speaking'); settle(); },
               onStatus: (next) => {
@@ -476,7 +366,6 @@ window.__ModuleLoader__.load({
                 if (next === 'thinking') dictation.clearUser();
               },
               onTranscript: (role, text) => { if (engineRef.current !== engine) return; dictation.append(role, text); },
-              onMuted: (next) => { if (engineRef.current === engine) setMuted(next); },
               onError: (message) => {
                 if (engineRef.current !== engine) return;
                 setError(message);
@@ -499,12 +388,13 @@ window.__ModuleLoader__.load({
               await engine.start(sessionId);
             } catch (cause) {
               if (engineRef.current !== engine) return;
-              setError(cause instanceof Error ? cause.message : String(cause));
+              setError(cause?.name === 'TimeoutError' ? t('error.connection') : cause instanceof Error ? cause.message : String(cause));
               setStatus('error');
+              dictation.stop();
               engineRef.current = null;
               await engine.stop();
             }
-          }, [sessionId, settle]);
+          }, [sessionId, settle, t]);
 
           const active = status !== 'idle' && status !== 'error';
           const connecting = status === 'connecting';
@@ -602,8 +492,8 @@ window.__ModuleLoader__.load({
 
         /** The one label this bundle still draws: the source under the dictation. */
         const LABELS = {
-          en: { 'mic.mute': 'Mute microphone', 'mic.unmute': 'Unmute microphone', 'trigger.voice': 'Live Voice', 'handoff.not_sent': 'No action sent yet', 'handoff.received': 'Sending request…', 'handoff.waiting': 'Waiting for your words…', 'handoff.dispatching': 'Sending request…', 'handoff.accepted': 'Request accepted', 'handoff.failed': 'Request not sent. Please try again.' },
-          zh: { 'mic.mute': '将麦克风静音', 'mic.unmute': '取消麦克风静音', 'trigger.voice': '实时语音', 'handoff.not_sent': '尚未发送操作', 'handoff.received': '正在发送请求…', 'handoff.waiting': '正在等待语音文字…', 'handoff.dispatching': '正在发送请求…', 'handoff.accepted': '请求已接收', 'handoff.failed': '请求未发送，请重试' },
+          en: { 'error.microphone': 'Check your microphone and try Live Voice again.', 'error.playback': 'Could not play Live Voice audio. Check your sound output and try again.', 'error.connection': 'Could not connect to Live Voice. Check your network and try again.', 'mic.mute': 'Mute microphone', 'mic.unmute': 'Unmute microphone', 'trigger.voice': 'Live Voice', 'handoff.not_sent': 'No action sent yet', 'handoff.received': 'Sending request…', 'handoff.waiting': 'Waiting for your words…', 'handoff.dispatching': 'Sending request…', 'handoff.accepted': 'Request accepted', 'handoff.failed': 'Request not sent. Please try again.' },
+          zh: { 'error.microphone': '请检查麦克风，然后重试实时语音。', 'error.playback': '无法播放实时语音。请检查声音输出后重试。', 'error.connection': '无法连接实时语音。请检查网络后重试。', 'mic.mute': '将麦克风静音', 'mic.unmute': '取消麦克风静音', 'trigger.voice': '实时语音', 'handoff.not_sent': '尚未发送操作', 'handoff.received': '正在发送请求…', 'handoff.waiting': '正在等待语音文字…', 'handoff.dispatching': '正在发送请求…', 'handoff.accepted': '请求已接收', 'handoff.failed': '请求未发送，请重试' },
         };
 
         /**

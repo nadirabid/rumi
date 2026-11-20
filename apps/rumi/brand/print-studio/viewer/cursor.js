@@ -35,6 +35,8 @@ export function validateCursorSnapshot(value) {
     || !Number.isFinite(region.worldRadius) || region.worldRadius <= 0 || region.worldRadius > 1e9) throw new Error('Invalid cursor region')
   const blob = region.modelLocalBlob
   if (blob !== null && (!blob || !vector(blob.center) || !vector(blob.radii) || blob.radii.some(n => n <= 0) || !vector(blob.rotationDegrees))) throw new Error('Invalid model-local region')
+  const modelLocalPoint = region.modelLocalPoint === undefined ? blob?.center ?? null : region.modelLocalPoint
+  if (modelLocalPoint !== null && !vector(modelLocalPoint)) throw new Error('Invalid saved model point')
   const selection = region.selection === undefined ? undefined : normalizeSelection(region.selection)
   if (region.anchorId !== undefined && (typeof region.anchorId !== 'string' || region.anchorId.length > 100)) throw new Error('Invalid cursor anchor')
   const camera = value.camera
@@ -46,7 +48,7 @@ export function validateCursorSnapshot(value) {
   return {
     status: 'captured', capturedAt: value.capturedAt, identity: value.identity,
     region: { ...(selection ? { selection } : {}), ...(region.anchorId ? { anchorId: region.anchorId } : {}), objectId: region.objectId, partPath: region.partPath, faceIndex: region.faceIndex,
-      worldPoint: region.worldPoint, worldRadius: region.worldRadius, modelLocalBlob: blob === null ? null : { center: blob.center, radii: blob.radii, rotationDegrees: blob.rotationDegrees } },
+      worldPoint: region.worldPoint, worldRadius: region.worldRadius, modelLocalPoint, modelLocalBlob: blob === null ? null : { center: blob.center, radii: blob.radii, rotationDegrees: blob.rotationDegrees } },
     camera: { position: camera.position, target: camera.target, up: camera.up, fov: camera.fov, aspect: camera.aspect },
     image: value.image,
   }

@@ -161,6 +161,14 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}) {
     restorePinned() {
       if (pinned) show(pinned)
     },
+    /** Move an existing pin with its surface and discard the old live hover. */
+    replacePin(hit) {
+      cancelUpdate()
+      inside = false
+      press = null
+      pinned = hit
+      show(hit)
+    },
     snapshot({ pinnedOnly = false } = {}) {
       if (pinned || pinnedOnly) return pinned
       cancelUpdate()

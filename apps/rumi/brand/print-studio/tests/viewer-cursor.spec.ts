@@ -7,7 +7,7 @@ afterEach(() => vi.useRealTimers())
 const identity = { sceneRevision: 2, design: null }
 function snapshot() {
   return { status: 'captured', capturedAt: '2026-11-03T20:00:00.000Z', identity,
-    region: { objectId: 'part', partPath: ['box'], faceIndex: 0, worldPoint: [1, 2, 3], worldRadius: 4, modelLocalBlob: null },
+    region: { objectId: 'part', partPath: ['box'], faceIndex: 0, worldPoint: [1, 2, 3], worldRadius: 4, modelLocalPoint: null, modelLocalBlob: null },
     camera: { position: [0, 0, 10], target: [0, 0, 0], up: [0, 0, 1], fov: 40, aspect: 1 },
     image: 'data:image/png;base64,cG5n',
   }

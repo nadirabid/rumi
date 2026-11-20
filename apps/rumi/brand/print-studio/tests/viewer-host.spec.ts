@@ -361,6 +361,17 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
     expect(trace.at(-1).data.status).toBe('rendered')
     expect((await f.meshState()).design.highlight).toEqual(highlighted.highlight)
     expect((await f.run('viewer_highlight', reference, 'another-session')).status).toBe('model_required')
+    const hidden = f.run('viewer_highlight', reference)
+    await expect.poll(async () => {
+      scene = await f.state()
+      return scene.design.highlight?.id !== design.highlight.id && Boolean(scene.design.highlight?.id)
+    }).toBe(true)
+    const hiddenDesign = scene.design
+    await f.routes.get('/api/print-studio/viewer/feedback')!(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
+      method: 'POST', body: JSON.stringify({ revision: hiddenDesign.revision, url: hiddenDesign.url, transform: hiddenDesign.transform,
+        requestedHighlightId: hiddenDesign.highlight.id, highlightStatus: 'highlight_hidden' }),
+    }))
+    expect(await hidden).toMatchObject({ status: 'not_rendered', reason: 'highlight_hidden' })
     expect((await f.run('viewer_highlight', { ...reference, revision: 99 })).status).toBe('stale_model')
     expect((await f.run('viewer_highlight', { ...reference, meshPath: '', label: '' })).status).toBe('cleared')
     const placed = await f.run('viewer_transform', { scale: 2, rotate: { z: 90 } })
@@ -409,7 +420,7 @@ it('returns a durable cursor image with its region through the tool output', asy
   const snapshot = {
     status: 'captured', capturedAt: '2026-11-03T20:00:00.000Z',
     identity: { sceneRevision: response.scene.revision, design: null },
-    region: { objectId: response.scene.objects[0].id, partPath: ['box'], faceIndex: 0, worldPoint: [0, 0, 1], worldRadius: 2, modelLocalBlob: null },
+    region: { objectId: response.scene.objects[0].id, partPath: ['box'], faceIndex: 0, worldPoint: [0, 0, 1], worldRadius: 2, modelLocalPoint: null, modelLocalBlob: null },
     camera: { position: [0, -20, 20], target: [0, 0, 0], up: [0, 0, 1], fov: 40, aspect: 1 },
     image: 'data:image/png;base64,cG5n',
   }

@@ -527,16 +527,31 @@ it('shows USD movement, retains its pose across reloads and restores saved geome
   } finally { viewport.dispose() }
 })
 
-it('highlights the visible moved surface and restores hover after resetting movement', async () => {
+it('captures saved hit coordinates and keeps both fixed and posed parts highlighted', async () => {
   const viewport = createViewport(container(), vi.fn())
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
   vi.stubGlobal('fetch', vi.fn(async () => new Response(robotUsd())))
-  const spec = { path: 'models/car/model.usda', format: 'usd', url: 'https://example.test/model.usda', transform: {} }
+  const spec = { revision: 1, path: 'models/car/model.usda', format: 'usd', url: 'https://example.test/model.usda', transform: {} }
   try {
     await viewport.applyDesign(spec, null)
     await viewport.applyShape(null)
     state.resize()
+    const saved = new Map(['Door', 'Body'].map(name => {
+      const mesh = rendered().getObjectByName(name)
+      mesh.updateWorldMatrix(true, false)
+      let model = mesh.parent
+      while (!model.userData.rumiCoordinateFrame) model = model.parent
+      while (model.parent?.userData.rumiCoordinateFrame) model = model.parent
+      return [name, { mesh, matrix: model.parent.matrixWorld.clone().invert().multiply(mesh.matrixWorld) }]
+    }))
+    const positions = [...saved.values()].flatMap(({ mesh, matrix }) => {
+      const source = mesh.geometry.getAttribute('position')
+      const points = [0, 1, 2].map(i => new THREE.Vector3().fromBufferAttribute(source, i).applyMatrix4(matrix))
+      // A clipped triangle has no exact face or vertex ID in the source mesh.
+      return points.flatMap((point, i) => point.clone().lerp(points[(i + 1) % 3], 0.25).toArray())
+    })
+    const highlighted = { ...spec, highlight: { id: 'posed-surface', positions: new Float32Array(positions) } }
     const move = state.renderer.domElement.addEventListener.mock.calls.find(([name]) => name === 'pointermove')[1]
     for (const angle of [60, 30, 0, 45, 0]) {
       viewport.updateMotion({ joint0: angle })
@@ -555,8 +570,32 @@ it('highlights the visible moved surface and restores hover after resetting move
       expect(shader.uniforms.rumiHover.value.w).toBeGreaterThan(0)
       expect(shader.uniforms.rumiCursorMesh.value).toBe(door.id)
       expect(shader.uniforms.rumiMeshId.value).toBe(door.id)
-      if (angle !== 0) expect(viewport.captureCursor()).toEqual({ status: 'viewer_unavailable', reason: 'movement_preview' })
+      const capture = viewport.captureCursor()
+      expect(capture.status).toBe('captured')
+      expect(capture.region.partPath).toEqual(['Model', 'Door'])
+      const expected = new THREE.Vector3(...capture.region.worldPoint)
+        .applyMatrix4(door.matrixWorld.clone().invert()).applyMatrix4(saved.get('Door')!.matrix)
+      expect(expected.distanceTo(new THREE.Vector3(...capture.region.modelLocalPoint))).toBeLessThan(1e-6)
+      await viewport.applyDesign(highlighted, null)
+      expect(viewport.renderedHighlight()).toBe('posed-surface')
+      const overlay = rendered().getObjectByName('Rumi highlight overlay')
+      if (angle === 0) expect(overlay.geometry.getAttribute('position').count).toBe(6)
+      else {
+        expect(overlay.children).toHaveLength(2)
+        expect(overlay.children[0].matrix.elements[1]).toBeCloseTo(Math.sin(THREE.MathUtils.degToRad(angle)))
+        expect(overlay.children[1].matrix.elements[1]).toBe(0)
+      }
     }
+    const listener = event => state.renderer.domElement.addEventListener.mock.calls.find(([name]) => name === event)[1]
+    const click = { isPrimary: true, button: 0, pointerId: 1, pointerType: 'mouse', clientX: 200, clientY: 150 }
+    listener('pointerdown')(click)
+    listener('pointerup')(click)
+    const pin = viewport.captureCursor()
+    viewport.updateMotion({ joint0: 60 })
+    const movedPin = viewport.captureCursor()
+    expect(movedPin.region.partPath).toEqual(pin.region.partPath)
+    expect(movedPin.region.worldPoint).not.toEqual(pin.region.worldPoint)
+    expect(new THREE.Vector3(...movedPin.region.modelLocalPoint).distanceTo(new THREE.Vector3(...pin.region.modelLocalPoint))).toBeLessThan(1e-6)
   } finally { await viewport.dispose() }
 })
 

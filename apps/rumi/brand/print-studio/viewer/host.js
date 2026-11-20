@@ -525,7 +525,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       if (value.requestedHighlightId === current.highlight?.id
         && value.revision === current.revision && value.url === current.url
         && JSON.stringify(value.transform) === JSON.stringify(current.transform)
-        && ['viewer_hidden', 'render_failed'].includes(value.highlightStatus)) {
+        && ['viewer_hidden', 'render_failed', 'print_layout', 'highlight_hidden'].includes(value.highlightStatus)) {
         receipts.fail(sessionId, value.requestedHighlightId, value.highlightStatus)
       }
       return json({ ok: true })
@@ -615,7 +615,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_cursor_snapshot',
-    description: 'Ask the open 3D viewer for a PNG and the pinned blue cursor region or a fresh hover hit. A pin can be captured while the window is hidden. Prefer an attached cursor-at-start-of-spoken-request reference for that utterance. The result includes model identity, camera, capture time, part, point and radius in millimetres, selection scope, and anchorId. For an editable model, use the part, scope and local coordinates to generate a surface STL for viewer_highlight with the same design identity to show the proposed area in teal. Read the image and region before highlighting or editing. On no_hit, ask the person to pin a surface. On viewer_unavailable, read reason. Bring the preview into view for viewer_hidden, reset Movement for movement_preview, resolve controls for temporary_edit, or leave the print layout for print_layout. Ask the person to check the preview on response_timeout. Treat the region as a soft reference.',
+    description: 'Read the pinned blue region or fresh hover hit, with a PNG and model identity. For each new pointing request, call this tool before choosing a region unless that request includes its own cursor-at-start-of-spoken-request capture. Use region.modelLocalPoint (saved model XYZ millimetres), partPath, faceIndex and selection scope to build the overlay. During Movement, the image and worldPoint describe the posed preview; modelLocalPoint maps the hit back to the saved source for viewer_highlight and editing. Verify the capture identity matches the current revision. If capture fails, ask for a fresh pin or resolve the reported viewer issue before choosing a region. Never reuse a capture from another request or guess where the person pointed.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => {
       const { image, ...snapshot } = JSON.parse(value)
@@ -771,13 +771,15 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         })
         if (!receipt) return JSON.stringify(result)
         const outcome = await receipt
-        const status = ['viewer_hidden', 'render_failed'].includes(outcome) ? 'not_rendered' : outcome
+        const status = ['viewer_hidden', 'render_failed', 'print_layout', 'highlight_hidden'].includes(outcome) ? 'not_rendered' : outcome
         const reason = outcome === 'not_rendered' ? 'ack_timeout' : outcome
         diagnostics.record(exec.agent.session.id, 'highlight.settled', { highlightId: result.highlight.id, status, reason, elapsedMs: Math.round(performance.now() - started) })
         exec.signal.throwIfAborted()
         return JSON.stringify({ ...result, status, reason, elapsedMs: Math.round(performance.now() - started), message: status === 'rendered'
           ? 'The visible viewer rendered this teal highlight. Use it as the visual reference for the requested change.'
           : reason === 'viewer_hidden' ? 'The viewer reports its document is hidden. Bring Rumi to the foreground and retry the highlight.'
+          : reason === 'print_layout' ? 'Leave the print layout to show this highlight in the 3D preview.'
+          : reason === 'highlight_hidden' ? 'Turn on highlight visibility in the preview to show this overlay.'
           : reason === 'render_failed' ? 'The viewer reported a rendering error. Read the current meshState context for the error before retrying.'
           : 'No matching rendering acknowledgment arrived. Visibility is unknown; do not claim the highlight is visible or absent. Ask the person to open the preview and retry.' })
       })()

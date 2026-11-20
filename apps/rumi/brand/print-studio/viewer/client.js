@@ -404,7 +404,7 @@ export function installViewer(ctx, React, primitives) {
         const report = await viewport.current.applyDesign(spec, view.volume ?? null)
         if (!active || !report) return
         const highlightId = viewport.current?.renderedHighlight?.() ?? null
-        await feedback({ report, parameters: viewport.current.modelParameters(), motion: viewport.current.motionControls?.() ?? null, loadStatus: document.hidden ? 'viewer_hidden' : 'ready', highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })
+        await feedback({ report, parameters: viewport.current.modelParameters(), motion: viewport.current.motionControls?.() ?? null, loadStatus: document.hidden ? 'viewer_hidden' : 'ready', highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : viewport.current?.highlightBlockedBy?.() ?? 'not_ready' })
       }
       const visible = () => {
         if (!document.hidden) void reportRendered().catch(() => { if (active) setBuildError('feedbackFailed') })
@@ -416,7 +416,7 @@ export function installViewer(ctx, React, primitives) {
         setMotion(viewport.current.motionControls?.() ?? null)
         trace('apply_finished')
         const highlightId = viewport.current?.renderedHighlight?.() ?? null
-        await feedback({ report, parameters: viewport.current.modelParameters(), motion: viewport.current.motionControls?.() ?? null, loadStatus: document.hidden ? 'viewer_hidden' : 'ready', highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : 'not_ready' })
+        await feedback({ report, parameters: viewport.current.modelParameters(), motion: viewport.current.motionControls?.() ?? null, loadStatus: document.hidden ? 'viewer_hidden' : 'ready', highlightId, requestedHighlightId: view.design.highlight?.id ?? null, highlightStatus: document.hidden ? 'viewer_hidden' : highlightId ? 'rendered' : viewport.current?.highlightBlockedBy?.() ?? 'not_ready' })
       }).catch(async (error) => {
         if (!active) return
         trace('apply_or_feedback_failed')

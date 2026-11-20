@@ -72,16 +72,16 @@ export function createSurfaceIndex(geometry) {
   }
   for (let face = 0; face < count; face++) ids.fill(find(face) + 1, face * 3, face * 3 + 3)
   edges.clear(); vertices.clear()
-  const box = new THREE.Box3(), point = new THREE.Vector3()
+  const box = new THREE.Box3(), point = new THREE.Vector3(), entry = new THREE.Vector3()
   return {
     ids, boundary, count,
     surface(face) { return ids[face * 3] },
-    pick(ray, material) {
-      let nearest = null, distance = Infinity
+    pick(ray, material, limit = Infinity) {
+      let nearest = null, distance = limit * limit
       for (let block = 0; block * 6 < bounds.length; block++) {
         box.min.fromArray(bounds, block * 6)
         box.max.fromArray(bounds, block * 6 + 3)
-        if (!ray.intersectsBox(box)) continue
+        if (!box.containsPoint(ray.origin) && (!ray.intersectBox(box, entry) || ray.origin.distanceToSquared(entry) >= distance)) continue
         const end = Math.min(count, (block + 1) * blockSize)
         for (let faceIndex = block * blockSize; faceIndex < end; faceIndex++) {
           const faceMaterial = Array.isArray(material) ? material[materials[faceIndex]] : material

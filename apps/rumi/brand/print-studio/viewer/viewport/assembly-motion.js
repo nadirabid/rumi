@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { mechanismMetadata } from '../mechanics.js'
 import { normalizeControls } from '../analog/control-spec.js'
 import { jointControls } from './joint-controls.js'
+import { createSurfaceIndex } from './surfaces.js'
 
 /**
  * Bind GLB physical parts to saved-world joint transforms and declared control widgets.
@@ -82,7 +83,7 @@ export function robotMotion(metadata, nodes, root, nodeIndices, labels, presenta
     if (!node.isMesh) return
     let owner = node, part
     while (owner && part === undefined) { part = partsByNode.get(nodeIndices.get(owner)); owner = owner.parent }
-    meshes.push({ node, part, saved: node.matrixWorld.clone() })
+    meshes.push({ node, part, saved: node.matrixWorld.clone(), inverseSaved: node.matrixWorld.clone().invert(), surface: null })
   })
   if (meshes.some(mesh => mesh.part === undefined) || assembly.parts.some(part => !meshes.some(mesh => mesh.part === part.id))) {
     return unavailable('Movement preview could not bind every physical part to its loaded mesh.')
@@ -91,15 +92,27 @@ export function robotMotion(metadata, nodes, root, nodeIndices, labels, presenta
     parameters, motionDefinitions: definitions, poseIdentity: JSON.stringify(assembly),
     createMotionPreview(parent) {
       const preview = new THREE.Group(), visible = root.visible
-      const copies = meshes.map(mesh => {
+      const transforms = new Map(assembly.parts.map(part => [part.id, new THREE.Matrix4()]))
+      const posed = new Map()
+      const copies = new Map(meshes.map(mesh => {
         const node = mesh.node.clone(false)
         node.matrixAutoUpdate = false; preview.add(node)
-        return { ...mesh, node }
-      })
+        posed.set(mesh.node, { node, inverseSaved: mesh.inverseSaved })
+        return [node, mesh]
+      }))
       return {
         root: preview,
+        savedHit(node, worldPoint) {
+          const mesh = copies.get(node)
+          if (!mesh) return null
+          return { node: mesh.node, point: worldPoint.clone().applyMatrix4(node.matrixWorld.clone().invert()).applyMatrix4(mesh.saved) }
+        },
+        posedHit(source, point) {
+          const mesh = posed.get(source)
+          return mesh ? { object: mesh.node, point: point.clone().applyMatrix4(mesh.inverseSaved).applyMatrix4(mesh.node.matrixWorld) } : null
+        },
+        overlayParts(positions) { return bindOverlay(positions, meshes, transforms) },
         update(values) {
-          const transforms = new Map([[assembly.root, new THREE.Matrix4()]])
           for (const connection of ordered) {
             const delta = new THREE.Matrix4()
             if (connection.kind !== 'fixed') {
@@ -113,9 +126,9 @@ export function robotMotion(metadata, nodes, root, nodeIndices, labels, presenta
                   .multiply(new THREE.Matrix4().makeTranslation(...pivot.negate().toArray()))
               }
             }
-            transforms.set(connection.child, transforms.get(connection.parent).clone().multiply(delta))
+            transforms.get(connection.child).multiplyMatrices(transforms.get(connection.parent), delta)
           }
-          for (const mesh of copies) mesh.node.matrix.copy(transforms.get(mesh.part)).multiply(mesh.saved)
+          for (const [node, mesh] of copies) node.matrix.multiplyMatrices(transforms.get(mesh.part), mesh.saved)
           root.visible = false; parent.add(preview); preview.updateMatrixWorld(true)
         },
         dispose() {
@@ -125,4 +138,36 @@ export function robotMotion(metadata, nodes, root, nodeIndices, labels, presenta
       }
     },
   }
+}
+
+// Bind a submitted triangle to the saved surface beneath its centroid. This
+// also handles an overlay clipped inside a source triangle.
+function bindOverlay(positions, meshes, transforms) {
+  const groups = new Map()
+  const tolerance = 0.001
+  const twoSided = { visible: true, side: THREE.DoubleSide }
+  const points = Array.from({ length: 3 }, () => new THREE.Vector3())
+  const center = new THREE.Vector3(), normal = new THREE.Vector3(), sample = new THREE.Vector3()
+  const ray = new THREE.Ray(), local = new THREE.Ray()
+  for (let offset = 0; offset < positions.length; offset += 9) {
+    for (let corner = 0; corner < 3; corner++) points[corner].fromArray(positions, offset + corner * 3)
+    center.copy(points[0]).add(points[1]).add(points[2]).multiplyScalar(1 / 3)
+    THREE.Triangle.getNormal(...points, normal)
+    ray.origin.copy(center).addScaledVector(normal, tolerance)
+    ray.direction.copy(normal).negate()
+    let owner = null, best = tolerance
+    for (const mesh of meshes) {
+      if (normal.lengthSq() === 0) break
+      local.copy(ray).applyMatrix4(mesh.inverseSaved)
+      const limit = 2 * sample.copy(center).applyMatrix4(mesh.inverseSaved).distanceTo(local.origin)
+      mesh.surface ??= createSurfaceIndex(mesh.node.geometry)
+      const hit = mesh.surface.pick(local, twoSided, limit)
+      if (!hit) continue
+      const distance = center.distanceTo(hit.point.applyMatrix4(mesh.saved))
+      if (distance < best) { best = distance; owner = mesh.part }
+    }
+    if (!groups.has(owner)) groups.set(owner, [])
+    for (let i = offset; i < offset + 9; i++) groups.get(owner).push(positions[i])
+  }
+  return [...groups].map(([part, vertices]) => ({ positions: new Float32Array(vertices), transform: transforms.get(part) }))
 }

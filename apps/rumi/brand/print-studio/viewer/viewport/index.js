@@ -105,6 +105,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       motionPreview = design.createMotionPreview(designRoot)
     }
     motionPreview.update(motion.values)
+    if (surfaceOverlay) surfaceOverlay.matrixWorldNeedsUpdate = true
   }
   const shapeMetrics = { frames: 0, maxInputToDrawMs: 0, lastDrawMs: 0 }
   function clearShape() { if (shapeFrame !== null) cancelAnimationFrame(shapeFrame); shapeFrame = null; if (shapeDeformer) track(Promise.resolve(shapeDeformer.dispose())); shapeDeformer = null; shapeId = null; shapeOperation = null }
@@ -215,17 +216,18 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   controls.addEventListener('change', cameraChanged)
   renderer.domElement.addEventListener('webglcontextlost', lost)
 
-  let surfaceOverlay = null
+  let surfaceOverlay = null, surfaceMaterial = null
   function clearSurfaceOverlay() {
     if (!surfaceOverlay) return
     surfaceOverlay.removeFromParent()
-    surfaceOverlay.geometry.dispose()
-    surfaceOverlay.material.dispose()
+    surfaceOverlay.traverse(node => { if (node.isMesh) node.geometry.dispose() })
+    surfaceMaterial.dispose()
+    surfaceMaterial = null
     surfaceOverlay = null
   }
   function showOverlay(visible) {
     highlightOverlay?.setVisible(visible)
-    if (surfaceOverlay) surfaceOverlay.visible = visible
+    if (surfaceOverlay) surfaceOverlay.visible = visible && !printPreview
   }
 
   function clearHighlight() {
@@ -237,17 +239,28 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
 
   function syncHighlight() {
     if (printPreview) return
-    const highlight = !printPreview && !motionPreview && designUrl === designSpec?.url ? designSpec?.highlight : null
+    const highlight = designUrl === designSpec?.url ? designSpec?.highlight : null
     if (highlightOverlay && highlightId === (highlight?.id ?? null)) return
     if (!design) { clearHighlight(); return }
     clearSurfaceOverlay()
     if (highlight?.positions) {
-      const geometry = new THREE.BufferGeometry()
-      geometry.setAttribute('position', new THREE.BufferAttribute(highlight.positions, 3))
-      const material = new THREE.MeshBasicMaterial({ color: 0x29b59d, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, depthWrite: false })
-      surfaceOverlay = new THREE.Mesh(geometry, material)
+      surfaceMaterial = new THREE.MeshBasicMaterial({ color: 0x29b59d, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, depthWrite: false })
+      const parts = motionPreview?.overlayParts(highlight.positions)
+      const meshFor = positions => {
+        const geometry = new THREE.BufferGeometry()
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+        const mesh = new THREE.Mesh(geometry, surfaceMaterial)
+        mesh.renderOrder = 1
+        return mesh
+      }
+      surfaceOverlay = parts ? new THREE.Group() : meshFor(highlight.positions)
+      for (const part of parts ?? []) {
+        const mesh = meshFor(part.positions)
+        mesh.matrixAutoUpdate = false
+        if (part.transform) mesh.matrix = part.transform
+        surfaceOverlay.add(mesh)
+      }
       surfaceOverlay.name = 'Rumi highlight overlay'
-      surfaceOverlay.renderOrder = 1
       surfaceOverlay.matrixAutoUpdate = false
       surfaceOverlay.matrix = designRoot.matrix
       scene.add(surfaceOverlay)
@@ -395,11 +408,18 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       if (activity.mode !== 'idle') return false
       if (!motion || shapeDeformer) return false
       const next = controlValues(motion, values), previous = motion.values
+      const pin = hover.snapshot({ pinnedOnly: true })
+      const saved = pin && (motionPreview?.savedHit(pin.object, pin.point)
+        ?? { node: pin.object, point: designRoot.worldToLocal(pin.point.clone()) })
       motion.values = next
       try { showMotion() } catch (error) { motion.values = previous; throw error }
       poses.delete(designSpec.path); poses.set(designSpec.path, { values: { ...next }, identity: design.poseIdentity ?? null })
       if (poses.size > 32) poses.delete(poses.keys().next().value)
-      hover.clear(); cursorAnchors.clear(); syncHighlight(); render()
+      const relocated = saved && (motionPreview
+        ? motionPreview.posedHit(saved.node, saved.point)
+        : { object: saved.node, point: designRoot.localToWorld(saved.point) })
+      hover.replacePin(relocated ? { ...pin, ...relocated } : null)
+      cursorAnchors.clear(); syncHighlight(); render()
       return true
     },
     async applyShape(spec) {
@@ -445,11 +465,12 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     renderedHighlight() {
       return !closed && !printPreview && !document.hidden && highlightVisible && designUrl === designSpec?.url ? highlightId : null
     },
+    /** Report a deliberate overlay suppression so the host can settle the request. */
+    highlightBlockedBy() { return printPreview ? 'print_layout' : !highlightVisible ? 'highlight_hidden' : null },
     /** Capture a pin from the mounted preview, or sample hover in a visible viewer. */
     captureCursor(request = {}) {
       if (closed) return { status: 'viewer_unavailable', reason: 'viewer_closed' }
       if (shapeDeformer) return { status: 'viewer_unavailable', reason: 'temporary_edit' }
-      if (motionPreview) return { status: 'viewer_unavailable', reason: 'movement_preview' }
       if (printPreview) return { status: 'viewer_unavailable', reason: 'print_layout' }
       const hidden = document.hidden
       if (hidden && request.command) return { status: 'viewer_unavailable', reason: 'viewer_hidden' }
@@ -462,7 +483,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       const designIdentity = design ? {
         path: designSpec.path, revision: designSpec.revision, url: designUrl, transform: designSpec.transform,
       } : null
-      let object = hit.object, objectId = null, path = []
+      const savedHit = motionPreview?.savedHit(hit.object, hit.point)
+      let object = savedHit?.node ?? hit.object, objectId = null, path = []
       while (object && object !== designRoot && object !== scene) {
         if (!object.userData.rumiCoordinateFrame) path.unshift(object.name || `child[${object.parent ? object.parent.children.indexOf(object) : 0}]`)
         for (const [id, entry] of objects) if (entry.mesh === object) objectId = id
@@ -475,7 +497,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       const selection = { partPath: path, surfaceId: hit.surfaceId, mode: ['patch', 'surface', 'part', 'edge'][hit.mode] }
       let modelLocalBlob = null
       if (object === designRoot) {
-        const center = designRoot.worldToLocal(hit.point.clone()).toArray()
+        const center = savedHit ? savedHit.point.toArray() : designRoot.worldToLocal(hit.point.clone()).toArray()
         const radius = hit.radius / Math.abs(designRoot.getWorldScale(new THREE.Vector3()).x)
         modelLocalBlob = { center, radii: [radius, radius, radius], rotationDegrees: [0, 0, 0] }
       }
@@ -497,7 +519,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       return {
         status: 'captured', capturedAt: new Date().toISOString(),
         identity: { sceneRevision, design: designIdentity },
-        region: { objectId, partPath: path, faceIndex: hit.faceIndex, worldPoint: point, worldRadius: hit.radius, modelLocalBlob, selection, anchorId },
+        region: { objectId, partPath: path, faceIndex: hit.faceIndex, worldPoint: point, worldRadius: hit.radius, modelLocalPoint: modelLocalBlob?.center ?? null, modelLocalBlob, selection, anchorId },
         camera: { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), fov: camera.getEffectiveFOV(), aspect: camera.aspect },
         image,
       }

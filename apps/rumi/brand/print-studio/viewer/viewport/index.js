@@ -20,6 +20,7 @@ import * as THREE from 'three'
 import { createActivity } from './activity.js'
 import { createHover } from './hover.js'
 import { createHighlight } from './highlight.js'
+import { createEditPicker } from './edit-picking.js'
 import { disposeModel } from './model.js'
 import { placeMesh } from '../transform.js'
 import { analyzeMesh } from '../checks.js'
@@ -108,7 +109,15 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     if (surfaceOverlay) surfaceOverlay.matrixWorldNeedsUpdate = true
   }
   const shapeMetrics = { frames: 0, maxInputToDrawMs: 0, lastDrawMs: 0 }
-  function clearShape() { if (shapeFrame !== null) cancelAnimationFrame(shapeFrame); shapeFrame = null; if (shapeDeformer) track(Promise.resolve(shapeDeformer.dispose())); shapeDeformer = null; shapeId = null; shapeOperation = null }
+  function clearShape() {
+    if (shapeFrame !== null) cancelAnimationFrame(shapeFrame)
+    shapeFrame = null
+    if (shapeDeformer) {
+      hover.replacePin(null)
+      track(Promise.resolve(shapeDeformer.dispose()))
+    }
+    shapeDeformer = null; shapeId = null; shapeOperation = null
+  }
   let highlightOverlay = null, highlightId = null, highlightVisible = true
   let design = null, designUrl = null, requestedUrl = null, generation = 0, cameraCommand = null
   let sceneRevision = 0, sceneGeneration = 0
@@ -153,8 +162,10 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   camera.add(light, light.target)
   scene.add(camera)
 
+  const editPicker = createEditPicker(renderer, scene, camera)
   const hover = createHover(renderer.domElement, camera,
-    () => shapeDeformer || printPreview ? [] : [...objects.values()].map(entry => entry.mesh).concat(design ? [designRoot] : []), render, onCursorMode)
+    () => printPreview ? [] : [...objects.values()].map(entry => entry.mesh).concat(design ? [designRoot] : []), render, onCursorMode,
+    (pointer, ray) => shapeDeformer ? editPicker.pick(pointer, ray, surfaceOverlay ? [...volumeNodes, surfaceOverlay] : volumeNodes) : undefined)
   const cameraChanged = () => { if (!hover.invalidate()) render() }
 
   function clearVolume() {
@@ -266,7 +277,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       scene.add(surfaceOverlay)
     }
     if (highlightOverlay) highlightOverlay.update(highlight?.blobs ? highlight : { blobs: [] })
-    else highlightOverlay = createHighlight(motionPreview?.root ?? design.root, highlight?.blobs ? highlight : { blobs: [] }, hover, activity.uniform)
+    else highlightOverlay = createHighlight(motionPreview?.root ?? design.root, highlight?.blobs ? highlight : { blobs: [] }, hover, activity.uniform, editPicker.active)
     showOverlay(highlightVisible)
     highlightId = highlight?.id ?? null
   }
@@ -447,6 +458,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         const owner = shapeDeformer
         return track(owner.update(values).then(updated => {
           if (closed || owner !== shapeDeformer || !updated) return false
+          hover.replacePin(null)
           render(); return true
         }))
       }
@@ -455,7 +467,10 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       shapeFrame = requestAnimationFrame(() => {
         shapeFrame = null
         if (!shapeDeformer || closed) return
-        const started = performance.now(); shapeDeformer.update(shapeValues); render()
+        const started = performance.now()
+        shapeDeformer.update(shapeValues)
+        hover.replacePin(null)
+        render()
         shapeMetrics.frames++; shapeMetrics.lastDrawMs = performance.now() - started
         shapeMetrics.maxInputToDrawMs = Math.max(shapeMetrics.maxInputToDrawMs, performance.now() - inputTime)
       })
@@ -668,7 +683,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
               entry.sourceMaterial = material
             }
             entry.mesh.matrix.fromArray(spec.matrix); entry.mesh.updateMatrixWorld(true)
-            if (rebuildOverlay) entry.overlay = createHighlight(entry.mesh, { blobs: [] }, hover, activity.uniform)
+            if (rebuildOverlay) entry.overlay = createHighlight(entry.mesh, { blobs: [] }, hover, activity.uniform, editPicker.active)
           }
           for (const [id, entry] of objects) {
             if (live.has(id)) continue
@@ -698,6 +713,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       generation++
       for (const [name, listener] of printListeners) renderer.domElement.removeEventListener(name, listener, true)
       hover.dispose()
+      editPicker.dispose()
       cursorAnchors.clear()
       clearHighlight()
       if (design) { clearShape(); disposeDesign(design) }

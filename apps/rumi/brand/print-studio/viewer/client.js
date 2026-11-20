@@ -519,7 +519,7 @@ export function installViewer(ctx, React, primitives) {
             try { return viewport.current?.updateMotion(values) !== false }
             catch (_error) { setBuildError('buildFailed'); return false }
           }, onRelease: () => {} })),
-      !view?.design?.analog && h('div', { className: 'pv-cursor-controls', role: 'group', 'aria-label': t('cursorHighlighting') },
+      h('div', { className: 'pv-cursor-controls', role: 'group', 'aria-label': t('cursorHighlighting') },
         ['patch', 'surface', 'part', 'edge'].map(mode => h(Button, {
           key: mode, variant: 'ghost', size: 'sm', 'aria-pressed': cursorMode === mode,
           onClick: () => { setCursorMode(mode); viewport.current?.setCursorMode(mode) },

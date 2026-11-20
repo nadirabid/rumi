@@ -12,7 +12,7 @@ import { en, zh } from '../viewer/locales.js'
 import { encodeStl } from '../viewer/stl.js'
 
 vi.mock('../viewer/viewer.module.css', () => ({ default: '' }))
-const viewport = vi.hoisted(() => ({ setActivity: vi.fn(), closePrintLayout: vi.fn(), motionControls: vi.fn(), updateMotion: vi.fn(), modelParameters: vi.fn(() => ({ width: 12 })), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
+const viewport = vi.hoisted(() => ({ setActivity: vi.fn(), closePrintLayout: vi.fn(), motionControls: vi.fn(), updateMotion: vi.fn(), modelParameters: vi.fn(() => ({ width: 12 })), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setCursorMode: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
 vi.mock('../viewer/viewport/index.js', () => ({
   createViewport: (...args: unknown[]) => {
     viewport.create(...args)
@@ -20,7 +20,7 @@ vi.mock('../viewer/viewport/index.js', () => ({
       setActivity: viewport.setActivity, closePrintLayout: viewport.closePrintLayout,
       motionControls: viewport.motionControls, updateMotion: viewport.updateMotion,
       modelParameters: viewport.modelParameters, renderedHighlight: viewport.renderedHighlight,
-      captureCursor: viewport.captureCursor, setHighlightVisible: viewport.setHighlightVisible,
+      captureCursor: viewport.captureCursor, setCursorMode: viewport.setCursorMode, setHighlightVisible: viewport.setHighlightVisible,
       thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose,
     }
   },
@@ -39,6 +39,7 @@ beforeEach(() => {
   viewport.updateMotion.mockReset().mockReturnValue(true)
   viewport.applyDesign.mockReset().mockResolvedValue(null)
   viewport.captureCursor.mockReset().mockReturnValue({ status: 'no_hit' })
+  viewport.setCursorMode.mockClear()
   viewport.renderedHighlight.mockReset().mockReturnValue(null)
   viewport.closePrintLayout.mockReset()
   viewport.setActivity.mockReset()
@@ -424,6 +425,8 @@ it('keeps movement controls in their own area across model reloads without openi
   await settle(2000)
   expect(screen.getByRole('slider', { name: 'Doors' }).closest('fieldset')?.disabled).toBe(true)
   expect(screen.getByRole('slider', { name: 'Width' }).closest('.pv-motion-controls')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: en.cursor_part }))
+  expect(viewport.setCursorMode).toHaveBeenCalledWith('part')
   viewport.motionControls.mockReturnValue(null)
   view.setScene({ ...scene([]), design: { ...design, url: '/without-movement.js', revision: 3 } })
   await settle(2000)

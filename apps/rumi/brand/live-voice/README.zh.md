@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-Rumi 的全双工语音功能：GPT-Live 负责听和说，Harness 执行它委派的工作。
+Rumi 使用 GPT-Live-1.1 提供全双工语音。WebRTC 将麦克风音频直接发送给 OpenAI 并播放回复。本地主机保管 API 密钥，通过控制 WebSocket 接收转录并处理项目 agent 委派。
 
 该软件包由 Rumi 维护，名称为 `@rumi/live-voice`。`src/` 管理 OpenAI 连接和 Harness 委派；`client/` 管理麦克风采集、播放和输入框旁的控件。Rumi 在默认配置中包含此 Bundle。
 
@@ -12,13 +12,15 @@ Rumi 的全双工语音功能：GPT-Live 负责听和说，Harness 执行它委�
 
 在 **插件 → Live Voice** 中设置密钥。主机通过 `ctx.credentials` 保存密钥；设置响应仅包含是否已配置、掩码提示和存储位置。凭据服务的解析结果优先于显式配置和指定的旧密钥文件（内置配置使用 `~/.rumi/live-voice.key`）。启动环境是最后的回退来源。保存替代密钥不会改写旧文件。
 
+使用标准配置时，下一次语音会话将启用新版。如果配置覆盖了 `endpoint`，请将其指向支持创建 GPT-Live WebRTC 会话及控制 WebSocket 的服务。移除覆盖即可使用 OpenAI。显式设置的 `model` 仍决定所用模型。
+
 ## 会话生命周期
 
 语音控件固定在发送按钮旁，麦克风静音控件出现在它的左侧。麦克风控件显示当前状态：开启时显示普通麦克风图标，静音时显示带斜线的麦克风图标；工具提示说明点击后的操作。语音启用时，图标的前景色与背景色互换；动画也会指示活动状态。
 
-连接期间，控件显示虚线加载环，并可再次点击取消。主机报告就绪且本地音频设置完成后，才会显示启用配色和静音控件。
+连接期间，控件显示虚线加载环，并可再次点击取消。OpenAI 确认 WebRTC 会话就绪后，才会显示启用配色和静音控件。静音会禁用传出的麦克风音轨。
 
-连续四分钟没有语音或 agent 工作时，语音会自动关闭，静音时也适用。`idleTimeoutMinutes` 可将此间隔配置为 1 到 60 分钟。识别到的用户语音、语音输出和对话消息会重置倒计时；静音音频帧和轮询不会。agent 正在工作或语音交接尚未完成时，语音保持开启；工作结束后，重新开始完整的空闲间隔。现有的 `maxSessionMinutes` 总时长上限仍然适用。点击语音控件即可重新启动。
+当前对话连续五分钟未识别到用户语音或收到用户发送的聊天消息时，语音会自动关闭，静音时也适用。agent 正在工作或语音交接尚未完成时，会推迟关闭。待播放或正在播放的语音回复有短暂的缓冲时间。点击语音控件即可重新启动。`idleTimeoutMinutes` 可将用户空闲时间配置为 1 到 60 分钟。`maxSessionMinutes` 总时长上限仍然适用。
 
 关闭语音会丢弃尚未提交的委派并立即停止本地采集。已提交给 Harness 的工作可以继续完成；插件释放会等待其会话写入和传输关闭。正在启动的连接不能在插件释放后发布会话，同一对话的重叠启动请求会被拒绝。
 
@@ -47,7 +49,7 @@ Harness 轮次运行期间，主机跟踪会话事件，每隔几秒最多发送
 
 ## 验证
 
-运行 `pnpm exec vitest run --config apps/rumi/vitest.voice.config.ts`。此配置将直接发布的 JavaScript 导入解析到工作区源码。测试使用本地 WebSocket 服务器和可控的浏览器音频 Promise，不会联系 OpenAI 或采集麦克风音频。
+运行 `pnpm exec vitest run --config apps/rumi/vitest.voice.config.ts`。此配置将直接发布的 JavaScript 导入解析到工作区源码。测试使用本地 HTTP 和控制 WebSocket 以及模拟的渲染器 WebRTC 音轨。音频和委派由真实服务的冒烟测试另行验证。
 
 贡献者还可以实现 `captureRequest({sessionId, requestedAt, signal})`，返回单独记录的 `rumi-voice-reference` 上下文消息的内容块。引用记录用户语音消息 ID，并在同一个下一步收件箱中紧接用户消息之前提交；语音气泡只包含转录的话语。标准上下文界面单独呈现引用，语音对话上下文不包含它。捕获从上次委派后的第一个非空转录片段开始，带时间戳的结果保留至委派。Print Studio 通过此方式提供指针图像与区域。捕获失败会明确记录为视觉上下文不可用，不会替换为旧捕获。关闭语音会中止待处理捕获。
 
@@ -55,7 +57,7 @@ Harness 轮次运行期间，主机跟踪会话事件，每隔几秒最多发送
 
 ## 委派证据
 
-默认前端提示对后端请求、任务问题的简短回答和纠正使用 GPT-Live 明确的 `Generate <|SpawnThinking|>` 指令。自定义 `instructions` 会替换此策略，必须保留委派指令；参见 [OpenAI 提示指南](https://developers.openai.com/api/docs/guides/live-prompting#delegation)。提示指令只能引导模型行为；只有收到委派事件并获得主机接收确认，才能认定工作已提交。
+GPT-Live-1.1 的默认提示以自然语言说明何时委派后端请求、对任务问题的简短答复和纠正。自定义 `instructions` 必须说明哪些请求需要委派。Rumi 会转换现有自定义提示中的旧委派标记。主机收到委派且项目 agent 接收后，任务才算提交。参见 [OpenAI 提示指南](https://developers.openai.com/api/docs/guides/live-prompting#delegation)。
 
 收到委派时，主机立即发送静默 thinking 更新，以抑制待发送的自动确认。`acknowledgementDelayMs` 默认 800 毫秒；它不会停止已经生成的语音或模型独立发言。语音指令禁止在主机确认前声称请求已接收，也禁止在工具返回 `rendered` 前声称高亮已显示。
 

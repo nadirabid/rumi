@@ -31,37 +31,40 @@ function fixture() {
   const ready = deferred<Response>()
   let firstPoll = true
   const acquiring = deferred<undefined>()
+  const offering = deferred<undefined>()
   const closing = deferred<undefined>()
   const closed = deferred<Response>()
+  const remoteSet = deferred<undefined>()
   const stopTrack = vi.fn()
-  const closeAudio = vi.fn(async () => {})
-  vi.stubGlobal('AudioContext', class {
-    sampleRate = 24_000
-    resume = async () => {}
-    close = closeAudio
-    audioWorklet = { addModule: async () => {} }
-    createMediaStreamSource = () => ({ connect: () => {}, disconnect: () => {} })
-    createGain = () => ({ gain: { value: 0 }, connect: () => {} })
+  const closePeer = vi.fn()
+  const track = Object.assign(new EventTarget(), { enabled: true, stop: stopTrack })
+  const events = new EventTarget()
+  const stream = { getTracks: () => [track], getAudioTracks: () => [track] } as MediaStream
+  const setRemoteDescription = vi.fn(async (_answer: RTCSessionDescriptionInit) => { remoteSet.resolve(undefined) })
+  const addTrack = vi.fn()
+  const createDataChannel = vi.fn(() => events)
+  vi.stubGlobal('RTCPeerConnection', class extends EventTarget {
+    iceGatheringState = 'complete'
+    localDescription = { type: 'offer', sdp: 'v=0 test offer' }
+    addTrack = addTrack
+    createDataChannel = createDataChannel
+    createOffer = async () => this.localDescription
+    setLocalDescription = async () => {}
+    setRemoteDescription = setRemoteDescription
+    close = closePeer
   })
-  vi.stubGlobal('AudioWorkletNode', class {
-    port = { onmessage: null }
-    connect(node: object) { return node }
-    disconnect() {}
-  })
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: () => { acquiring.resolve(undefined); return microphone.promise } } })
-  vi.stubGlobal('URL', class extends URL {
-    static createObjectURL() { return 'blob:voice-test' }
-    static revokeObjectURL() {}
-  })
-  vi.stubGlobal('fetch', vi.fn((input: string, init: RequestInit) => {
-    if (input.endsWith('/session')) return started.promise
+  const fetch = vi.fn((input: string, init: RequestInit) => {
+    if (input.endsWith('/session')) { offering.resolve(undefined); return started.promise }
     if (input.endsWith('/poll') && firstPoll) { firstPoll = false; return ready.promise }
     if (input.endsWith('/close')) { closing.resolve(undefined); return closed.promise }
     return new Promise((_resolve, reject) => {
       if (init.signal?.aborted) reject(new Error('Capture stopped'))
       else init.signal?.addEventListener('abort', () => { reject(new Error('Capture stopped')) }, { once: true })
     })
-  }))
+  })
+  vi.stubGlobal('fetch', fetch)
   let labels: Record<string, string> = {}
   const t = (key: string) => labels[key] ?? key
   const components = new Map<string, React.ComponentType<{ sessionId: string; t: (key: string) => string }>>()
@@ -84,62 +87,70 @@ function fixture() {
   const view = render(<Voice sessionId="s" t={t} />)
   const begin = () => fireEvent.click(screen.getByRole('button', { name: 'Start live voice session' }))
   const stop = () => fireEvent.click(screen.getByRole('button', { name: 'End live voice session' }))
+  const respond = () => started.resolve(new Response(JSON.stringify({ liveId: 'live', sdp: 'test answer' })))
+  const grant = async () => { await acquiring.promise; microphone.resolve(stream); await offering.promise }
+  const connected = async () => {
+    respond()
+    await remoteSet.promise
+    events.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'session.started' }) }))
+  }
+  const finishClose = () => closed.resolve(new Response(null, { status: 204 }))
   // Resolve deferred resources before plugin disposal even if an assertion fails.
   disposers.unshift(async () => {
-    started.resolve(new Response(JSON.stringify({ liveId: 'live' })))
-    microphone.resolve({ getTracks: () => [{ stop: stopTrack }] } as MediaStream)
-    closed.resolve(new Response(null, { status: 204 }))
+    respond()
+    microphone.resolve(stream)
+    finishClose()
     ready.resolve(new Response(JSON.stringify({ events: [] })))
   })
   return {
     view, switchSession: (sessionId: string) => view.rerender(<Voice sessionId={sessionId} t={t} />),
-    begin, stop, ready, started, acquiring, microphone, closing, closed, stopTrack, closeAudio,
+    begin, stop, ready, grant, connected, respond, microphone, closing, stopTrack, closePeer,
+    track, stream, addTrack, createDataChannel, setRemoteDescription, fetch, finishClose,
   }
 }
 
-it('closes a late host session without opening the microphone after Stop', async () => {
+it('closes a late host session without installing the remote answer after Stop', async () => {
   const f = fixture()
   f.begin()
+  await act(f.grant)
   f.stop()
+  expect(f.stopTrack).toHaveBeenCalledOnce()
   await act(async () => {
-    f.started.resolve(new Response(JSON.stringify({ liveId: 'live' })))
+    f.respond()
     await f.closing.promise
   })
-  expect(f.closeAudio).not.toHaveBeenCalled()
+  expect(f.setRemoteDescription).not.toHaveBeenCalled()
   expect(screen.getByRole('button', { name: 'Start live voice session' })).toBeTruthy()
-  f.closed.resolve(new Response(null, { status: 204 }))
+  f.finishClose()
 })
 
 it('releases a microphone granted after the component unmounts', async () => {
   const f = fixture()
   f.begin()
-  await act(async () => {
-    f.started.resolve(new Response(JSON.stringify({ liveId: 'live' })))
-    await f.acquiring.promise
-  })
   f.view.unmount()
-  await act(async () => {
-    f.microphone.resolve({ getTracks: () => [{ stop: f.stopTrack }] } as MediaStream)
-    await f.closing.promise
-  })
+  await act(async () => { f.microphone.resolve(f.stream) })
   expect(f.stopTrack).toHaveBeenCalledOnce()
-  expect(f.closeAudio).toHaveBeenCalledOnce()
-  f.closed.resolve(new Response(null, { status: 204 }))
+  expect(f.fetch).not.toHaveBeenCalled()
 })
 
-it('stops local capture before a delayed host close response', async () => {
+it('negotiates one WebRTC track and stops local capture before a delayed host close response', async () => {
   const f = fixture()
   f.begin()
-  await act(async () => {
-    f.started.resolve(new Response(JSON.stringify({ liveId: 'live' })))
-    await f.acquiring.promise
-    f.microphone.resolve({ getTracks: () => [{ stop: f.stopTrack }] } as MediaStream)
-  })
+  await act(f.grant)
+  expect(f.track.enabled).toBe(false)
+  expect(f.addTrack).toHaveBeenCalledWith(f.track, f.stream)
+  expect(f.createDataChannel).toHaveBeenCalledWith('oai-events')
+  expect(f.fetch).toHaveBeenCalledWith('/api/live-voice/session',
+    expect.objectContaining({ body: JSON.stringify({ sessionId: 's', sdp: 'v=0 test offer' }) }))
+  await act(f.connected)
+  expect(f.setRemoteDescription).toHaveBeenCalledWith({ type: 'answer', sdp: 'test answer' })
+  expect(f.track.enabled).toBe(true)
   f.stop()
   expect(f.stopTrack).toHaveBeenCalledOnce()
-  expect(f.closeAudio).toHaveBeenCalledOnce()
-  await act(async () => { f.ready.resolve(new Response(JSON.stringify({ events: [] }))); await f.closing.promise })
-  f.closed.resolve(new Response(null, { status: 204 }))
+  await act(async () => { await f.closing.promise })
+  expect(f.closePeer).not.toHaveBeenCalled()
+  await act(async () => { f.finishClose() })
+  expect(f.closePeer).toHaveBeenCalledOnce()
 })
 
 it('shows a cancellable pending state until ready, then places mute left and reverses colors', async () => {
@@ -153,13 +164,9 @@ it('shows a cancellable pending state until ready, then places mute left and rev
   expect(voice.getAttribute('aria-pressed')).toBe('false')
   expect(voice.querySelector('circle')!.getAttribute('fill')).toBe(background)
   expect(screen.queryByRole('button', { name: 'Mute microphone' })).toBeNull()
-  await act(async () => {
-    f.started.resolve(new Response(JSON.stringify({ liveId: 'live' })))
-    await f.acquiring.promise
-    f.microphone.resolve({ getTracks: () => [{ stop: f.stopTrack }] } as MediaStream)
-  })
+  await act(f.grant)
   expect(voice.getAttribute('aria-busy')).toBe('true')
-  await act(async () => { f.ready.resolve(new Response(JSON.stringify({ events: [{ type: 'ready' }] }))) })
+  await act(f.connected)
   expect(voice.getAttribute('aria-busy')).toBe('false')
   const mute = screen.getByRole('button', { name: 'Mute microphone' })
   expect(mute.textContent).toBe('')
@@ -173,9 +180,11 @@ it('shows a cancellable pending state until ready, then places mute left and rev
     }
   `)
   expect(mute.querySelector('line')).not.toBeNull()
+  expect(f.track.enabled).toBe(false)
   fireEvent.keyDown(mute, { key: 'Enter' })
   expect(screen.getByRole('button', { name: 'Mute microphone' }).textContent).toBe('')
   expect(mute.querySelector('line')).toBeNull()
+  expect(f.track.enabled).toBe(true)
   expect(mute.nextElementSibling).toBe(voice)
   expect(voice.parentElement!.lastElementChild).toBe(voice)
   expect(voice.getAttribute('aria-pressed')).toBe('true')
@@ -190,29 +199,22 @@ it('shows a cancellable pending state until ready, then places mute left and rev
 it('stops the old connection and resets the button when the composer changes session', async () => {
   const f = fixture()
   f.begin()
-  await act(async () => {
-    f.started.resolve(new Response(JSON.stringify({ liveId: 'live' })))
-    await f.acquiring.promise
-    f.microphone.resolve({ getTracks: () => [{ stop: f.stopTrack }] } as MediaStream)
-    f.ready.resolve(new Response(JSON.stringify({ events: [{ type: 'ready' }] })))
-  })
+  await act(f.grant)
+  await act(f.connected)
   expect(screen.getByRole('button', { name: 'End live voice session' }).getAttribute('aria-pressed')).toBe('true')
   f.switchSession('another-session')
   expect(screen.getByRole('button', { name: 'Start live voice session' }).getAttribute('aria-pressed')).toBe('false')
   expect(f.stopTrack).toHaveBeenCalledOnce()
   await f.closing.promise
-  f.closed.resolve(new Response(null, { status: 204 }))
+  f.finishClose()
 })
 
 
 it.each([['dispatching', 'Sending request…'], ['accepted', 'Request accepted'], ['failed', 'Request not sent. Please try again.']])('shows verified handoff state %s independently of audio', async (state, label) => {
   const f = fixture()
   f.begin()
-  await act(async () => {
-    f.started.resolve(new Response(JSON.stringify({ liveId: 'live' })))
-    await f.acquiring.promise
-    f.microphone.resolve({ getTracks: () => [{ stop: f.stopTrack }] } as MediaStream)
-  })
+  await act(f.grant)
+  await act(f.connected)
   await act(async () => { f.ready.resolve(new Response(JSON.stringify({ events: [{ type: 'ready' }, { type: 'handoff', state }] }))) })
   expect(screen.getByRole('status').textContent).toBe(label)
   f.switchSession('other')
@@ -223,18 +225,14 @@ it.each([['dispatching', 'Sending request…'], ['accepted', 'Request accepted']
 it('releases the microphone and resets the control when the host closes idle voice', async () => {
   const f = fixture()
   f.begin()
-  await act(async () => {
-    f.started.resolve(new Response(JSON.stringify({ liveId: 'live' })))
-    await f.acquiring.promise
-    f.microphone.resolve({ getTracks: () => [{ stop: f.stopTrack }] } as MediaStream)
-  })
+  await act(f.grant)
+  await act(f.connected)
   await act(async () => {
     f.ready.resolve(new Response(JSON.stringify({ events: [{ type: 'closed', reason: 'idle_timeout' }], closed: true })))
     await f.closing.promise
   })
   expect(f.stopTrack).toHaveBeenCalledOnce()
-  expect(f.closeAudio).toHaveBeenCalledOnce()
   expect(screen.getByRole('button', { name: 'Start live voice session' }).getAttribute('aria-pressed')).toBe('false')
   expect(screen.queryByRole('button', { name: 'Mute microphone' })).toBeNull()
-  f.closed.resolve(new Response(null, { status: 204 }))
+  f.finishClose()
 })

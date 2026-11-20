@@ -1,148 +1,143 @@
+/** OpenAI WebRTC negotiation and host-side control for one Live session. */
+
 import WebSocket from 'ws';
-import { LIVE_ENDPOINT, parseEvent, sessionStart } from './protocol.js';
+import { parseEvent, sessionConfig } from './protocol.js';
+
+const START_TIMEOUT_MS = 15_000;
+const CLOSE_TIMEOUT_MS = 1_000;
 
 /**
- * One GPT-Live WebSocket session.
- *
- * Connects with the API key in the handshake, sends `session.start`, and waits
- * for `session.started` before reporting the session open. Server events are
- * handed to `onEvent` unchanged; this class deliberately interprets almost
- * nothing, so the protocol stays visible in one place.
+ * Keep the credential, instructions, and project-agent controls on the host.
+ * The renderer receives only the negotiated SDP answer and Rumi's session ID.
  */
 export class LiveClient {
   #socket = null;
-  #opened = false;
+  #closed = false;
   #closing = null;
 
   /**
    * @param {object} options
    * @param {string} options.apiKey
-   * @param {string} [options.url]
-   * @param {string} [options.model]
-   * @param {string} [options.instructions]
-   * @param {string} [options.voice]
-   * @param {number} [options.acknowledgementDelayMs] Time for host updates to suppress automatic acknowledgments.
-   * @param {(event: any) => void} [options.onEvent]
-   * @param {(error: Error) => void} [options.onError]
-   * @param {() => void} [options.onClose]
-   * @param {number} [options.startTimeoutMs]
+   * @param {string} options.endpoint Live session creation URL.
+   * @param {string} options.model
+   * @param {string} options.instructions
+   * @param {string} options.voice
+   * @param {number} options.acknowledgementDelayMs
+   * @param {(event: any) => void} options.onEvent
+   * @param {(error: Error) => void} options.onError
+   * @param {(detail: {code: number, reason: string}) => void} options.onClose
    */
-  constructor({
-    apiKey,
-    url = LIVE_ENDPOINT,
-    model,
-    instructions,
-    voice,
-    acknowledgementDelayMs = 800,
-    onEvent = () => {},
-    onError = () => {},
-    onClose = () => {},
-    startTimeoutMs = 15_000,
-  }) {
-    if (!apiKey) throw new Error('live voice: missing OpenAI API key');
-    this.apiKey = apiKey;
-    this.url = url;
-    this.startOptions = { model, instructions, voice, acknowledgementDelayMs };
+  constructor({ apiKey, endpoint, model, instructions, voice, acknowledgementDelayMs, onEvent, onError, onClose }) {
+    this.headers = { Authorization: `Bearer ${apiKey}` };
+    this.endpoint = new URL(endpoint);
+    // Profiles can retain a WebSocket URL if the provider also implements WebRTC.
+    if (this.endpoint.protocol === 'wss:') this.endpoint.protocol = 'https:';
+    if (this.endpoint.protocol === 'ws:') this.endpoint.protocol = 'http:';
+    this.session = sessionConfig({ model, instructions, voice, acknowledgementDelayMs });
     this.onEvent = onEvent;
     this.onError = onError;
     this.onClose = onClose;
-    this.startTimeoutMs = startTimeoutMs;
   }
 
   get open() {
-    return this.#opened;
+    return !this.#closed && this.#socket?.readyState === WebSocket.OPEN;
   }
 
-  /** Dial, start the session, and resolve once the server confirms. */
-  connect() {
+  /**
+   * Create the WebRTC session and attach host controls before enabling caller audio.
+   * @param {string} sdp Renderer SDP offer.
+   * @param {AbortSignal} signal Host lifetime.
+   * @returns {Promise<string>} OpenAI SDP answer.
+   */
+  async connect(sdp, signal) {
+    const response = await fetch(this.endpoint, {
+      method: 'POST',
+      headers: { ...this.headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: this.session, transport: { type: 'webrtc', sdp } }),
+      redirect: 'error',
+      signal: AbortSignal.any([signal, AbortSignal.timeout(START_TIMEOUT_MS)]),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`OpenAI could not start Live Voice (HTTP ${response.status}). Check your API key and GPT-Live access, then try again.`);
+    }
+    const result = await response.json();
+    const id = result?.session?.id;
+    const answer = result?.transport?.sdp;
+    if (typeof id !== 'string' || !/^live_[A-Za-z0-9_-]+$/u.test(id)) {
+      throw new Error('OpenAI did not return a valid Live Voice session ID.');
+    }
+    signal.throwIfAborted();
+    if (this.#closed) throw new Error('Live Voice closed during setup.');
+    const sideband = new URL(this.endpoint);
+    sideband.protocol = this.endpoint.protocol === 'https:' ? 'wss:' : 'ws:';
+    sideband.pathname = `${sideband.pathname.replace(/\/$/u, '')}/${id}/attach`;
+    await this.#attach(sideband);
+    if (result.transport?.type !== 'webrtc' || typeof answer !== 'string' || answer === '') {
+      throw new Error('OpenAI did not return a valid WebRTC answer.');
+    }
+    return answer;
+  }
+
+  #attach(url) {
     return new Promise((resolve, reject) => {
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        this.close();
-        reject(new Error('live voice: session did not start in time'));
-      }, this.startTimeoutMs);
-
-      const socket = new WebSocket(this.url, {
-        headers: { Authorization: `Bearer ${this.apiKey}` },
-      });
+      const socket = new WebSocket(url, { headers: this.headers, handshakeTimeout: START_TIMEOUT_MS });
       this.#socket = socket;
-
-      socket.on('open', () => {
-        socket.send(JSON.stringify(sessionStart(this.startOptions)));
+      let opened = false;
+      socket.once('open', () => {
+        opened = true;
+        resolve();
       });
-
       socket.on('message', (raw) => {
         const event = parseEvent(raw);
-        if (!event) return;
-        if (!settled) {
-          if (event.type === 'session.started') {
-            settled = true;
-            clearTimeout(timer);
-            this.#opened = true;
-            this.onEvent(event);
-            resolve(event.session ?? {});
-            return;
-          }
-          if (event.type === 'error') {
-            settled = true;
-            clearTimeout(timer);
-            this.close();
-            reject(new Error(`live voice: ${event.error?.code ?? 'error'}: ${event.error?.message ?? 'session refused'}`));
-            return;
-          }
-        }
-        this.onEvent(event);
+        if (event && !this.#closed) this.onEvent(event);
       });
-
       socket.on('error', (error) => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          reject(error);
-          return;
-        }
-        this.onError(error);
+        if (!opened) reject(error);
+        else if (!this.#closed) this.onError(error);
       });
-
-      socket.on('close', (code, reason) => {
-        this.#opened = false;
-        this.closeCode = code;
-        this.closeReason = reason?.toString?.() ?? '';
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          reject(new Error('live voice: socket closed before the session started'));
-          return;
-        }
-        this.onClose({ code, reason: this.closeReason });
+      socket.once('close', (code, reason) => {
+        if (!opened) reject(new Error('Live Voice controls disconnected during setup.'));
+        else if (!this.#closed) this.onClose({ code, reason: reason.toString() });
       });
     });
   }
 
-  /** @param {object} event */
+  /**
+   * @param {object} event Live control event.
+   * @returns {boolean} Whether the sideband accepted the send.
+   */
   send(event) {
-    if (!this.#socket || this.#socket.readyState !== WebSocket.OPEN) return false;
+    if (!this.open) return false;
     this.#socket.send(JSON.stringify(event));
     return true;
   }
 
-  /** @param {string} base64Pcm16 */
-  sendAudio(base64Pcm16) {
-    return this.send({ type: 'session.input_audio.append', audio: base64Pcm16 });
-  }
-
-  /** Release the transport and resolve only after its close event. */
+  /**
+   * End the provider session and release the sideband within a bounded time.
+   * @returns {Promise<void>} Settles when the socket closes.
+   */
   close() {
     if (this.#closing) return this.#closing;
+    this.#closed = true;
     const socket = this.#socket;
     if (!socket || socket.readyState === WebSocket.CLOSED) return Promise.resolve();
-    this.#opened = false;
     this.#closing = new Promise((resolve) => {
-      socket.once('close', resolve);
-      // Local teardown must not wait for an unresponsive peer's close handshake.
-      socket.terminate();
+      const finish = () => {
+        clearTimeout(timer);
+        socket.terminate();
+      };
+      const timer = setTimeout(finish, CLOSE_TIMEOUT_MS);
+      timer.unref?.();
+      socket.once('close', () => { clearTimeout(timer); resolve(); });
+      if (socket.readyState !== WebSocket.OPEN) {
+        finish();
+        return;
+      }
+      socket.on('message', (raw) => {
+        if (parseEvent(raw)?.type === 'session.closed') finish();
+      });
+      socket.send(JSON.stringify({ type: 'session.close' }), error => { if (error) finish(); });
     });
     return this.#closing;
   }

@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Full-duplex voice for Rumi: GPT-Live listens and speaks, and the harness does the work it delegates.
+Rumi uses GPT-Live-1.1 for full-duplex voice. WebRTC sends microphone audio directly to OpenAI and plays the response. The local host holds the API key and handles transcripts and project-agent handoffs on a control WebSocket.
 
 The package is Rumi's own, at `@rumi/live-voice`. `src/` owns the OpenAI connection and harness delegation; `client/` owns microphone capture, playback, and the composer control. Rumi includes the bundle in its default profile.
 
@@ -12,13 +12,15 @@ Every voice session includes the mandatory [conversation scope](../../../../RUMI
 
 Set a key under **Plugins → Live Voice**. The host saves it through `ctx.credentials`; settings responses contain only presence, a masked hint, and the storage location. Credential-service resolution takes precedence over explicit configuration and the configured legacy key file (`~/.rumi/live-voice.key` in the bundled profile). The launch environment is the final fallback. Saving a replacement does not rewrite legacy files.
 
+Standard profiles upgrade when the next voice session starts. If the profile overrides `endpoint`, point it at a GPT-Live provider that accepts WebRTC session creation and offers a sideband WebSocket. Remove the override to use OpenAI. An explicit `model` override still selects that model.
+
 ## Session lifetime
 
 The voice control stays beside Send while the microphone mute control appears to its left. The microphone control displays its current state: a normal microphone when on, or a crossed-out microphone when muted; its tooltip describes the action. Active voice reverses the icon’s foreground and background colors; animation also indicates activity.
 
-While connecting, the control shows a dashed loading ring and remains cancellable. The enabled colors and mute control appear after the host reports readiness and local audio setup finishes.
+While connecting, the control shows a dashed loading ring and remains cancellable. The enabled colors and mute control appear after OpenAI confirms that the WebRTC session is ready. Mute disables the outgoing microphone track.
 
-Voice closes automatically after four minutes without speech or agent work, including while muted. `idleTimeoutMinutes` configures this interval from 1 to 60 minutes. Recognized user speech, voice output, and conversation messages restart the countdown; silent microphone frames and polling do not. Running agent work and pending voice handoffs keep voice open, and a full idle interval begins after work settles. The existing `maxSessionMinutes` hard cap still applies. Click the voice control to start again.
+Voice closes automatically after five minutes without recognized speech or a sent chat message in the current conversation, including while muted. Agent work and pending voice handoffs defer closure until they settle. A pending or playing voice reply gets a short grace period. Click the voice control to start again. `idleTimeoutMinutes` sets the period of user inactivity from 1 to 60 minutes. The `maxSessionMinutes` hard cap still applies.
 
 Closing voice discards unsubmitted delegations and stops local capture immediately. Work already submitted to the harness may finish; plugin disposal waits for its session flush and transport shutdown. Pending starts cannot publish a session after disposal, and overlapping starts for the same conversation are rejected.
 
@@ -49,7 +51,7 @@ Voice instructions require visual highlights for referenced model parts and plai
 
 ## Handoff evidence
 
-The default frontend prompt uses GPT-Live’s explicit `Generate <|SpawnThinking|>` instruction for backend requests, short answers to task questions, and corrections. Custom `instructions` replace that policy and must retain the delegation instruction; see the [OpenAI prompting guide](https://developers.openai.com/api/docs/guides/live-prompting#delegation). Prompt instructions guide model behavior; only a received delegation and host acceptance establish that work was submitted.
+The default GPT-Live-1.1 prompt describes when to delegate backend requests, short answers to task questions, and corrections in plain language. Custom `instructions` must describe the requests that need delegation. Rumi adapts the previous delegation marker in existing custom prompts. A task is submitted when the host receives a delegation and the project agent accepts it. See the [OpenAI prompting guide](https://developers.openai.com/api/docs/guides/live-prompting#delegation).
 
 On delegation, the host immediately sends a silent thinking update to suppress the pending automatic acknowledgment. `acknowledgementDelayMs` defaults to 800 ms. This does not stop speech already generated or independent model speech. Voice instructions prohibit claiming acceptance before the host reports it and prohibit claiming a visible highlight before a `rendered` tool result.
 
@@ -61,6 +63,6 @@ The voice controls distinguish no action sent, sending, accepted, and failed. Ac
 
 ## Verification
 
-Run `pnpm exec vitest run --config apps/rumi/vitest.voice.config.ts`. This configuration resolves directly shipped JavaScript imports to workspace source. Tests use a local WebSocket server and controlled browser audio promises; they do not contact OpenAI or capture microphone audio.
+Run `pnpm exec vitest run --config apps/rumi/vitest.voice.config.ts`. This configuration resolves directly shipped JavaScript imports to workspace source. Tests use a local HTTP and control WebSocket fixture plus simulated renderer WebRTC tracks. A real-provider smoke verifies audio and delegation separately.
 
 Contributors may implement `refineRequest({sessionId, text, content, signal})` to refine captured content from accumulated transcript chunks before delegation. The hook returns the replacement content blocks, runs in order after capture, and shares voice cancellation. Print Studio uses it for non-destructive cursor selection phrases without another model request. The final reference remains logged separately from the user’s words; refinement failures add explicit unavailable context.

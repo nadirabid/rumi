@@ -5,7 +5,7 @@ import * as Projects from '../brand/projects/index.js'
 import { describe, expect, it } from 'vitest'
 import { composeInstructions, createLiveVoiceRegistry } from '../brand/live-voice/src/registry.js'
 import { LiveBridge, speakable, summarize } from '../brand/live-voice/src/bridge.js'
-import { CONVERSATION_POLICY, DEFAULT_INSTRUCTIONS, sessionStart, VOICES } from '../brand/live-voice/src/protocol.js'
+import { CONVERSATION_POLICY, DEFAULT_INSTRUCTIONS, sessionConfig, VOICES } from '../brand/live-voice/src/protocol.js'
 import { createProjectStore, projectInstructionsFor, renderProjectInstructions } from '../brand/projects/index.js'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -56,6 +56,12 @@ describe('summarize', () => {
 describe('voice configuration', () => {
   it('offers only voices the Live API accepts', () => {
     expect([...VOICES].sort()).toEqual(['alloy', 'ash', 'ballad', 'cedar', 'coral', 'echo', 'marin', 'sage', 'shimmer', 'verse'])
+  })
+
+  it('uses the handoff wording for the configured model', () => {
+    const instructions = 'Generate <|SpawnThinking|> when the user asks to edit. Do not generate <|SpawnThinking|> for greetings.'
+    expect(sessionConfig({ instructions }).instructions).toContain('Delegate to the backend when the user asks to edit. Do not delegate for greetings.')
+    expect(sessionConfig({ model: 'gpt-live-1' }).instructions).toContain('Generate <|SpawnThinking|> when:')
   })
 
   it('no longer speaks as a coding agent', () => {
@@ -178,8 +184,8 @@ it('records the voice visual-reference requirements', () => {
 
 
 it('keeps mandatory scope when voice instructions are overridden', () => {
-  const payload = sessionStart({ instructions: 'Custom speaking style.' })
-  expect(payload.session.instructions).toBe(`${CONVERSATION_POLICY}\n\nCustom speaking style.`)
+  const payload = sessionConfig({ instructions: 'Custom speaking style.' })
+  expect(payload.instructions).toBe(`${CONVERSATION_POLICY}\n\nCustom speaking style.`)
   const template = readFileSync(new URL('../brand/projects/AGENTS_TEMPLATE.md', import.meta.url), 'utf8')
   expect(template).toContain(CONVERSATION_POLICY)
 })

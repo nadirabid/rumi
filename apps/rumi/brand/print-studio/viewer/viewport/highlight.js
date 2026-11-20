@@ -8,9 +8,10 @@ import { createSurfaceIndex, partPath } from './surfaces.js'
  * @param {object} highlight - Validated model-local Gaussian regions.
  * @param {object | null} hover - Shared world-space sphere uniform; null disables cursor reveal.
  * @param {object | null} activity Shared mode/phase uniform; null disables activity treatment.
+ * @param {object} [editPick] Shared render-mode uniform for sampling a live edit.
  * @returns {object} Visibility, suspend/resume controls retaining prepared display resources, and a disposer restoring originals.
  */
-export function createHighlight(root, highlight, hover = null, activity = null) {
+export function createHighlight(root, highlight, hover = null, activity = null, editPick = { value: false }) {
   const activityUniform = activity ?? { value: new THREE.Vector2() }
   const activityBounds = { value: new THREE.Vector2() }
   let low = Infinity, high = -Infinity
@@ -89,13 +90,20 @@ export function createHighlight(root, highlight, hover = null, activity = null) 
           shader.uniforms.rumiCursorMesh = hover?.mesh ?? { value: -1 }
           shader.uniforms.rumiCursorSurface = hover?.surface ?? { value: -1 }
           shader.uniforms.rumiCursorMode = hover?.mode ?? { value: 0 }
+          shader.uniforms.rumiEditPick = editPick
           shader.uniforms.rumiMeshId = { value: node.id }
           shader.uniforms.rumiAgentMesh = entry.agentMesh
           shader.uniforms.rumiAgentSurface = entry.agentSurface
           shader.uniforms.rumiAgentMode = entry.agentMode
           shader.vertexShader = 'attribute float rumiSurface; attribute vec3 rumiBoundary; varying float rumiSurfaceId; varying vec3 rumiBorder; attribute vec3 rumiBarycentric; attribute vec3 rumiLocalPoint; varying vec3 rumiBary; varying vec3 rumiPoint; varying vec3 rumiWorldPoint;\n' + shader.vertexShader
-          shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nrumiSurfaceId = rumiSurface; rumiBorder = rumiBoundary; rumiBary = rumiBarycentric; rumiPoint = rumiLocalPoint; rumiWorldPoint = (modelMatrix * vec4(position, 1.0)).xyz;')
-          shader.fragmentShader = `uniform vec2 rumiActivity, rumiActivityBounds; uniform float rumiCursorMesh, rumiCursorSurface, rumiCursorMode, rumiMeshId, rumiAgentMesh, rumiAgentSurface, rumiAgentMode; varying float rumiSurfaceId; varying vec3 rumiBorder; uniform mat4 rumiRegions[8]; uniform int rumiRegionCount; uniform float rumiReveal; uniform vec4 rumiHover; varying vec3 rumiBary; varying vec3 rumiPoint; varying vec3 rumiWorldPoint;\n` + shader.fragmentShader
+          shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nrumiSurfaceId = rumiSurface; rumiBorder = rumiBoundary; rumiBary = rumiBarycentric; rumiPoint = rumiLocalPoint; rumiWorldPoint = (modelMatrix * vec4(transformed, 1.0)).xyz;')
+          shader.fragmentShader = `uniform bool rumiEditPick; uniform vec2 rumiActivity, rumiActivityBounds; uniform float rumiCursorMesh, rumiCursorSurface, rumiCursorMode, rumiMeshId, rumiAgentMesh, rumiAgentSurface, rumiAgentMode; varying float rumiSurfaceId; varying vec3 rumiBorder; uniform mat4 rumiRegions[8]; uniform int rumiRegionCount; uniform float rumiReveal; uniform vec4 rumiHover; varying vec3 rumiBary; varying vec3 rumiPoint; varying vec3 rumiWorldPoint;\n` + shader.fragmentShader
+          shader.fragmentShader = shader.fragmentShader.replace('#include <alphatest_fragment>', `#include <alphatest_fragment>
+            if (rumiEditPick) {
+              if (diffuseColor.a <= 0.0) discard;
+              gl_FragColor = vec4(rumiMeshId, rumiSurfaceId, distance(rumiWorldPoint, cameraPosition), 2.0);
+              return;
+            }`)
           shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
             float field = 0.0;
             for (int i = 0; i < 8; i++) {
@@ -140,11 +148,11 @@ export function createHighlight(root, highlight, hover = null, activity = null) 
                 : 0.12 + scan * 0.55 + 0.12 * rim;
               outgoingLight = mix(outgoingLight, vec3(0.12, 0.72, 0.60), activityAmount);
             }
-            vec3 cursorColor = mix(vec3(0.12, 0.32, 0.75), vec3(0.005, 0.025, 0.12), edge);
-            outgoingLight = mix(outgoingLight, cursorColor, cursorAmount * (1.0 - step(0.01, amount)));
+            vec3 cursorColor = vec3(0.48, 0.65, 0.86);
+            outgoingLight = mix(outgoingLight, cursorColor, 0.62 * cursorAmount * (1.0 - step(0.01, amount)));
             #include <opaque_fragment>`)
         }
-        clone.customProgramCacheKey = () => `${original.customProgramCacheKey()}:rumi-highlight:activity-2`
+        clone.customProgramCacheKey = () => `${original.customProgramCacheKey()}:rumi-highlight:activity-4`
         return clone
       })
       node.geometry = copy

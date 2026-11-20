@@ -105,10 +105,12 @@ it('composes deformation with the region highlight and restores resources in own
   const overlay = createHighlight(root, { blobs: [{ center: [0, 0, 0], radii: [20, 20, 20], rotationDegrees: [0, 0, 0] }] })
   const highlighted = mesh.material, displayGeometry = mesh.geometry
   const control = createShapeDeformer(root, normalizeShape(recipe))
-  const compiled = { uniforms: {}, vertexShader: '#include <beginnormal_vertex>\n#include <begin_vertex>', fragmentShader: '#include <opaque_fragment>' } as Parameters<typeof material.onBeforeCompile>[0]
+  const compiled = { uniforms: {}, vertexShader: '#include <beginnormal_vertex>\n#include <begin_vertex>\n#include <project_vertex>', fragmentShader: '#include <alphatest_fragment>\n#include <opaque_fragment>' } as Parameters<typeof material.onBeforeCompile>[0]
   mesh.material.onBeforeCompile(compiled, {} as THREE.WebGLRenderer)
   expect(compiled.vertexShader).toContain('rumiPoint = rumiLocalPoint')
   expect(compiled.vertexShader).toContain('transformed=shapeObject(position)')
+  expect(compiled.vertexShader).toContain('rumiWorldPoint = (modelMatrix * vec4(transformed, 1.0)).xyz')
+  expect(compiled.fragmentShader).toContain('if (rumiEditPick)')
   expect(compiled.fragmentShader).toContain('rumiRegionCount')
   expect(mesh.geometry).toBe(displayGeometry)
   expect(compiled.uniforms.rumiRegionCount.value).toBe(1)

@@ -358,7 +358,6 @@ export function installViewer(ctx, React, primitives) {
           if (!await autosave.flush(saveKey) || controller.signal.aborted || layoutSaveKey(printTarget.current) !== saveKey) return
           const response = await fetch(`${ROUTE}/open-plate?${query}`, {
             method: 'POST', signal: controller.signal,
-            headers: { 'content-type': 'application/octet-stream' },
             body: owner.exportPrintPlate(),
           })
           const result = await response.json()

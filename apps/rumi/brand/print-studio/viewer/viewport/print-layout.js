@@ -1,7 +1,7 @@
 /** Print-only transforms borrow original GPU resources and never modify the assembly. */
 import { manufacturingChecks } from '../manufacturing.js'
 import * as THREE from 'three'
-import { encodeStl } from '../stl.js'
+import { PRINT_FACE_BYTES } from '../print-layout/plate-payload.js'
 import { parsePrintLayout } from '../print-layout/state.js'
 
 function rotationMatrix(rotation) {
@@ -89,11 +89,47 @@ function placedMatrix(part, placement) {
   return new THREE.Matrix4().makeTranslation(placement.position[0] - center.x, placement.position[1] - center.y, -bounds.min.z).multiply(rotation)
 }
 
+function meshFaceColors(node, faceCount) {
+  const colors = new Uint32Array(faceCount).fill(0xffffff)
+  if (!Array.isArray(node.material)) return colors.fill(node.material.color?.getHex() ?? 0xffffff)
+  for (const { start, count, materialIndex } of node.geometry.groups) {
+    colors.fill(node.material[materialIndex]?.color?.getHex() ?? 0xffffff, start / 3, (start + count) / 3)
+  }
+  return colors
+}
+
+function placedMesh(part, transform) {
+  const faceCount = part.meshes.reduce((total, { node }) => total + (node.geometry.index?.count ?? node.geometry.getAttribute('position').count) / 3, 0)
+  const bytes = new DataView(new ArrayBuffer(faceCount * PRINT_FACE_BYTES))
+  const point = new THREE.Vector3()
+  let offset = 0
+  for (const { node, matrix } of part.meshes) {
+    const world = transform.clone().multiply(matrix), { geometry } = node
+    const position = geometry.getAttribute('position'), index = geometry.index
+    const count = index?.count ?? position.count
+    const corners = world.determinant() < 0 ? [0, 2, 1] : [0, 1, 2]
+    const colors = meshFaceColors(node, count / 3)
+    for (let face = 0; face < count; face += 3) {
+      for (const corner of corners) {
+        const vertex = index ? index.getX(face + corner) : face + corner
+        point.fromBufferAttribute(position, vertex).applyMatrix4(world)
+        bytes.setFloat32(offset, point.x, true)
+        bytes.setFloat32(offset + 4, point.y, true)
+        bytes.setFloat32(offset + 8, point.z, true)
+        offset += 12
+      }
+      bytes.setUint32(offset, colors[face / 3], true)
+      offset += 4
+    }
+  }
+  return new Blob([bytes])
+}
+
 /** Create a reversible print preview sharing original geometry/materials.
  * @param {object[]} parts Printable groups.
  * @param {THREE.Scene} scene Destination, in millimetres and Z up.
  * @param {THREE.Color} [selectionColor] Outline color; omitted by geometry-only consumers.
- * @returns {object} Placement, STL export, picking roots and non-owning cleanup.
+ * @returns {object} Placement, a printable mesh payload, picking roots and non-owning cleanup.
  */
 export function createPrintPreview(parts, scene, selectionColor) {
   const root = new THREE.Group(), copies = new Map()
@@ -135,20 +171,13 @@ export function createPrintPreview(parts, scene, selectionColor) {
       if (!layout || layoutIssues(parts, layout).length) throw new Error('Resolve print layout issues before export')
       const selected = layout.parts.filter(part => part.plate === plate)
       if (!selected.length) throw new Error('The selected plate is empty')
-      const values = [], point = new THREE.Vector3()
+      const payload = new FormData()
       for (const placement of selected) {
-        const part = parts.find(part => part.id === placement.id), transform = placedMatrix(part, placement)
-        for (const { node, matrix } of part.meshes) {
-          const world = transform.clone().multiply(matrix), geometry = node.geometry, position = geometry.getAttribute('position')
-          const count = geometry.index?.count ?? position.count, mirrored = world.determinant() < 0
-          for (let triangle = 0; triangle < count; triangle += 3) for (const corner of mirrored ? [0, 2, 1] : [0, 1, 2]) {
-            const index = geometry.index ? geometry.index.getX(triangle + corner) : triangle + corner
-            point.fromBufferAttribute(position, index).applyMatrix4(world)
-            values.push(point.x, point.y, point.z)
-          }
-        }
+        const part = parts.find(part => part.id === placement.id)
+        payload.append('name', part.name ?? '')
+        payload.append('mesh', placedMesh(part, placedMatrix(part, placement)))
       }
-      return encodeStl(values)
+      return payload
     },
     dispose() { scene.remove(root); if (selection) { scene.remove(selection); selection.geometry.dispose(); selection.material.dispose() } },
   }

@@ -5,10 +5,13 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { JSDOM } from 'jsdom'
+import { strFromU8, unzipSync } from 'three/addons/libs/fflate.module.js'
 import { printParts, arrangePrintParts, createPrintPreview, layoutIssues } from '../viewer/viewport/print-layout.js'
 import { parsePrintLayout, printLayoutIdentity } from '../viewer/print-layout/state.js'
 import { readPrintLayout, savePrintLayout, registerPrintLayout } from '../viewer/print-layout/host.js'
-import { parseStl } from '../viewer/stl.js'
+import { makePrint3mf } from '../viewer/print-layout/three-mf.js'
+import { PRINT_FACE_BYTES } from '../viewer/print-layout/plate-payload.js'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
@@ -24,7 +27,20 @@ function model(mode = 'separate') {
 }
 const options = { identity: 'revision-one', volume: { x: 60, y: 60, z: 60 }, gap: 5 }
 
-it('arranges separate parts on additional plates without changing source placement or geometry', () => {
+async function exportModel(payload: FormData, volume = options.volume) {
+  const request = new Request('http://localhost/open-plate', { method: 'POST', body: payload })
+  const form = await request.formData()
+  const files = unzipSync(await makePrint3mf(form, volume))
+  return new JSDOM(strFromU8(files['3D/3dmodel.model']), { contentType: 'text/xml' }).window.document
+}
+
+function vertices(object: Element) {
+  return [...object.querySelectorAll('vertex')].map(vertex => new THREE.Vector3(
+    Number(vertex.getAttribute('x')), Number(vertex.getAttribute('y')), Number(vertex.getAttribute('z')),
+  ))
+}
+
+it('arranges separate parts on additional plates without changing source placement or geometry', async () => {
   const design = model(), parts = printParts(design)
   const before = design.root.children.map(node => node.matrixWorld.toArray())
   const layout = arrangePrintParts(parts, { ...options, volume: { x: 50, y: 50, z: 50 } })
@@ -34,8 +50,8 @@ it('arranges separate parts on additional plates without changing source placeme
   preview.apply(layout, 0)
   expect(preview.root.children[0].children[0].geometry).toBe(parts[0].meshes[0].node.geometry)
   const dispose = vi.spyOn(parts[0].meshes[0].node.geometry, 'dispose')
-  const positions = parseStl(preview.exportPlate())
-  const z = Array.from(positions).filter((_, i) => i % 3 === 2)
+  const exported = await exportModel(preview.exportPlate(), layout.volume)
+  const z = vertices(exported.querySelector('object')!).map(point => point.z)
   expect(Math.min(...z)).toBeCloseTo(0)
   expect(Math.max(...z)).toBeCloseTo(10)
   preview.dispose()
@@ -66,21 +82,59 @@ it('blocks overlapping and out-of-bounds exports without shrinking parts', () =>
   expect(layoutIssues(parts, arrangePrintParts(parts, { ...options, volume: { x: 5, y: 5, z: 5 } }))).toContain('layoutOutside')
 })
 
-it('exports mirrored source transforms with outward winding and the chosen plate only', () => {
+it('exports mirrored source transforms with outward winding and the chosen plate only', async () => {
   const design = model(); design.root.children[0].scale.x = -1
   const parts = printParts(design), layout = arrangePrintParts(parts, { ...options, volume: { x: 50, y: 50, z: 50 } })
   const preview = createPrintPreview(parts, new THREE.Scene())
   for (const placement of layout.parts) {
     preview.apply(layout, placement.plate)
-    const p = parseStl(preview.exportPlate())
-    expect(p.length).toBe(108)
+    const exported = await exportModel(preview.exportPlate(), layout.volume)
+    const objects = exported.querySelectorAll('object')
+    expect(objects).toHaveLength(1)
+    expect(objects[0].getAttribute('name')).toBe(placement.id)
+    const points = vertices(objects[0])
+    const faces = objects[0].querySelectorAll('triangle')
+    expect(faces).toHaveLength(12)
     let signedVolume = 0
-    for (let i = 0; i < p.length; i += 9) {
-      const a = new THREE.Vector3(...p.slice(i, i + 3)), b = new THREE.Vector3(...p.slice(i + 3, i + 6))
-      signedVolume += a.dot(b.cross(new THREE.Vector3(...p.slice(i + 6, i + 9)))) / 6
+    for (const face of faces) {
+      const [a, b, c] = ['v1', 'v2', 'v3'].map(key => points[Number(face.getAttribute(key))])
+      signedVolume += a.dot(b.clone().cross(c)) / 6
     }
     expect(signedVolume).toBeGreaterThan(0)
   }
+})
+
+it('exports two independently placeable objects and preserves material assignments within one connected mesh', async () => {
+  const design = model()
+  const [base, door] = design.root.children as THREE.Mesh<THREE.BoxGeometry>[]
+  base.name = 'Base & "hinge"'
+  const red = new THREE.MeshStandardMaterial({ color: '#D44335' })
+  base.material = [red, new THREE.MeshStandardMaterial({ color: '#2984C0' }), red, red, red, red]
+  door.geometry = door.geometry.toNonIndexed()
+  door.material = new THREE.MeshStandardMaterial({ color: '#3DA050' })
+  const parts = printParts(design), volume = { x: 120, y: 120, z: 120 }
+  const layout = arrangePrintParts(parts, { ...options, volume })
+  const preview = createPrintPreview(parts, new THREE.Scene())
+  preview.apply(layout, 0)
+  const exported = await exportModel(preview.exportPlate(), volume)
+  const objects = [...exported.querySelectorAll('object')]
+  const items = [...exported.querySelectorAll('build item')]
+  expect(items.map(item => item.getAttribute('objectid'))).toEqual(objects.map(object => object.id))
+  const colors = [...exported.getElementsByTagName('m:color')].map(entry => entry.getAttribute('color'))
+  for (const object of objects) {
+    const name = object.getAttribute('name')
+    const placement = layout.parts.find(part => part.id === name)!
+    const bounds = new THREE.Box3().setFromPoints(vertices(object))
+    expect(bounds.getCenter(new THREE.Vector3()).toArray().slice(0, 2))
+      .toEqual(placement.position.map(coordinate => coordinate + 60))
+    expect(bounds.min.z).toBeCloseTo(0)
+    expect(vertices(object)).toHaveLength(8)
+    const faceColors = [...object.querySelectorAll('triangle')].map(face => colors[Number(face.getAttribute('p1'))])
+    expect(faceColors).toEqual(name === base.name
+      ? ['#D44335', '#D44335', '#2984C0', '#2984C0', ...Array(8).fill('#D44335')]
+      : Array(12).fill('#3DA050'))
+  }
+  expect(objects.map(object => object.getAttribute('name')).sort()).toEqual([base.name, door.name].sort())
 })
 
 it('rejects malformed durable transforms, duplicate parts and unsafe plate indices', () => {
@@ -131,6 +185,24 @@ it('rejects stale and malformed HTTP saves and restores only the matching source
   expect((await post('a', '{}')).status).toBe(400)
   expect((await post('a', JSON.stringify(layout))).status).toBe(200)
   expect(await (await route(new Request('http://localhost/layout?sessionId=s'))).json()).toMatchObject({ layout, stale: false })
+  const open = routes.get('/api/print-studio/viewer/open-plate')!
+  const openPlate = (body: FormData) => open(new Request('http://localhost/open-plate?sessionId=s&sourceHash=a', { method: 'POST', body }))
+  const payload = new FormData()
+  payload.append('name', 'Part')
+  expect((await openPlate(payload)).status).toBe(400)
+  const face = new DataView(new ArrayBuffer(PRINT_FACE_BYTES))
+  face.setFloat32(0, 1000, true)
+  payload.append('mesh', new Blob([face]))
+  const request = new Request('http://localhost/open-plate?sessionId=s&sourceHash=a', { method: 'POST', body: payload })
+  const contentType = request.headers.get('content-type')!
+  const boundary = contentType.split('boundary=')[1]
+  // Chromium emits mixed-case boundaries, which Blob.type lowercases.
+  const browserBoundary = '----WebKitFormBoundaryRumiTest'
+  const body = Buffer.from(await request.arrayBuffer()).toString('latin1').replaceAll(boundary, browserBoundary)
+  const browserRequest = new Request(request.url, {
+    method: 'POST', headers: { 'content-type': contentType.replace(boundary, browserBoundary) }, body: Buffer.from(body, 'latin1'),
+  })
+  expect(await (await open(browserRequest)).json()).toEqual({ error: 'layoutOutside' })
   requiresSeparatePrint = true
   for (const path of ['layout', 'open-plate']) {
     const response = await routes.get(`/api/print-studio/viewer/${path}`)!(

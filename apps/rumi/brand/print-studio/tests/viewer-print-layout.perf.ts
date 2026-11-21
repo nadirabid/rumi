@@ -1,6 +1,7 @@
-/** CPU layout preparation, placement and STL export; excludes loading, React and GPU drawing. */
+/** CPU layout preparation, placement and print-mesh encoding outside React and GPU drawing. */
 import * as THREE from 'three'
 import { printParts, arrangePrintParts, createPrintPreview } from '../viewer/viewport/print-layout.js'
+import { PRINT_FACE_BYTES } from '../viewer/print-layout/plate-payload.js'
 
 const fixture = process.argv.includes('--assembly') ? 'assembly' : process.argv.includes('--small') ? 'small' : 'large'
 const geometry = fixture === 'large' ? new THREE.SphereGeometry(100, 450, 220) : new THREE.SphereGeometry(fixture === 'assembly' ? 10 : 100, 32, 16)
@@ -28,7 +29,7 @@ const preparedAt = performance.now()
 global.gc?.()
 const preparedMemory = process.memoryUsage()
 const placementSamplesMs: number[] = [], exportSamplesMs: number[] = []
-let exported: ArrayBuffer | null = null
+let exported: FormData | null = null
 try {
   const first = layout.parts[0], originalX = first.position[0]
   for (let iteration = 0; iteration < 140; iteration++) {
@@ -44,12 +45,13 @@ try {
     exported = preview.exportPlate()
     exportSamplesMs.push(performance.now() - exportAt)
   }
-  if (!exported || new DataView(exported).getUint32(80, true) !== triangles) throw new Error('Diagnostic export lost source triangles')
+  const exportBytes = exported?.getAll('mesh').reduce((bytes, field) => bytes + (typeof field === 'string' ? 0 : field.size), 0)
+  if (exportBytes !== triangles * PRINT_FACE_BYTES) throw new Error('Diagnostic export lost source triangles')
   global.gc?.()
   const sorted = [...placementSamplesMs].sort((a, b) => a - b)
   console.log(JSON.stringify({ fixture, triangles, partCount,
     prepareMs: preparedAt - start, collectMs: collectedAt - start, arrangeMs: arrangedAt - collectedAt, previewMs: preparedAt - arrangedAt,
-    placementSamplesMs, placementMedianMs: sorted[60], placementP95Ms: sorted[114], exportSamplesMs, exportBytes: exported.byteLength,
+    placementSamplesMs, placementMedianMs: sorted[60], placementP95Ms: sorted[114], exportSamplesMs, exportBytes,
     before, preparedMemory, memory: process.memoryUsage(), peakRssKiB: process.resourceUsage().maxRSS,
   }))
 } finally { preview.dispose(); geometry.dispose(); material.dispose() }

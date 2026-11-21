@@ -8,6 +8,7 @@ import { readMotion } from './motion.js'
 import { normalizePlacement } from './transform.js'
 import { normalizeShape, normalizeValues } from './analog/spec.js'
 import { controlValues, parameterValues } from './analog/control-spec.js'
+import { readModelRegions } from './model-regions.js'
 
 const ROUTE = '/api/print-studio/viewer'
 const MAX_FILES = 64
@@ -40,7 +41,11 @@ export function createSourcePresentation(initial) {
 
 function applyHighlight(state, value) {
   if (typeof value.label !== 'string' || value.label.length > 200 || (value.meshPath && !value.label.trim())) throw new Error('Supply a descriptive highlight label of up to 200 characters')
-  state.highlight = value.meshPath ? { label: value.label.trim(), meshPath: value.meshPath, triangleCount: value.triangleCount, id: randomUUID() } : null
+  const regionName = typeof value.regionName === 'string' ? value.regionName.trim() : undefined
+  if (value.regionName !== undefined && (!regionName || regionName.length > 64 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(regionName))) {
+    throw new Error('Supply a region name of up to 64 characters on one line')
+  }
+  state.highlight = value.meshPath ? { label: value.label.trim(), meshPath: value.meshPath, triangleCount: value.triangleCount, id: randomUUID(), ...(regionName ? { regionName } : {}) } : null
   return { status: state.highlight ? 'queued' : 'cleared', highlight: state.highlight,
     message: 'Presentation state updated; viewer display and user confirmation are not acknowledged.' }
 }
@@ -146,6 +151,29 @@ export async function createSource(ctx, path, workspace) {
     return { files, hash: digest.digest('hex'), parameters }
   }
 
+  let regionsFile = null, regionsStatus = 'missing'
+  async function updateRegions() {
+    if (format !== 'usd' || closed) return
+    try {
+      const path = resolve(root, entryName.replace(/\.usd[a]?$/iu, '.regions.json'))
+      if (!inside(root, await realpath(path))) throw new Error('Region map must be inside the model folder')
+      const info = await stat(path, { bigint: true })
+      if (!info.isFile() || info.size > 65_536n) throw new Error('Region map exceeds 64 KiB')
+      const key = signature(info)
+      if (regionsFile?.key !== key) {
+        const text = await readFile(path, 'utf8')
+        if (Buffer.byteLength(text) > 65_536) throw new Error('Region map exceeds 64 KiB')
+        const parsed = JSON.parse(text)
+        const map = readModelRegions(parsed, parsed?.sourceHash)
+        regionsFile = { key, sourceHash: parsed.sourceHash, map: { ...map, key: createHash('sha256').update(text).digest('hex') } }
+      }
+      regionsStatus = regionsFile.sourceHash === state.contentHash ? 'ready' : 'outdated'
+    } catch (error) {
+      regionsFile = null
+      regionsStatus = error.code === 'ENOENT' ? 'missing' : 'invalid'
+    }
+  }
+
   async function update(initial, force = false) {
     try {
       const next = await scan(force)
@@ -212,10 +240,13 @@ export async function createSource(ctx, path, workspace) {
     entryName = relative(root, entry).split(sep).join('/')
     state.path = entry
     await update(true)
+    await updateRegions()
   }, 'print viewer: source lifetime')
   await dispose
   return {
-    state: () => ({ ...state, controlReview: controlReview.state(), error: sourceError ?? buildError }),
+    state: () => ({ ...state,
+      ...(format === 'usd' ? { regionStatus: regionsStatus, regionMap: regionsFile?.sourceHash === state.contentHash ? regionsFile.map : null } : {}),
+      controlReview: controlReview.state(), error: sourceError ?? buildError }),
     controlReview,
     /** Request fresh renderer feedback without replacing geometry, edits, or review evidence. */
     requestRender() {
@@ -245,7 +276,7 @@ export async function createSource(ctx, path, workspace) {
         await pending
         if (!force || closed) return
       }
-      pending = update(false, force).finally(() => { pending = undefined })
+      pending = update(false, force).then(updateRegions).finally(() => { pending = undefined })
       return pending
     },
     transform(value) {

@@ -32,6 +32,7 @@ import { registerValidationTools } from './validation-tools.js'
 import { summarizeValidationState } from './validation-summary.js'
 import { createSource } from './source.js'
 import { discoverModels, readSelection, saveSelection } from './catalog.js'
+import { modelRegionReference } from './model-regions.js'
 
 const ROUTE = '/api/print-studio/viewer'
 const JSON_HEADERS = { 'cache-control': 'private, no-store', 'content-type': 'application/json', 'x-content-type-options': 'nosniff' }
@@ -208,7 +209,22 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   const receipts = createHighlightReceipts()
   const loads = createLoadReceipts(loadTimeoutMs)
   const events = createViewerEvents()
-  const focus = createModelFocus(ctx, { read: id => sessions.get(id), notify: id => events.notify(id) })
+  const focus = createModelFocus(ctx, {
+    read: id => sessions.get(id), notify: id => events.notify(id),
+    readRegion: id => attachedRegion(sessions.get(id)),
+  })
+  function referenceRegion(record, id) {
+    const design = record?.source?.state(), highlight = design?.highlight
+    if (!id || !design || design.error) return null
+    const source = { id, path: design.path, revision: design.revision, url: design.url }
+    if (highlight?.regionName && highlight.id === id) return { ...source, name: highlight.regionName, meshPath: highlight.meshPath }
+    if (!design.regionMap) return null
+    const region = [...design.regionMap.regions, design.regionMap.remainder].find(item => modelRegionReference(design, item.id) === id)
+    return region ? { ...source, name: region.name, regionId: region.id } : null
+  }
+  function attachedRegion(record) {
+    return referenceRegion(record, record?.regionReference)
+  }
   const validation = validationConfig ? createValidation(ctx, validationConfig, {
     notify: id => events.notify(id),
     view: id => {
@@ -225,6 +241,10 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   const cursors = createCursorRequests(sessionId => events.notify(sessionId))
   const captureJobs = new Set(), evictions = new Set()
   ctx.inject(['systemPrompt'], scoped => {
+    scoped.effect(() => scoped.systemPrompt.section({
+      name: 'rumi:naming-model-regions', order: scoped.systemPrompt.getSectionOrder('TOOL_WORKFLOW'),
+      text: 'Keep a complete hover-name map beside each USD model you create or revise. If the current editable model is your work target and meshState.design.regionStatus is missing, outdated, or invalid, inspect its distinct features and write its map in the same modeling turn. See clarify-mesh-changes. Use short, familiar names in the person’s language, and use a precise feature name when it helps the person describe a future edit.',
+    }), 'print viewer: name model features')
     scoped.effect(() => scoped.systemPrompt.context({
       name: 'rumi:mesh-state', order: scoped.systemPrompt.getContextOrder('WEB_SURFACE'), interpolate: false, required: true,
       text: ({ agent }) => {
@@ -402,7 +422,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       ...displayed, design: record.source?.state() ?? null,
       models: record.models ?? [], selectedModel: record.selectedModel ?? null,
       workingModels: focus.paths(sessionId), agentRunning: focus.running(sessionId),
-      catalogFailed: Boolean(record.catalogError),
+      catalogFailed: Boolean(record.catalogError), regionReference: attachedRegion(record),
     } })
   })
 
@@ -553,6 +573,29 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       })
     },
   }), 'print viewer: cursor response')
+
+  ctx.effect(() => ctx.connection.fetch.register({
+    path: `${ROUTE}/region-reference`, methods: ['POST'], requestBody: 'buffered',
+    fetch: async request => {
+      const sessionId = new URL(request.url).searchParams.get('sessionId')
+      const record = sessions.get(sessionId)
+      if (!record) return json({ error: 'preview_not_found' }, 404)
+      const body = await request.text()
+      if (body.length > 2048) return json({ error: 'invalid_region_reference' }, 400)
+      let value
+      try { value = JSON.parse(body) } catch (_error) { return json({ error: 'invalid_region_reference' }, 400) }
+      if (typeof value?.id !== 'string' || typeof value.attach !== 'boolean') return json({ error: 'invalid_region_reference' }, 400)
+      return serialize(record, async () => {
+        if (value.attach) {
+          await record.source?.poll()
+          if (!referenceRegion(record, value.id)) return json({ error: 'stale_region' }, 409)
+          record.regionReference = value.id
+        } else if (record.regionReference === value.id) delete record.regionReference
+        events.notify(sessionId)
+        return json({ regionReference: attachedRegion(record) })
+      })
+    },
+  }), 'print viewer: attach named region to chat')
 
   ctx.inject(['liveVoice'], scoped => {
     scoped.effect(() => scoped.liveVoice.register({
@@ -726,12 +769,13 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_highlight',
-    description: 'Draw a temporary teal triangle mesh on the editable model. Generate an ASCII or binary STL in the project (outside the watched model directory). Copy evaluated surface triangles, or clip them to the desired boundary. Include part transforms and use model-local millimetres, Z up, before viewer placement. Disconnected patches are supported. Triangles are drawn directly and depth-tested. Use the current displayedDesign identity. Empty meshPath clears. Wait for rendered before describing the overlay as visible. See clarify-mesh-changes.',
+    description: 'Draw a temporary teal triangle mesh on the editable model. Generate an ASCII or binary STL in the project (outside the watched model directory). Copy evaluated surface triangles, or clip them to the desired boundary. Include part transforms and use model-local millimetres, Z up, before viewer placement. Disconnected patches are supported. Triangles are drawn directly and depth-tested. Use the current displayedDesign identity. Empty meshPath clears. Supply regionName when the highlighted geometry identifies a feature the person could refer to, such as Tail tip or Neck seam. Wait for rendered before describing the overlay as visible. See clarify-mesh-changes.',
     parameters: {
-      path: { type: 'string', required: true, description: 'Exact design.path from the current meshState context.' },
+      path: { type: 'string', required: true, description: 'Exact design.path or selectedModel from the current meshState context.' },
       revision: { type: 'integer', required: true, description: 'Exact design.revision from the current meshState context.' },
       url: { type: 'string', required: true, description: 'Exact design.url from the current meshState context; identifies the loaded instance.' },
       label: { type: 'string', required: true, description: 'Short description of the proposed region, at most 200 characters. May be empty when clearing.' },
+      regionName: { type: 'string', description: 'Optional short feature name shown on the mesh, in the person’s language, at most 64 characters. Name the exact highlighted feature using familiar, precise words. Omit when unsure or highlighting an unnamed patch. Use a unique meshPath for a named region so later references retain their original geometry.' },
       meshPath: { type: 'string', required: true, description: 'Project-relative STL containing the exact surface triangles to color. Empty string clears the overlay.' },
     },
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
@@ -758,7 +802,9 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
             bytes = encodeStl(parseStl(await ctx.fs.readBytes(file, exec.signal, STL_LIMITS.maxBytes)))
             exec.signal.throwIfAborted()
           }
-          const result = displaySource(record)?.highlight({ ...args, triangleCount: bytes ? (bytes.byteLength - 84) / 50 : 0 }) ?? { status: 'awaiting_validation', message: 'No accepted model is displayed yet.' }
+          const source = displaySource(record)
+          const path = args.path === record.selectedModel ? source?.state().path : args.path
+          const result = source?.highlight({ ...args, path, triangleCount: bytes ? (bytes.byteLength - 84) / 50 : 0 }) ?? { status: 'awaiting_validation', message: 'No accepted model is displayed yet.' }
           let receipt = null
           if (result.status === 'queued') {
             record.highlightMesh = { id: result.highlight.id, bytes }

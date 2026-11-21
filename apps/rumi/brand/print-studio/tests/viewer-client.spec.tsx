@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
-import { Menu, IconChevronDownOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Menu, IconChevronDownOutlineRegular, IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { printLayoutIdentity } from '../viewer/print-layout/state.js'
 import { installViewer } from '../viewer/client.js'
 import { en, zh } from '../viewer/locales.js'
@@ -108,7 +108,7 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
         return () => { entries.delete(options.name) }
       },
     },
-  }, React, { Menu, IconChevronDownOutlineRegular, PluginArtworkDefault: () => null, Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant: string; size: string }) => React.createElement('button', props) })
+  }, React, { Menu, IconChevronDownOutlineRegular, IconCloseOutlineRegular, PluginArtworkDefault: () => null, Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant: string; size: string }) => React.createElement('button', props) })
   return {
     opened, fetch,
     mount: (id: string | undefined) => { mounted = id; for (const listener of mountedListeners) listener() },
@@ -130,6 +130,51 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
 async function settle(ms = 0) {
   await act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 }
+
+type RegionMarkerPosition = { id: string; name: string; x: number; y: number; interactive: boolean }
+
+it('shows the projected name and lets the chat chip reopen or remove its reference', async () => {
+  const design = { url: '/source/model.js', revision: 1, error: null, highlight: { id: 'tail', regionName: 'Tail tip', meshPath: 'tail.stl' } }
+  const base = { ...scene([]), design }
+  const view = fixture({ scene: base })
+  render(<>{view.view('sidebar.right.pane.tab')}{view.view('conversation.input.dock')}</>)
+  await settle()
+  expect(screen.queryByRole('button', { name: 'Use Tail tip in chat' })).toBeNull()
+  const position = viewport.create.mock.calls[0]![5] as (input: RegionMarkerPosition | null) => void
+  act(() => position({ id: 'tail', name: 'Tail tip', x: 55, y: 40, interactive: false }))
+  expect(screen.getByRole('button', { name: 'Use Tail tip in chat' }).tabIndex).toBe(-1)
+  act(() => position({ id: 'tail', name: 'Tail tip', x: 55, y: 40, interactive: true }))
+  expect(screen.getByRole('button', { name: 'Use Tail tip in chat' }).tabIndex).toBe(0)
+  view.setScene({ ...base, regionReference: { id: 'tail', name: 'Tail tip' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Use Tail tip in chat' }))
+  await settle()
+  const route = '/api/print-studio/viewer/region-reference?sessionId=session-a'
+  expect(view.fetch).toHaveBeenCalledWith(route, expect.objectContaining({ body: JSON.stringify({ id: 'tail', attach: true }) }))
+  const chip = screen.getByRole('button', { name: 'Show Tail tip in the preview' })
+  view.opened.mockClear()
+  fireEvent.click(chip)
+  expect(view.opened).toHaveBeenCalledWith('session-a', 'print-studio')
+  act(() => position(null))
+  view.setScene(base)
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Tail tip from chat' }))
+  await settle()
+  expect(view.fetch).toHaveBeenCalledWith(route, expect.objectContaining({ body: JSON.stringify({ id: 'tail', attach: false }) }))
+  expect(screen.queryByRole('button', { name: 'Show Tail tip in the preview' })).toBeNull()
+})
+
+it('updates the hover name between mapped regions without an agent highlight', async () => {
+  const view = fixture({ scene: { ...scene([]), design: { url: '/source/model.usda', revision: 1, regionMap: { key: 'map' } } } })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  const position = viewport.create.mock.calls[0]![5] as (input: RegionMarkerPosition | null) => void
+  act(() => position({ id: 'ear', name: 'Right ear', x: 68, y: 25, interactive: false }))
+  expect(screen.getByRole('button', { name: 'Use Right ear in chat' })).toBeTruthy()
+  act(() => position({ id: 'cheek', name: 'Right cheek', x: 70, y: 45, interactive: false }))
+  expect(screen.queryByRole('button', { name: 'Use Right ear in chat' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Use Right cheek in chat' })).toBeTruthy()
+  act(() => position(null))
+  expect(screen.queryByRole('button', { name: 'Use Right cheek in chat' })).toBeNull()
+})
 
 it('discovers new model controls without a geometry revision and selects the requested entry', async () => {
   const base = { ...scene([]), models: [{ name: 'helmet', path: 'models/helmet/model.js' }], selectedModel: 'models/helmet/model.js' }

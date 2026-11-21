@@ -336,8 +336,8 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
     expect(loaded.design).toMatchObject({ revision: 1, error: null, report: null })
     expect((await f.request(loaded.design.url)).headers.get('content-type')).toContain('javascript')
     await writeFile(join(root, 'overlay.stl'), stl(box()))
-    const reference = { path: loaded.design.path, revision: loaded.design.revision, url: loaded.design.url,
-      label: 'Upper region', meshPath: 'overlay.stl' }
+    const reference = { path: 'model.js', revision: loaded.design.revision, url: loaded.design.url,
+      label: 'Upper region', regionName: 'Top edge', meshPath: 'overlay.stl' }
     const highlighting = f.run('viewer_highlight', reference)
     let scene
     await expect.poll(async () => { scene = await f.state(); return scene.design.highlight?.id }).toBeTruthy()
@@ -351,6 +351,20 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
     const highlighted = await highlighting
     expect({ status: highlighted.status, reason: highlighted.reason, message: highlighted.message }).toMatchSnapshot('acknowledged highlight result')
     expect(highlighted.status).toBe('rendered')
+    const regionRoute = f.routes.get('/api/print-studio/viewer/region-reference')!
+    const updateRegion = (id: string, attach: boolean, session = 'session-a') =>
+      regionRoute(new Request(`http://rumi/api/print-studio/viewer/region-reference?sessionId=${session}`, {
+        method: 'POST', body: JSON.stringify({ id, attach }),
+      }))
+    expect((await updateRegion(design.highlight.id, true, 'session-b')).status).toBe(404)
+    expect((await updateRegion('earlier-highlight', true)).status).toBe(409)
+    expect((await updateRegion(design.highlight.id, true)).status).toBe(200)
+    expect((await f.state()).regionReference).toMatchObject({
+      id: design.highlight.id, name: 'Top edge', path: design.path, revision: design.revision, meshPath: 'overlay.stl',
+    })
+    expect((await updateRegion(design.highlight.id, false)).status).toBe(200)
+    expect((await f.state()).regionReference).toBeNull()
+    expect((await updateRegion(design.highlight.id, true)).status).toBe(200)
     const journal = join(f.diagnosticsDirectory, (await readdir(f.diagnosticsDirectory))[0])
     const trace = (await readFile(journal, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     expect(trace.map(row => row.type)).toEqual(expect.arrayContaining(['highlight.requested', 'viewer.state_delivered', 'viewer.feedback_received', 'highlight.acknowledged', 'highlight.settled']))
@@ -361,18 +375,20 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
     expect(trace.at(-1).data.status).toBe('rendered')
     expect((await f.meshState()).design.highlight).toEqual(highlighted.highlight)
     expect((await f.run('viewer_highlight', reference, 'another-session')).status).toBe('model_required')
-    const hidden = f.run('viewer_highlight', reference)
+    const hidden = f.run('viewer_highlight', { ...reference, path: loaded.design.path })
     await expect.poll(async () => {
       scene = await f.state()
       return scene.design.highlight?.id !== design.highlight.id && Boolean(scene.design.highlight?.id)
     }).toBe(true)
     const hiddenDesign = scene.design
+    expect(scene.regionReference).toBeNull()
     await f.routes.get('/api/print-studio/viewer/feedback')!(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
       method: 'POST', body: JSON.stringify({ revision: hiddenDesign.revision, url: hiddenDesign.url, transform: hiddenDesign.transform,
         requestedHighlightId: hiddenDesign.highlight.id, highlightStatus: 'highlight_hidden' }),
     }))
     expect(await hidden).toMatchObject({ status: 'not_rendered', reason: 'highlight_hidden' })
     expect((await f.run('viewer_highlight', { ...reference, revision: 99 })).status).toBe('stale_model')
+    expect((await f.run('viewer_highlight', { ...reference, path: 'another-model.js' })).status).toBe('stale_model')
     expect((await f.run('viewer_highlight', { ...reference, meshPath: '', label: '' })).status).toBe('cleared')
     const placed = await f.run('viewer_transform', { scale: 2, rotate: { z: 90 } })
     expect(placed.design.transform).toMatchObject({ scale: 2, rotate: { z: 90 } })

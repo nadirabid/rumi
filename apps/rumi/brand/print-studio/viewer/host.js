@@ -25,7 +25,6 @@ import { createHighlightReceipts } from './receipts.js'
 import { createLoadReceipts } from './load-receipts.js'
 import { createViewerEvents } from './events.js'
 import { createCursorRequests, cursorIdentity } from './cursor.js'
-import { cursorCommand } from './cursor-commands.js'
 import { createModelFocus } from './model-focus.js'
 import { createValidation } from './validation.js'
 import { registerValidationTools } from './validation-tools.js'
@@ -600,21 +599,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   ctx.inject(['liveVoice'], scoped => {
     scoped.effect(() => scoped.liveVoice.register({
       id: 'print-studio-pointing',
-      instructions: () => 'Cursor driven mesh highlighting responds directly to short selection phrases: local patch, whole panel, whole part, just the edge, larger selection, smaller selection. These refine a visual reference only; they never edit geometry. Still delegate the request. Use the attached refined reference and have the modeling assistant confirm it in teal with viewer_highlight, using surface triangles from the referenced model. Do not claim a preview succeeded without its result. When mesh shaping controls are active, delegate satisfaction, completion, cancellation, and changes of topic so the modeling assistant can resolve the current edit and clear its controls and highlight before proceeding. Do not merely acknowledge that it is done.',
-      refineRequest: async ({ sessionId, text, content, signal }) => {
-        const command = cursorCommand(text)
-        if (!command) return content
-        const referenceIndex = content.findIndex(part => part.type === 'text' && part.text.startsWith('{"reference":"cursor-at-start-of-spoken-request"'))
-        if (referenceIndex < 0) return content
-        const reference = JSON.parse(content[referenceIndex].text)
-        if (reference.command === command || reference.snapshot?.status !== 'captured' || !reference.snapshot.region.anchorId) return content
-        const { image, ...snapshot } = JSON.parse(await captureReference(sessionId, signal, { command, anchorId: reference.snapshot.region.anchorId }))
-        return content.flatMap((part, index) => {
-          if (index === referenceIndex) return [{ type: 'text', text: JSON.stringify({ ...reference, command, snapshot }) }, ...(image ? [{ type: 'image', attachment: image }] : [])]
-          if (index === referenceIndex + 1 && part.type === 'image') return []
-          return [part]
-        })
-      },
+      instructions: () => 'Delegate all requests about what to highlight or change in the model, including ambiguous requests. The modeling assistant interprets the spoken request with the captured cursor reference, asks for any needed clarification, and confirms the requested highlight using viewer_highlight. Wait for the rendered result before describing a visible highlight. When mesh shaping controls are active, delegate satisfaction, completion, cancellation, and changes of topic so the modeling assistant can resolve the current edit and clear its controls and highlight before proceeding. Do not merely acknowledge that it is done.',
       captureRequest: async ({ sessionId, requestedAt, signal }) => {
         if (!sessions.has(sessionId)) return []
         const record = sessions.get(sessionId)
@@ -629,14 +614,14 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
     }), 'print viewer: spoken pointing references')
   })
 
-  async function captureReference(sessionId, signal, refinement = {}) {
+  async function captureReference(sessionId, signal) {
     if (closed) return JSON.stringify({ status: 'viewer_unavailable', reason: 'viewer_closed' })
     const capture = (async () => {
         const record = sessions.get(sessionId)
         if (!record) return JSON.stringify({ status: 'viewer_unavailable', reason: 'viewer_not_open' })
         const identity = await serialize(record, async () => { await record.source?.poll(); return displayIdentity(record) })
         if (displaySource(record)?.state().error) return JSON.stringify({ status: 'stale_view' })
-        const snapshot = await cursors.request(sessionId, identity, signal, refinement)
+        const snapshot = await cursors.request(sessionId, identity, signal)
         signal.throwIfAborted()
         if (snapshot.status !== 'captured') return JSON.stringify(snapshot)
         try {

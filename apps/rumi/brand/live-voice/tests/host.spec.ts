@@ -224,30 +224,32 @@ it('retains early delegation, suppresses its automatic acknowledgment, and journ
   expect(records.some(record => record.type === 'session.delegation.created')).toBe(true)
 })
 
-it('refines the captured reference from transcript chunks before admitting the spoken task', async () => {
+it.each([
+  ['whole ', 'part'],
+  ['Can you show me ', 'that whole part?'],
+])('delegates the spoken request with its original cursor reference (%s%s)', async (first, last) => {
   const f = await fixture()
-  const refined = deferred<undefined>()
-  const texts: string[] = []
+  const content = [{ type: 'text', text: '{"selection":{"mode":"patch","partPath":["wheel"]}}' }]
+  const captureRequest = vi.fn(async () => content)
   f.registry.register({
     id: 'selection-test',
-    captureRequest: async () => [{ type: 'text', text: 'initial anchor' }],
-    refineRequest: async ({ text, content }: { text: string; content: object[] }) => {
-      texts.push(text)
-      if (text !== 'whole part') return content
-      refined.resolve(undefined)
-      return [{ type: 'text', text: 'refined original anchor' }]
-    },
+    captureRequest,
   })
   await f.request('/session', { sessionId: 's' })
   const socket = await f.started.promise
-  socket.send(JSON.stringify({ type: 'session.input_transcript.delta', delta: 'whole ' }))
-  socket.send(JSON.stringify({ type: 'session.input_transcript.delta', delta: 'part' }))
-  await refined.promise
-  expect(texts).toEqual(['whole ', 'whole part'])
+  socket.send(JSON.stringify({ type: 'session.input_transcript.delta', delta: first }))
+  socket.send(JSON.stringify({ type: 'session.input_transcript.delta', delta: last }))
   socket.send(JSON.stringify({ type: 'session.delegation.created', delegation: { id: 'selection', target: 'client' } }))
   await f.entered.promise
-  expect(JSON.stringify(f.injected)).toContain('refined original anchor')
-  expect(JSON.stringify(f.injected)).not.toContain('initial anchor')
+  expect(captureRequest).toHaveBeenCalledExactlyOnceWith({
+    sessionId: 's', requestedAt: expect.any(String), signal: expect.any(AbortSignal),
+  })
+  expect(f.steered).toEqual([expect.objectContaining({
+    id: expect.any(String), source: { kind: 'user' }, content: [{ type: 'text', text: first + last }],
+  })])
+  expect(f.injected).toEqual([expect.objectContaining({
+    content, source: expect.objectContaining({ kind: 'rumi-voice-reference', userMessageId: Reflect.get(f.steered[0]!, 'id') }),
+  })])
 })
 
 it.each(['Probably just the back, let’s see', 'Yes, do it', 'Leave the crown alone'])(

@@ -3,7 +3,6 @@ import * as THREE from 'three'
 import { expect, it, vi } from 'vitest'
 import { createHighlight } from '../viewer/viewport/highlight.js'
 import { createSurfaceIndex } from '../viewer/viewport/surfaces.js'
-import { cursorCommand } from '../viewer/cursor-commands.js'
 import { normalizeSelection } from '../viewer/highlight.js'
 
 it('joins coplanar triangles, stops at creases, and preserves triangle identity when picking', () => {
@@ -65,15 +64,6 @@ it('selects the nearest visible indexed triangle using its material group and si
     materials[1]!.side = THREE.DoubleSide
     expect(surfaces.pick(ray, materials).faceIndex).toBe(1)
   } finally { geometry.dispose(); materials.forEach(material => material.dispose()) }
-})
-
-it('recognizes only short selection requests, never embedded geometry edits or negations', () => {
-  expect(cursorCommand('Whole panel.')).toBe('surface')
-  expect(cursorCommand('just the edge')).toBe('edge')
-  expect(cursorCommand('扩大选区')).toBe('larger')
-  for (const phrase of ['make the whole part bigger', 'not the whole panel', 'whole', 'make it larger', 'yes']) {
-    expect(cursorCommand(phrase)).toBeNull()
-  }
 })
 
 it('retains a captured selection in a cursor snapshot and rejects malformed references', () => {

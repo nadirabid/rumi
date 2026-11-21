@@ -47,7 +47,7 @@ Contributions are composed in `order` at session startup. A contributor that thr
 
 During a harness turn, the host follows session events and sends quiet `thinking` notes, at most one every few seconds. New delegations steer the active agent at its next step instead of waiting for another turn. Ordered submissions share one running interval; its final result is returned against the latest delegation, not attributed separately to each correction. A command already executing is not interrupted.
 
-Voice instructions require visual highlights for referenced model parts and plain-language explanations. Clear requests, undo requests, and offered choices are handled in context; ambiguous intent needs clarification. Short replies and corrections must be delegated to the harness. No special confirmation phrase is required.
+Voice delegates model highlights and edits to the modeling agent, which handles any needed clarification and reports when a highlight renders. Voice also delegates undo requests, answers to task questions, and corrections. Plain-language requests and responses work without a confirmation phrase.
 
 ## Handoff evidence
 
@@ -64,5 +64,3 @@ The voice controls distinguish no action sent, sending, accepted, and failed. Ac
 ## Verification
 
 Run `pnpm exec vitest run --config apps/rumi/vitest.voice.config.ts`. This configuration resolves directly shipped JavaScript imports to workspace source. Tests use a local HTTP and control WebSocket fixture plus simulated renderer WebRTC tracks. A real-provider smoke verifies audio and delegation separately.
-
-Contributors may implement `refineRequest({sessionId, text, content, signal})` to refine captured content from accumulated transcript chunks before delegation. The hook returns the replacement content blocks, runs in order after capture, and shares voice cancellation. Print Studio uses it for non-destructive cursor selection phrases without another model request. The final reference remains logged separately from the user’s words; refinement failures add explicit unavailable context.

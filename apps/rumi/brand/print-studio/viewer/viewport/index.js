@@ -126,7 +126,6 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   let sceneRevision = 0, sceneGeneration = 0
   let designSpec = null, designVolume = null, designPending = null, requestedRenderRequest = null
   let measurement = null
-  const cursorAnchors = new Map()
   const ink = token(element, '--dsw-alias-label-tertiary', FALLBACK_INK)
   const solidMaterial = new THREE.MeshStandardMaterial({
     color: token(element, '--dsw-alias-brand-primary', FALLBACK_ACCENT),
@@ -437,7 +436,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         printPreview?.dispose(); printPreview = next; printLayout = structuredClone(candidate)
         printSelected = printLayout.parts[0].id; designRoot.visible = false
         clearVolume(); buildVolume(options.volume)
-        hover.clear(); cursorAnchors.clear(); frame(); drawPrint(); publishPrint()
+        hover.clear(); frame(); drawPrint(); publishPrint()
         return printSnapshot()
       } catch (error) { highlightOverlay?.resume(); showMotion(); syncHighlight(); render(); throw error }
     },
@@ -482,7 +481,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         ? motionPreview.posedHit(saved.node, saved.point)
         : { object: saved.node, point: designRoot.localToWorld(saved.point) })
       hover.replacePin(relocated ? { ...pin, ...relocated } : null)
-      cursorAnchors.clear(); syncHighlight(); render()
+      syncHighlight(); render()
       return true
     },
     async applyShape(spec) {
@@ -535,17 +534,13 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     /** Report a deliberate overlay suppression so the host can settle the request. */
     highlightBlockedBy() { return printPreview ? 'print_layout' : !highlightVisible ? 'highlight_hidden' : null },
     /** Capture a pin from the mounted preview, or sample hover in a visible viewer. */
-    captureCursor(request = {}) {
+    captureCursor() {
       if (closed) return { status: 'viewer_unavailable', reason: 'viewer_closed' }
       if (shapeDeformer) return { status: 'viewer_unavailable', reason: 'temporary_edit' }
       if (printPreview) return { status: 'viewer_unavailable', reason: 'print_layout' }
       const hidden = document.hidden
-      if (hidden && request.command) return { status: 'viewer_unavailable', reason: 'viewer_hidden' }
       if (design && designUrl !== designSpec?.url) return { status: 'stale_view' }
-      const anchor = request.anchorId ? cursorAnchors.get(request.anchorId) : null
-      const identityKey = JSON.stringify([sceneRevision, designUrl, designSpec?.transform])
-      if (request.command && (!anchor || anchor.identityKey !== identityKey)) return { status: 'stale_view' }
-      const hit = request.command ? hover.refine(request.command, anchor.hit) : hover.snapshot({ pinnedOnly: hidden })
+      const hit = hover.snapshot({ pinnedOnly: hidden })
       if (!hit) return hidden ? { status: 'viewer_unavailable', reason: 'viewer_hidden' } : { status: 'no_hit' }
       const designIdentity = design ? {
         path: designSpec.path, revision: designSpec.revision, url: designUrl, transform: designSpec.transform,
@@ -558,9 +553,6 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         object = object.parent
       }
       const point = hit.point.toArray()
-      const anchorId = crypto.randomUUID()
-      cursorAnchors.set(anchorId, { hit, identityKey })
-      while (cursorAnchors.size > 8) cursorAnchors.delete(cursorAnchors.keys().next().value)
       const selection = { partPath: path, surfaceId: hit.surfaceId, mode: ['patch', 'surface', 'part', 'edge'][hit.mode] }
       let modelLocalBlob = null
       if (object === designRoot) {
@@ -580,19 +572,18 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       } finally {
         renderer.setPixelRatio(ratio)
         renderer.setSize(size.x, size.y, false)
-        if (request.command) hover.restorePinned()
         render()
       }
       return {
         status: 'captured', capturedAt: new Date().toISOString(),
         identity: { sceneRevision, design: designIdentity },
-        region: { objectId, partPath: path, faceIndex: hit.faceIndex, worldPoint: point, worldRadius: hit.radius, modelLocalPoint: modelLocalBlob?.center ?? null, modelLocalBlob, selection, anchorId },
+        region: { objectId, partPath: path, faceIndex: hit.faceIndex, worldPoint: point, worldRadius: hit.radius, modelLocalPoint: modelLocalBlob?.center ?? null, modelLocalBlob, selection },
         camera: { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), fov: camera.getEffectiveFOV(), aspect: camera.aspect },
         image,
       }
     },
     /** Change the cursor scope at the pinned point or the next pointer hit. */
-    setCursorMode(command) { hover.refine(command) },
+    setCursorMode(mode) { hover.setMode(mode) },
     /** Reveal a named region for keyboard focus and retain its existing mouse or touch state. */
     setRegionFocused(focused) { regionFocused = focused; render() },
     /** Set local presentation visibility without confirming the proposed region. */
@@ -647,7 +638,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       if (closed) return null
       const mapChanged = designSpec?.regionMap?.key !== spec?.regionMap?.key
       if (designSpec?.url !== spec?.url || JSON.stringify(designSpec?.transform) !== JSON.stringify(spec?.transform)) {
-        hover.clear(); cursorAnchors.clear()
+        hover.clear()
       }
       if (printLayout && (!spec || spec.url !== designUrl || printLayout.identity !== printLayoutIdentity(spec, volume ?? printLayout.volume))) clearPrint(true)
       designSpec = spec
@@ -689,7 +680,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
           // Validate placement before replacing the last successful design.
           clearShape(); clearMotion(); clearHighlight()
           if (design) {
-            hover.clear(); cursorAnchors.clear()
+            hover.clear()
             designRoot.remove(design.root); disposeDesign(design)
           }
           design = next
@@ -719,7 +710,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
           if (closed || request !== sceneGeneration) return
           for (const [id, model] of loaded) geometries.set(id, model)
           loaded.clear()
-          if (sceneRevision !== view.revision) { hover.clear(); cursorAnchors.clear() }
+          if (sceneRevision !== view.revision) hover.clear()
           sceneRevision = view.revision
           const live = new Set()
           for (const spec of view.objects) {
@@ -774,7 +765,6 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       for (const [name, listener] of printListeners) renderer.domElement.removeEventListener(name, listener, true)
       hover.dispose()
       editPicker.dispose()
-      cursorAnchors.clear()
       clearHighlight()
       if (design) { clearShape(); disposeDesign(design) }
       design = null

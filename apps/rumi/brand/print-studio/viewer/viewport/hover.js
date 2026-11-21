@@ -10,7 +10,7 @@ const CLICK_SLOP = 4
  * @param {THREE.PerspectiveCamera} camera - Interactive camera.
  * @param {() => THREE.Object3D[]} roots - Current model roots, excluding printer guides.
  * @param {() => void} render - Draw after the hover uniform changes.
- * @param {Function} [onMode] Receives the selected scope when a local or voice command changes it.
+ * @param {Function} [onMode] Receives the scope selected in the viewer.
  * @param {Function} [pickPreview] Picks edited geometry. Returns null for a miss or undefined to use the CPU surface index.
  * @param {Function} [onPoint] Receives the current visible hit, ray and whether the hit is pinned.
  * @returns {object} Shared sphere uniform, invalidation, clearing and disposal controls.
@@ -23,7 +23,6 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}, pi
   const meshes = [], indexes = new WeakMap()
   const mesh = { value: -1 }, surface = { value: -1 }, mode = { value: 0 }
   const inverse = new THREE.Matrix4(), ray = new THREE.Ray()
-  let radiusScale = 1
   let pending = null, inside = false, closed = false
   let clientX = 0, clientY = 0, pinned = null, press = null
 
@@ -78,7 +77,7 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}, pi
       if (hit) {
         const depth = -local.copy(hit.point).applyMatrix4(camera.matrixWorldInverse).z
         // A 60 CSS-pixel nominal radius remains usable across model scales and zoom levels.
-        const radius = radiusScale * 120 * depth * Math.tan(THREE.MathUtils.degToRad(camera.getEffectiveFOV()) / 2) / rect.height
+        const radius = 120 * depth * Math.tan(THREE.MathUtils.degToRad(camera.getEffectiveFOV()) / 2) / rect.height
         target = { object: hit.object, faceIndex: hit.faceIndex, surfaceId: hit.surfaceId, point: hit.point, radius, mode: mode.value }
       }
     }
@@ -146,28 +145,13 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}, pi
   document.addEventListener('visibilitychange', visibility)
   return {
     sphere, mesh, surface, mode, invalidate, clear,
-    refine(command, anchor) {
+    setMode(command) {
       const modes = { patch: 0, surface: 1, part: 2, edge: 3 }
-      const previousScale = radiusScale
-      if (command in modes) { mode.value = modes[command]; onMode(command) }
-      if (command === 'larger') radiusScale = Math.min(4, radiusScale * 1.5)
-      if (command === 'smaller') radiusScale = Math.max(0.25, radiusScale / 1.5)
-      if (pinned) pinned = { ...pinned, radius: pinned.radius * (radiusScale / previousScale), mode: mode.value }
-      if (anchor) {
-        cancelUpdate()
-        const ratio = command === 'larger' ? 1.5 : command === 'smaller' ? 1 / 1.5 : 1
-        const target = { ...anchor, radius: anchor.radius * ratio, mode: mode.value }
-        show(target)
-        render()
-        return target
-      }
-      if (pinned) { show(pinned); render() }
+      if (!Object.hasOwn(modes, command)) return
+      mode.value = modes[command]
+      onMode(command)
+      if (pinned) { pinned = { ...pinned, mode: mode.value }; show(pinned); render() }
       else invalidate()
-      return null
-    },
-    /** Restore the pinned drawing after capturing a separate voice anchor. */
-    restorePinned() {
-      if (pinned) show(pinned)
     },
     /** Move an existing pin with its surface and discard the old live hover. */
     replacePin(hit) {

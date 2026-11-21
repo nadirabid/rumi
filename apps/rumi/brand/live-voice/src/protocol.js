@@ -36,7 +36,6 @@ export const DEFAULT_INSTRUCTIONS = [
   '- The user asks "Are you doing it?" and no host acceptance or current task status is available. Request backend status; do not claim work is running.',
   'Do not delegate when:',
   '- The user is greeting you, or you can answer using a still-current backend result.',
-  '- The request is ambiguous and needs a brief clarification before work can begin.',
   'Delegate to the backend before saying you will hand work off or giving an answer that depends on backend work.',
   'Report only host-confirmed task state. Do not say work was sent, accepted, or is running before host acceptance. Do not invent results. If the host reports a failed handoff, explain that it was not sent and ask the user to repeat it.',
   'Visually ground model regions through the assistant before discussing changes: require viewer_highlight and a rendered result, then refer to the teal area in plain words. Queued or not_rendered is not visible confirmation.',

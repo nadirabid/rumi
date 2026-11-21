@@ -38,7 +38,6 @@ export function validateCursorSnapshot(value) {
   const modelLocalPoint = region.modelLocalPoint === undefined ? blob?.center ?? null : region.modelLocalPoint
   if (modelLocalPoint !== null && !vector(modelLocalPoint)) throw new Error('Invalid saved model point')
   const selection = region.selection === undefined ? undefined : normalizeSelection(region.selection)
-  if (region.anchorId !== undefined && (typeof region.anchorId !== 'string' || region.anchorId.length > 100)) throw new Error('Invalid cursor anchor')
   const camera = value.camera
   if (!camera || !vector(camera.position) || !vector(camera.target) || !vector(camera.up)
     || !Number.isFinite(camera.fov) || camera.fov <= 0 || camera.fov >= 180
@@ -47,7 +46,7 @@ export function validateCursorSnapshot(value) {
     || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value.image)) throw new Error('Invalid cursor image')
   return {
     status: 'captured', capturedAt: value.capturedAt, identity: value.identity,
-    region: { ...(selection ? { selection } : {}), ...(region.anchorId ? { anchorId: region.anchorId } : {}), objectId: region.objectId, partPath: region.partPath, faceIndex: region.faceIndex,
+    region: { ...(selection ? { selection } : {}), objectId: region.objectId, partPath: region.partPath, faceIndex: region.faceIndex,
       worldPoint: region.worldPoint, worldRadius: region.worldRadius, modelLocalPoint, modelLocalBlob: blob === null ? null : { center: blob.center, radii: blob.radii, rotationDegrees: blob.rotationDegrees } },
     camera: { position: camera.position, target: camera.target, up: camera.up, fov: camera.fov, aspect: camera.aspect },
     image: value.image,
@@ -63,7 +62,7 @@ export function createCursorRequests(onRequest = () => {}) {
   const pending = new Map()
   let closed = false
   return {
-    request(sessionId, identity, signal, refinement = {}) {
+    request(sessionId, identity, signal) {
       signal.throwIfAborted()
       if (closed) return Promise.resolve({ status: 'viewer_unavailable', reason: 'viewer_closed' })
       if (pending.has(sessionId)) return Promise.resolve({ status: 'busy' })
@@ -77,12 +76,12 @@ export function createCursorRequests(onRequest = () => {}) {
         }
         const abort = () => finish({ status: 'cancelled' })
         const timer = setTimeout(() => finish({ status: 'viewer_unavailable', reason: 'response_timeout' }), 8000)
-        pending.set(sessionId, { id, identity, finish, refinement })
+        pending.set(sessionId, { id, identity, finish })
         signal.addEventListener('abort', abort, { once: true })
         onRequest(sessionId)
       })
     },
-    read(sessionId) { const request = pending.get(sessionId); return request ? { id: request.id, ...request.refinement } : null },
+    read(sessionId) { const request = pending.get(sessionId); return request ? { id: request.id } : null },
     deliver(sessionId, id, value, currentIdentity) {
       const request = pending.get(sessionId)
       if (!request || request.id !== id) return false

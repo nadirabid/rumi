@@ -14,11 +14,11 @@
 
 打印机 IP 和序列号存储在 `$DSH_HOME/print-studio/printer.json` 中，仅所有者可访问。局域网访问码通过 `ctx.credentials` 存储为 `BAMBU_LAN_ACCESS_CODE`；它不会返回给客户端，也不会写入配置补丁。
 
-[打印机感知技能](skills/printer-awareness/SKILL.md)将实时状态工具和已安装的机器配置用于打印机相关决策，保留未知读数，并要求打印空间具有明确来源。
+[打印机感知技能](skills/inspect-printer/SKILL.md)将实时状态工具和已安装的机器配置用于打印机相关决策，保留未知读数，并要求打印空间具有明确来源。
 
 ## 打印布局
 
-活动实体部件必须分开打印后组装，并保留声明的旋转或滑动功能。智能体按照[分开打印要求](skills/joints/SKILL.md#separate-printing-for-moving-parts)设计可组装的连接结构并说明组装顺序。旧的组装状态打印活动模型仍可查看，但在重新设计前不能发布、通过验证或准备打印。现有模型和脚本参见[迁移说明](upgrade-guide/separate-moving-parts/README.zh.md)。
+活动实体部件必须分开打印后组装，并保留声明的旋转或滑动功能。智能体按照[分开打印要求](skills/printable-joints/SKILL.md#separate-printing-for-moving-parts)设计可组装的连接结构并说明组装顺序。旧的组装状态打印活动模型仍可查看，但在重新设计前不能发布、通过验证或准备打印。现有模型和脚本参见[迁移说明](upgrade-guide/separate-moving-parts/README.zh.md)。
 
 在标准 USD 模型预览中选择 **安排打印**，即可将实体部件放到打印板上。**返回模型** 恢复已保存的模型及其运动控件。分开制造的部件单独放置，包括组装后通过固定连接相连的部件。旧的静态原位打印组保持整体。多部件模型缺少制造声明时，必须先修正模型才能排列。自动排列尝试轴对齐方向，优先降低高度，并在不改变比例的情况下添加打印板。它不选择支撑，也不保证可打印性。
 
@@ -104,7 +104,7 @@ Print Studio 验证返回消息，通过 Bambu 的票据端点交换票据，并
 
 建模技能在编辑前提供[实体构建默认规则](skills/blender-modeling/SKILL.md#solid-construction-defaults)：封闭实体、Exact 布尔运算、独立机械部件、受控细节处理和选择性重网格化。这些是智能体指令，不是强制执行的操作限制；几何验证仍会检查结果。
 
-`blender_status` 还会返回 `joints`，即 `blender/rumi_joints.py` 的路径：这是一个以毫米为单位的建模工具包，提供经过清理的 Exact 布尔运算，并从 `blender/joints/*.py` 加载连接件配方。每个配方为传入的两个零件添加配合特征并返回连接记录；工具包的 `publish` 把这些记录写成 USD 装配。[`joints` 技能](skills/joints/SKILL.md)列出每个配方及其样例在真实检查中得到的结果，其 `references/` 卡片给出调用方式和选项。配方是供智能体使用的起点，而不是经过验证的库：每个配方只在默认尺寸下单独检查过，依靠摩擦、磁力或五金件固定的连接保持未验证状态，若干被形状约束的连接读出的 `excessive_penetration` 略高于默认限值。在本包目录下运行 `Blender --background --factory-startup --python-exit-code 1 --python tests/blender-joints.py` 可执行工具包回归测试。
+`blender_status` 还会返回 `joints`，即 `blender/rumi_joints.py` 的路径：这是一个以毫米为单位的建模工具包，提供经过清理的 Exact 布尔运算，并从 `blender/joints/*.py` 加载连接件配方。每个配方为传入的两个零件添加配合特征并返回连接记录；工具包的 `publish` 把这些记录写成 USD 装配。[`printable-joints` 技能](skills/printable-joints/SKILL.md)列出每个配方及其样例在真实检查中得到的结果，其 `references/` 卡片给出调用方式和选项。配方是供智能体使用的起点，而不是经过验证的库：每个配方只在默认尺寸下单独检查过，依靠摩擦、磁力或五金件固定的连接保持未验证状态，若干被形状约束的连接读出的 `excessive_penetration` 略高于默认限值。在本包目录下运行 `Blender --background --factory-startup --python-exit-code 1 --python tests/blender-joints.py` 可执行工具包回归测试。
 
 ## 显式验证工具
 
@@ -152,7 +152,7 @@ USD 旋转和移动关节默认生成滑块。根节点可选的 `rumi:motionCon
 
 Rumi 可以用用户的语言为这些三角面覆盖的特征提供简短的 `regionName`。将指针悬停在已命名的表面上即可看到名称。点击或轻触该表面可固定标签，旋转视角时标签会继续显示。使用键盘聚焦预览也可显示标签。激活标签可将区域添加到聊天输入框上方。点击聊天中的区域标签可重新打开预览；点击关闭按钮可移除引用。标签在当前高亮有效期间保留，每条接收的请求都会在 `modelFocus.requests` 中记录关联特征及源码版本。更换高亮或模型版本会清除标签。
 
-整个模型的悬停标签由 USD 文件旁的 `model.regions.json` 提供。命中表面时显示首个匹配的特征名称，未匹配时显示剩余区域的名称。即使当前没有高亮，预览也可在本地查找名称。区域表使用 SHA-256 与 USD 版本关联。模型更改后需要匹配的区域表，区域表格式错误时仍可查看模型。添加到聊天的区域包含特征 ID 和源码版本。参见[为整个模型命名](skills/clarify-mesh-changes/SKILL.md#name-the-whole-model-for-hover)。
+整个模型的悬停标签由 USD 文件旁的 `model.regions.json` 提供。命中表面时显示首个匹配的特征名称，未匹配时显示剩余区域的名称。即使当前没有高亮，预览也可在本地查找名称。区域表使用 SHA-256 与 USD 版本关联。模型更改后需要匹配的区域表，区域表格式错误时仍可查看模型。添加到聊天的区域包含特征 ID 和源码版本。参见[为整个模型命名](skills/name-model-regions/SKILL.md)。
 
 光标模式位于左下角的紧凑玻璃胶囊中。使用鼠标或触控板时，仅显示当前模式；悬停或键盘聚焦后显示全部四个选项，选择期间焦点会保持展开。触屏控件始终展开，点击区域为 44px。减少透明度或提高对比度时使用不透明背景。
 
@@ -180,9 +180,9 @@ Rumi 可以用用户的语言为这些三角面覆盖的特征提供简短的 `r
 
 ## 连续网格编辑
 
-agent 使用 `viewer_controls` 声明带标签的滑块、双轴面板和标量曲线。每个轴绑定一个数值，并指定范围、步长和重置值。面板可以仅展示所提供模型参数中的一部分。曲线控件的手柄位于水平中央，随数值上下移动。渲染器独立于模型操作；标签描述真实绑定。控件悬浮在查看器右上角，必要时可滚动，并支持键盘输入、独立重置、焦点指示和降低透明度。[interactive-controls skill](skills/interactive-controls/SKILL.md) 介绍通用控件。[网格编辑控件](skills/mesh-edit-controls/SKILL.md) 根据请求选择有用的调整、编写变形，并处理预览、修改和保存。其活动工作流提示词也适用于已有项目。
+agent 使用 `viewer_controls` 声明带标签的滑块、双轴面板和标量曲线。每个轴绑定一个数值，并指定范围、步长和重置值。面板可以仅展示所提供模型参数中的一部分。曲线控件的手柄位于水平中央，随数值上下移动。渲染器独立于模型操作；标签描述真实绑定。控件悬浮在查看器右上角，必要时可滚动，并支持键盘输入、独立重置、焦点指示和降低透明度。[control-widgets skill](skills/control-widgets/SKILL.md) 介绍通用控件。[网格编辑控件](skills/mesh-edit-controls/SKILL.md) 根据请求选择有用的调整、编写变形，并处理预览、修改和保存。其活动工作流提示词也适用于已有项目。
 
-可执行的 JavaScript 参数预览被禁用。几何适配器保留其几何行为：鼓包、弯曲、扭转和渐缩更新 GPU uniforms，无需重建。声明的轴使用 0..1 归一化值，中性值为 .5。区域与保存规则见 [analog-shaping](skills/analog-shaping/SKILL.md)。将指针悬停在编辑中的网格上可显示蓝色高亮，点击可固定高亮，切割时保留的网格表面也可选取。调整编辑控件会解除固定。编辑期间查看器暂停光标快照和缩略图。几何检查描述已保存的原件。
+可执行的 JavaScript 参数预览被禁用。几何适配器保留其几何行为：鼓包、弯曲、扭转和渐缩更新 GPU uniforms，无需重建。声明的轴使用 0..1 归一化值，中性值为 .5。区域与保存规则见 [built-in-mesh-operations](skills/built-in-mesh-operations/SKILL.md)。将指针悬停在编辑中的网格上可显示蓝色高亮，点击可固定高亮，切割时保留的网格表面也可选取。调整编辑控件会解除固定。编辑期间查看器暂停光标快照和缩略图。几何检查描述已保存的原件。
 
 松开控件会更新会话所属的值。用户满意或开始新任务时，先完成最新可见编辑；明确取消则放弃。Freeze 捕获最新可见值、锁定控件，并在 `artifacts/shape-controls/` 写入绑定源文件的配方。代理使用 `apply_shape_controls` 将配方应用于匹配的 Blender 源文件，发布新版本并加载。Close 恢复已保存预览。源文件变化使控件失效；过期反馈被拒绝。隐藏的查看器报告 `viewer_hidden`，恢复可见时渲染相同控件。渲染异常报告 `render_failed`，并在控件状态和工具结果中包含原因。预览和保存都不能认证打印就绪性。
 

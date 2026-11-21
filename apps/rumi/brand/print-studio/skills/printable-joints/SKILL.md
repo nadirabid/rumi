@@ -1,9 +1,9 @@
 ---
-name: joints
-description: Ready-made printable joints and a millimetre modelling kit for Blender scripts — wheels on axles, hinges, sliders, snap fits, gears. Read before modelling any part that moves or attaches to another part.
+name: printable-joints
+description: "Build separately printed assemblies with Blender joint recipes for wheels, hinges, sliders, snaps, and gears."
 ---
 
-# Joints and the modelling kit
+# Printable joints
 
 `blender_status` returns a `joints` path. Load it at the top of the build script:
 
@@ -14,24 +14,9 @@ K = types.SimpleNamespace(**runpy.run_path(joints_path))
 
 The kit works in **millimetres, Z up** and creates the Blender geometry in metres for you. Do not mix raw `bpy` coordinates with kit calls. Parts keep identity transforms, which the joint frames need.
 
-Use the kit and a recipe before designing a connector yourself. Working out retention geometry and joint frames by hand is the slowest part of a build; a recipe is one call.
+Use a compatible recipe before designing a connector by hand.
 
-## Kit
-
-| Call | Makes |
-|---|---|
-| `K.start()` | An empty metric scene. Call once, first. |
-| `K.box(name, size, center)`, `K.box2(name, low, high)` | A box by size and centre, or by two corners. |
-| `K.cylinder(name, radius, length, center, axis, radius2=None)`, `K.rod(name, radius, a, b)` | A cylinder or cone frustum, by centre and axis or between two points. |
-| `K.sphere(name, radius, center)`, `K.prism(name, points, height, center, axis)`, `K.lathe(name, profile, center, axis)` | A sphere, an extruded 2D outline (concave is fine), a revolved `(radius, height)` profile. |
-| `K.join(a, b, ...)`, `K.cut(a, tool, ...)`, `K.common(a, tool)` | Fuse, subtract, intersect. The first part is changed and kept; the others are deleted. Results are cleaned for the geometry check. |
-| `K.copy(obj, name)`, `K.mirror(obj, 'X', name)`, `K.move(obj, offset)`, `K.rotate(obj, axis, degrees, pivot)` | Duplicate, mirror across the origin plane, translate, turn. |
-| `K.paint(obj, (r, g, b))` | One surface colour. |
-| `K.bounds(obj)`, `K.solids(obj)` | Corner coordinates; the number of disconnected pieces (a printable part has one). |
-| `K.joint(name, kind, parent, child, axis, pivot, limits, control)` | A joint record for a connector you modelled yourself. |
-| `K.publish(directory, root, joints, mode=..., controls=...)` | Publishes `model.usda`, writes the whole USD assembly from the joint records, and prints `RUMI_CHECKS`. It replaces `helper["publish"]` and `configure_robot`. |
-
-Axes are `'X'`, `'-Y'`, `'+Z'` or a vector. Give tools and helper solids names starting with `_`; never leave one in the scene, because every visible mesh is published as a part. Overlap pieces you fuse by at least 0.5 mm and run cutters past the surface.
+See the [kit API](references/kit.md) for primitives, booleans, transforms, and publishing.
 
 ## Separate printing for moving parts
 
@@ -49,13 +34,9 @@ Run the geometry, clearance, collision, retention and movement workflow in [fini
 2. Choose each joint's pivot and axis from those coordinates.
 3. Call the recipe. It adds and cuts the mating features on both parts and returns the joint record. A recipe raises an error that says what to move when a part does not reach the joint.
 4. Add detail and colour. Build one side and `K.mirror` it for pairs.
-5. `K.publish(...)`, read `RUMI_CHECKS`, then follow `blender-modeling` for `viewer_load` and validation.
+5. Publish the assembled pose with `K.publish`, read `RUMI_CHECKS`, then follow [Blender modeling](../blender-modeling/SKILL.md#edit-and-publish) for region labels and preview. The viewer derives a separate plate layout from the physical parts.
 
 Choose movement widgets through [blender-modeling](../blender-modeling/SKILL.md#movement-controls). Pass their declarations as `controls` to `K.publish`; joint geometry and limits remain the movement definition.
-
-## Publish the assembly
-
-After modeling separately printable parts and their connectors, publish their assembled pose with `K.publish('models/kart', body, joints, mode='separate')`. The viewer uses the joints for motion and creates a separate plate layout for printing. Keep every removable pin, cap and axle as its own physical part. Publishing does not create an insertion path or make a captive connector assembleable.
 
 ## Recipes are starting points
 

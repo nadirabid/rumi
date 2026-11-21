@@ -1,6 +1,6 @@
 ---
 name: blender-modeling
-description: Create, import, or edit Rumi meshes using background Blender Python scripts, then inspect and iterate in the Three.js viewer. Use for model creation and geometry edits.
+description: "Create, import, revise, or restore meshes with Blender Python. Publish and validate the editable USD revision."
 ---
 
 # Blender modeling
@@ -9,7 +9,7 @@ Call `blender_status` for the executable and helper paths. Run Blender through t
 
 ## Start from the joints kit
 
-For any model with more than one part, or with a wheel, hinge, slider, snap or gear, read `joints` first and build with its kit. It supplies millimetre primitives, cleaned Boolean operations, joint recipes and `K.publish`, which writes the whole USD assembly, so the script needs no `configure_robot`. Design moving parts for [separate printing and assembly](../joints/SKILL.md#separate-printing-for-moving-parts); this is required, not a choice. Revisions, the viewer and validation below apply unchanged.
+For any model with more than one part, or with a wheel, hinge, slider, snap or gear, read `printable-joints` first and build with its kit. It supplies millimetre primitives, cleaned Boolean operations, joint recipes and `K.publish`, which writes the whole USD assembly, so the script needs no `configure_robot`. Design moving parts for [separate printing and assembly](../printable-joints/SKILL.md#separate-printing-for-moving-parts); this is required, not a choice. Revisions, the viewer and validation below apply unchanged.
 
 ## Solid construction defaults
 
@@ -29,7 +29,7 @@ Use these defaults from the first modeling operation, including edits to existin
 3. Work in **metres, Z up** in Blender. Rumi's viewer, measurements and Gaussian regions use **millimetres, Z up**. Divide model-local cursor/highlight coordinates and radii by 1,000 before using them in Blender; account for object transforms when selecting vertices. Standard USD export/import handles the USD coordinate frame. Do not apply viewer placement to an editing selection twice.
 4. Follow the solid construction defaults above when choosing Blender modifiers and mesh operations. For symmetric objects construct one half and mirror it about an explicit plane; measure symmetry after evaluated modifiers. Keep planar faces planar, bevel widths consistent, sharp boundaries deliberate, and smooth normals confined to intended smooth surfaces. More subdivisions or smooth shading alone do not correct a lumpy silhouette. Inspect front, side and three-quarter views. Distinguish topology checks from visual/reference fidelity.
 5. Load the helper returned by `blender_status` with `helper = runpy.run_path(helper_path)`, then call `helper["publish"]("models/<name>")`. Use `runpy` so importing the helper does not write bytecode into the installed application. It saves an immutable `.blend` and USD revision, prints the paths and `RUMI_CHECKS`, and atomically updates `model.usda`. Keep named parts, modifiers, and movement declarations in the editable original. Preview limits are 200,000 triangles and 64 MiB; preserve detailed assets separately if a lighter preview is required. Do not silently simplify the print deliverable.
-6. Call `viewer_load` on `models/<name>/model.usda`. Saved models display independently of validation. Use `RUMI_CHECKS` and `meshState.validation` to inspect findings; a visible model is not a printability pass. Use `viewer_camera`, `viewer_cursor_snapshot`, and `viewer_highlight` for iteration.
+6. Follow [Name Model Regions](../name-model-regions/SKILL.md) for the published revision. Call `viewer_load` on `models/<name>/model.usda`. Saved models display independently of validation. Use `RUMI_CHECKS` and `meshState.validation` to inspect findings; a visible model is not a printability pass. Use `viewer_camera`, `viewer_cursor_snapshot`, and `viewer_highlight` for iteration.
 
 ## Efficient geometry edits
 
@@ -43,39 +43,11 @@ To revert to an existing saved revision, call `helper["restore_revision"]("model
 
 Every multi-part or movable model requires a complete assembly description. Give each physical piece a unique mesh name and include retaining pins, caps and axles. Disconnected solids cannot become one rigid piece by grouping or joining their mesh objects. Preserve requested features, connectors, names, controls and movement ranges through repairs and conversions.
 
-Use standard OpenUSD Python APIs in a `configure_robot(stage)` callback. The exporter creates `IsaacRobotAPI` on `/Model`, applies `IsaacLinkAPI`, `PhysicsRigidBodyAPI` and `PhysicsCollisionAPI` to each mesh, and lists the links in `isaac:physics:robotLinks`. Set that ordered relationship explicitly so the first link is the intended test fixture. Author every connection with `UsdPhysics`, apply `IsaacJointAPI`, and list every joint in `isaac:physics:robotJoints`:
-
-```python
-from pxr import Gf, Sdf, UsdPhysics
-
-def configure_robot(stage):
-    root = stage.GetDefaultPrim()
-    root.GetAttribute("rumi:manufacturingMode").Set("separate")
-    root.GetRelationship("isaac:physics:robotLinks").SetTargets(["/Model/Frame", "/Model/Door"])
-    joint = UsdPhysics.RevoluteJoint.Define(stage, "/Model/DoorHinge")
-    joint.GetPrim().AddAppliedSchema("IsaacJointAPI")
-    joint.CreateBody0Rel().SetTargets(["/Model/Frame"])
-    joint.CreateBody1Rel().SetTargets(["/Model/Door"])
-    joint.CreateAxisAttr("Z")
-    joint.CreateLocalPos0Attr(Gf.Vec3f(0, 0, .012))
-    joint.CreateLocalPos1Attr(Gf.Vec3f(0, 0, .012))
-    joint.CreateLowerLimitAttr(0)
-    joint.CreateUpperLimitAttr(90)
-    joint.GetPrim().CreateAttribute("rumi:control", Sdf.ValueTypeNames.String, custom=False).Set("Door")
-    root.GetRelationship("isaac:physics:robotJoints").SetTargets([joint.GetPath()])
-
-helper["publish"]("models/<name>", configure_robot=configure_robot)
-```
-
-This example assumes both mesh transforms are identity and requires actual connectors that retain the door and can be assembled after separate printing. Joint positions and rotations are local to the respective body: calculate each frame from the saved world pivot and axis. USD positions and prismatic limits use metres; revolute limits use degrees. The current checker supports fixed, revolute and prismatic joints, at most 128 parts and 128 joints, with finite ranges containing the saved pose at zero and bounded by ±180 degrees or ±1 metre. Include every retaining pin, cap and axle as its own link. The first robot link is held by the fixture; all others must be connected through the declared graph. Joints describe expected behavior; Bullet does not create ideal constraints that could hide missing connectors.
-
-The helper retains the native USD description in the editable `.blend`. Later `publish` calls preserve it; supply `configure_robot` when changing the robot. USD is the authoritative geometry and joint format, while `.blend` retains editable modifiers. Use one self-contained ASCII layer, metres/Z up, with no external textures, references, variants or animation. Use surface colours for the preview. Each exported physical link must be one uniquely named mesh.
-
-Rumi-specific attributes cover information the robot schema does not define: `rumi:control` on a joint labels its slider; `rumi:manufacturingMode` on the root must be `separate` for moving assemblies. Legacy `print-in-place` models remain viewable but require connector redesign before publishing or print preparation. Optional root strings `rumi:sequences` and `rumi:disassembly` encode JSON movement waypoints and translation-only reverse-assembly paths. Waypoints name joint prims and use degrees or millimetres; disassembly paths name link prims and use millimetre offsets. These are checking instructions, not a second body/joint description. Unsupported coupling and incomplete coverage remain unverified. See [movement controls](#movement-controls) for viewer widgets.
+Use [Printable Joints](../printable-joints/SKILL.md) for kit-built assemblies. For a custom USD exporter callback, follow [USD assembly declarations](references/usd-assembly.md) for joint frames, limits, and metadata.
 
 ## Movement controls
 
-Use [interactive-controls](../interactive-controls/SKILL.md) to choose widgets and labels. Publish control layout changes in a model revision. Operating those controls afterward changes only the local preview pose, not saved geometry or validation input; pose changes need no freeze or save. Keep physical joint declarations and connectors intact when editing the UI.
+Use [control-widgets](../control-widgets/SKILL.md) to choose widgets and labels. Publish control layout changes in a model revision. Operating those controls afterward changes only the local preview pose, not saved geometry or validation input; pose changes need no freeze or save. Keep physical joint declarations and connectors intact when editing the UI.
 
 Without UI declarations, revolute and prismatic joints generate sliders labeled by `rumi:control` or the child mesh name. To choose widgets, set the default prim’s string attribute `rumi:motionControls` to a JSON array. Each item has `kind`, `label`, and `axes`; each axis references an absolute joint prim path and may set `step`. For example:
 
@@ -104,13 +76,11 @@ Play is expected. Retention passes when the connector stops the part; the pivot 
 
 Repair `unretained_part` and `unstable_at_rest` by adding or enlarging the feature that captures the part: a cap, shoulder, flange or collar wider than the bore, or a pin through both knuckles. Do not tighten the fit. Repair `insufficient_clearance` by widening the listed gaps while keeping the capturing feature.
 
-## Pointed regions and printing
+## Pointing and print export
 
-Use `printer-awareness` before supplying a build volume or making printer-specific fit, nozzle or filament claims.
+Follow [Clarify Mesh Changes](../clarify-mesh-changes/SKILL.md) for captured pointing references. Recompute selections after a topology change. Gaussian regions describe soft influence around a point.
 
-Use the cursor snapshot associated with the request and visually ground named regions through `viewer_highlight`, following `clarify-mesh-changes`. Check the model revision before editing; a Gaussian region is a soft reference, not an exact vertex selection or semantic part boundary. Changes to topology invalidate old triangle indices.
-
-Keep `.blend` files as editable originals and USD as the shared geometry and robot description. Export print meshes separately from the intended evaluated solids and verify units, wall thickness, manifoldness, fit, supports and slicer output using `fdm-design`. Blender operations and viewer checks do not certify print readiness. Whole-model placement still uses `viewer_transform`; it does not rewrite the Blender original.
+Export print meshes from the intended evaluated solids. Follow [FDM Design](../fdm-design/SKILL.md) for geometry constraints and [Prepare Print Job](../prepare-print-job/SKILL.md) for slicing and placement.
 
 ## Validate a finished revision
 

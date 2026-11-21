@@ -12,6 +12,7 @@ import { printLayoutIdentity } from './print-layout/state.js'
 import { createPrintLayoutPanel } from './print-layout/panel.js'
 import { createModelSelector } from './model-selector.js'
 import { createAnalogPanel } from './analog/controls.js'
+import { createMovementControls } from './movement-controls.js'
 import { parseStl } from './stl.js'
 import { createModelArtifacts } from './generation/artifacts.js'
 import { createViewport } from './viewport/index.js'
@@ -58,6 +59,7 @@ export function installViewer(ctx, React, primitives) {
   }, 'print viewer: generated artifacts')
   const h = React.createElement
   const AnalogPanel = createAnalogPanel(React)
+  const MovementControls = createMovementControls(React, primitives, AnalogPanel)
   const { PluginArtworkDefault, Button, IconCloseOutlineRegular } = primitives
   const ModelSelector = createModelSelector(React, Button)
   const PrintLayoutPanel = createPrintLayoutPanel(React, primitives)
@@ -582,13 +584,10 @@ export function installViewer(ctx, React, primitives) {
     return h(React.Fragment, null,
       view?.design && h(PrintLayoutPanel, { state: printState, available: !view.design.analog && !failed,
         busy: printBusy, working, message: printMessage, saveStatus, t, action: printAction }),
-      !printState?.active && h('div', { className: 'pv-bottom-controls' },
-      motion && h('fieldset', { className: 'pv-motion-controls', disabled: working || Boolean(view?.design?.analog), inert: working || Boolean(view?.design?.analog), 'aria-label': t('motionControls') },
-        h(AnalogPanel, { key: motion.id, spec: { ...motion, label: t('motionControls') }, t,
-          onChange: values => {
-            try { return viewport.current?.updateMotion(values) !== false }
-            catch (_error) { setBuildError('buildFailed'); return false }
-          }, onRelease: () => {} })),
+      h('div', { className: 'pv-bottom-controls', hidden: printState?.active },
+      motion && h(MovementControls, { key: motion.id, spec: { ...motion, label: t('motionControls') }, t, viewport,
+        hidden: printState?.active, disabled: failed || working || Boolean(view?.design?.analog) || view?.design?.url !== motion.id,
+        onError: () => setBuildError('buildFailed') }),
       h('div', { className: 'pv-cursor-controls', role: 'group', 'aria-label': t('cursorHighlighting') },
         ['patch', 'surface', 'part', 'edge'].map(mode => h(Button, {
           key: mode, variant: 'ghost', size: 'sm', 'aria-pressed': cursorMode === mode,

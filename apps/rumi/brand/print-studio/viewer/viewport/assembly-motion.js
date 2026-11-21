@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { mechanismMetadata } from '../mechanics.js'
 import { normalizeControls } from '../analog/control-spec.js'
 import { jointControls } from './joint-controls.js'
+import { createJointOcclusion } from './joint-occlusion.js'
 import { createSurfaceIndex } from './surfaces.js'
 
 /**
@@ -88,11 +89,25 @@ export function robotMotion(metadata, nodes, root, nodeIndices, labels, presenta
   if (meshes.some(mesh => mesh.part === undefined) || assembly.parts.some(part => !meshes.some(mesh => mesh.part === part.id))) {
     return unavailable('Movement preview could not bind every physical part to its loaded mesh.')
   }
+  const anchors = new Map([...groups.values()].map(([joint]) => [bindings.get(joint.id).key, {
+    parent: joint.parent, child: joint.child, pivot: new THREE.Vector3(...joint.pivot), kind: joint.kind,
+  }]))
+  const controlAnchors = definitions.map(control => anchors.get(control.axes[0].key))
   return {
     parameters, motionDefinitions: definitions, poseIdentity: JSON.stringify(assembly),
+    motionUnit: key => anchors.get(key)?.kind === 'revolute' ? 'degree' : 'millimeter',
+    motionAnchor: (index, target) => target.copy(controlAnchors[index].pivot),
+    motionOccluded: createJointOcclusion(meshes, controlAnchors),
     createMotionPreview(parent) {
       const preview = new THREE.Group(), visible = root.visible
       const transforms = new Map(assembly.parts.map(part => [part.id, new THREE.Matrix4()]))
+      const steps = ordered.map(connection => {
+        const binding = bindings.get(connection.id)
+        return { kind: connection.kind, parent: transforms.get(connection.parent), child: transforms.get(connection.child),
+          binding, axis: binding && new THREE.Vector3(...connection.axis),
+          pivot: binding && new THREE.Vector3(...connection.pivot) }
+      })
+      const delta = new THREE.Matrix4(), offset = new THREE.Vector3()
       const posed = new Map()
       const copies = new Map(meshes.map(mesh => {
         const node = mesh.node.clone(false)
@@ -102,6 +117,7 @@ export function robotMotion(metadata, nodes, root, nodeIndices, labels, presenta
       }))
       return {
         root: preview,
+        motionOccluded: createJointOcclusion([...copies].map(([node, mesh]) => ({ node, part: mesh.part })), controlAnchors),
         savedHit(node, worldPoint) {
           const mesh = copies.get(node)
           if (!mesh) return null
@@ -112,24 +128,28 @@ export function robotMotion(metadata, nodes, root, nodeIndices, labels, presenta
           return mesh ? { object: mesh.node, point: point.clone().applyMatrix4(mesh.inverseSaved).applyMatrix4(mesh.node.matrixWorld) } : null
         },
         overlayParts(positions) { return bindOverlay(positions, meshes, transforms) },
+        motionAnchor(index, target) {
+          const anchor = controlAnchors[index]
+          return target.copy(anchor.pivot).applyMatrix4(transforms.get(anchor.parent))
+        },
         update(values) {
-          for (const connection of ordered) {
-            const delta = new THREE.Matrix4()
-            if (connection.kind !== 'fixed') {
-              const binding = bindings.get(connection.id), value = values[binding.key] - binding.origin
-              const axis = new THREE.Vector3(...connection.axis)
-              if (connection.kind === 'prismatic') delta.makeTranslation(...axis.multiplyScalar(value).toArray())
+          for (const { kind, parent: parentTransform, child, binding, axis, pivot } of steps) {
+            if (kind === 'fixed') child.copy(parentTransform)
+            else {
+              const value = values[binding.key] - binding.origin
+              if (kind === 'prismatic') delta.makeTranslation(offset.copy(axis).multiplyScalar(value))
               else {
-                const pivot = new THREE.Vector3(...connection.pivot)
-                delta.makeTranslation(...pivot.toArray())
-                  .multiply(new THREE.Matrix4().makeRotationAxis(axis, THREE.MathUtils.degToRad(value)))
-                  .multiply(new THREE.Matrix4().makeTranslation(...pivot.negate().toArray()))
+                delta.makeRotationAxis(axis, THREE.MathUtils.degToRad(value))
+                offset.copy(pivot).applyMatrix4(delta).negate().add(pivot)
+                delta.setPosition(offset)
               }
+              child.multiplyMatrices(parentTransform, delta)
             }
-            transforms.get(connection.child).multiplyMatrices(transforms.get(connection.parent), delta)
           }
           for (const [node, mesh] of copies) node.matrix.multiplyMatrices(transforms.get(mesh.part), mesh.saved)
-          root.visible = false; parent.add(preview); preview.updateMatrixWorld(true)
+          root.visible = false
+          if (preview.parent !== parent) parent.add(preview)
+          preview.updateMatrixWorld(true)
         },
         dispose() {
           // Clones borrow geometry and materials from the saved model, whose owner disposes them.

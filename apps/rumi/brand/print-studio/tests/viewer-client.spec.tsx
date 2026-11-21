@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
-import { Menu, IconChevronDownOutlineRegular, IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Menu, IconChevronDownOutlineRegular, IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { printLayoutIdentity } from '../viewer/print-layout/state.js'
 import { installViewer } from '../viewer/client.js'
 import { en, zh } from '../viewer/locales.js'
@@ -19,6 +19,8 @@ vi.mock('../viewer/viewport/index.js', () => ({
     return {
       setActivity: viewport.setActivity, closePrintLayout: viewport.closePrintLayout,
       motionControls: viewport.motionControls, updateMotion: viewport.updateMotion,
+      observeMotionAnchors: (_id: string, draw: (points: ({ x: number, y: number } | null)[], width: number) => void) => draw([{ x: 40, y: 48 }, null], 750),
+      motionUnit: () => 'degree',
       modelParameters: viewport.modelParameters, renderedHighlight: viewport.renderedHighlight,
       captureCursor: viewport.captureCursor, setCursorMode: viewport.setCursorMode, setHighlightVisible: viewport.setHighlightVisible,
       thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose,
@@ -108,7 +110,7 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
         return () => { entries.delete(options.name) }
       },
     },
-  }, React, { Menu, IconChevronDownOutlineRegular, IconCloseOutlineRegular, PluginArtworkDefault: () => null, Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant: string; size: string }) => React.createElement('button', props) })
+  }, React, { Menu, IconChevronDownOutlineRegular, IconCloseOutlineRegular, PluginArtworkDefault: () => null, Button })
   return {
     opened, fetch,
     mount: (id: string | undefined) => { mounted = id; for (const listener of mountedListeners) listener() },
@@ -444,23 +446,50 @@ it('shows only a discreet error dot, retaining unresolved findings until a fresh
   expect(screen.queryByText(en.validationMechanicsReview)).toBeNull()
 })
 
-it('keeps movement controls in their own area across model reloads without opening an edit', async () => {
-  const controls = [{ kind: 'slider', label: 'Doors', axes: [{ key: 'doorAngle', min: 0, max: 100, step: 1, reset: 0 }] }]
-  const motion = { id: 'first', values: { doorAngle: 0 }, controls }
+it('opens a single joint control, keeps its pose across dismissal and reload, and supports joints outside the view', async () => {
+  const controls = [
+    { kind: 'slider', label: 'Doors', axes: [{ key: 'doorAngle', min: 0, max: 100, step: 1, reset: 0 }] },
+    { kind: 'slider', label: 'Wheels', axes: [{ key: 'wheelAngle', min: 0, max: 360, step: 1, reset: 0 }] },
+  ]
+  const motion = { id: '/first.js', values: { doorAngle: 0, wheelAngle: 0 }, controls }
   viewport.motionControls.mockReturnValue(motion)
   viewport.applyDesign.mockResolvedValue({ status: 'review', dimensions: { x: 20, y: 20, z: 20 }, checks: [] })
   const design = { path: 'models/car/model.js', url: '/first.js', revision: 1, transform: {} }
   const view = fixture({ scene: { ...scene([]), design } })
   render(view.view('sidebar.right.pane.tab'))
   await settle()
+  const movement = screen.getByRole('button', { name: en.motionControls })
+  expect(movement.getAttribute('aria-expanded')).toBe('true')
+  expect(screen.queryByRole('slider')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Wheels' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Doors' }))
   const slider = screen.getByRole('slider', { name: 'Doors' })
-  expect(slider.closest('.pv-motion-controls')).toBeTruthy()
-  expect(slider.closest('.pv-bottom-controls')).toBeTruthy()
+  expect(slider.closest('.pv-joint-popover')?.hasAttribute('data-anchored')).toBe(true)
+  expect(slider.closest('.pv-joint-popover')?.hasAttribute('data-left')).toBe(true)
   fireEvent.input(slider, { target: { value: '58' } })
-  expect(viewport.updateMotion).toHaveBeenCalledWith({ doorAngle: 58 })
-  viewport.motionControls.mockReturnValue({ ...motion, id: 'second', values: { doorAngle: 58 } })
+  expect([movement.textContent, slider.getAttribute('aria-label'), slider.getAttribute('aria-valuetext')]).toMatchInlineSnapshot(`
+    [
+      "Movement",
+      "Doors",
+      "58°",
+    ]
+  `)
+  expect(viewport.updateMotion).toHaveBeenCalledWith({ doorAngle: 58, wheelAngle: 0 }, { id: motion.id, deferDraw: true })
+  fireEvent.keyDown(slider, { key: 'Escape' })
+  expect(document.activeElement).toBe(movement)
+  expect(movement.getAttribute('aria-expanded')).toBe('false')
+  expect(screen.queryByRole('slider')).toBeNull()
+  fireEvent.click(movement)
+  fireEvent.change(screen.getByRole('combobox', { name: en.motionChooseJoint }), { target: { value: '1' } })
+  expect(screen.getByRole('slider', { name: 'Wheels' }).closest('.pv-joint-popover')?.hasAttribute('data-anchored')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Doors' }))
+  expect(screen.getByRole('slider', { name: 'Doors' }).getAttribute('value')).toBe('58')
+  viewport.motionControls.mockReturnValue({ ...motion, id: '/second.js', values: { doorAngle: 58, wheelAngle: 0 } })
   view.setScene({ ...scene([]), design: { ...design, url: '/second.js', revision: 2 } })
   await settle(2000)
+  expect(screen.queryByRole('slider')).toBeNull()
+  expect(screen.getByRole('button', { name: en.motionControls }).getAttribute('aria-expanded')).toBe('true')
+  fireEvent.click(screen.getByRole('button', { name: 'Doors' }))
   expect(screen.getByRole('slider', { name: 'Doors' }).getAttribute('value')).toBe('58')
   expect(view.fetch.mock.calls.some(([url]) => String(url).includes('/shape-feedback'))).toBe(false)
   view.setScene({ ...scene([]), design: { ...design, url: '/second.js', revision: 2, analog: {
@@ -468,10 +497,14 @@ it('keeps movement controls in their own area across model reloads without openi
     controls: [{ kind: 'slider', label: 'Width', axes: [{ key: 'width', min: 10, max: 40, step: 1, reset: 20 }] }],
   } } })
   await settle(2000)
-  expect(screen.getByRole('slider', { name: 'Doors' }).closest('fieldset')?.disabled).toBe(true)
-  expect(screen.getByRole('slider', { name: 'Width' }).closest('.pv-motion-controls')).toBeNull()
+  expect((screen.getByRole('button', { name: en.motionControls }) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.queryByRole('combobox', { name: en.motionChooseJoint })).toBeNull()
+  expect(screen.getByRole('slider', { name: 'Width' }).closest('.pv-movement')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: en.cursor_part }))
   expect(viewport.setCursorMode).toHaveBeenCalledWith('part')
+  view.setScene({ ...scene([]), design: { ...design, url: '/second.js', revision: 2 } })
+  await settle(2000)
+  expect(screen.getByRole('button', { name: en.motionControls }).getAttribute('aria-expanded')).toBe('true')
   viewport.motionControls.mockReturnValue(null)
   view.setScene({ ...scene([]), design: { ...design, url: '/without-movement.js', revision: 3 } })
   await settle(2000)

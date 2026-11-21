@@ -8,11 +8,11 @@
 .rumi-print-viewer .pv-model-button:focus-visible,.rumi-print-viewer .pv-print-back:has(button:focus-visible),.rumi-print-viewer .pv-print-selected:has(button:focus-visible){outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
 @media(prefers-reduced-motion:reduce){.rumi-print-viewer .pv-model-button{transition:none}}
 @media(pointer:coarse){.rumi-print-viewer .pv-model-button{min-height:44px}}
-.rumi-print-viewer .pv-content{position:relative;flex:1;min-height:0}
+.rumi-print-viewer .pv-content{position:relative;flex:1;min-height:0;container:print-viewer / inline-size}
 .rumi-print-viewer .pv-catalog-error{margin:0;padding:8px 12px;font-size:12px;color:var(--dsw-alias-state-error-primary)}
 .rumi-print-viewer .pv-stage{position:absolute;inset:0;overflow:hidden;touch-action:none}
 .rumi-print-viewer .pv-stage canvas{display:block;width:100%;height:100%}
-.rumi-region-glass {
+.rumi-region-glass,.rumi-print-viewer .pv-movement .pv-movement-trigger {
   box-sizing: border-box;
   border-radius: 999px;
   border: 1px solid var(--dsw-alias-border-l2);
@@ -56,7 +56,7 @@
 .rumi-region-glass button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
 .rumi-region-dock [role='alert'] { color: var(--dsw-alias-state-error-primary); font-size: 13px; }
 @media (prefers-reduced-transparency: reduce),(prefers-contrast: more) {
-  .rumi-region-glass { border-color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); backdrop-filter: none; }
+  .rumi-region-glass,.rumi-print-viewer .pv-movement .pv-movement-trigger { border-color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); backdrop-filter: none; }
 }
 @media (pointer: coarse) {
   .rumi-region-glass button { min-width: 44px; min-height: 44px; }
@@ -249,30 +249,116 @@
 }
 
 .rumi-print-viewer .pv-bottom-controls {
-  position: absolute; bottom: 12px; left: 12px; right: 28px; z-index: 3;
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, min(264px, calc(100% - 120px)));
-  grid-template-rows: minmax(0, 1fr);
-  align-items: end; gap: 10px; max-height: 45%;
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; flex-wrap: wrap; align-items: end; align-content: end; gap: 8px;
+  padding: 12px 28px 12px 12px;
   pointer-events: none;
 }
+.rumi-print-viewer .pv-bottom-controls[hidden] { display: none; }
 .rumi-print-viewer .pv-bottom-controls .pv-cursor-controls {
-  position: relative; inset: auto; grid-column: 1; grid-row: 1; justify-self: start;
-  max-width: 100%; pointer-events: auto;
+  position: relative; inset: auto; z-index: auto; max-width: 100%; pointer-events: auto;
 }
-.rumi-print-viewer .pv-motion-controls {
-  grid-column: 2; grid-row: 1; justify-self: end;
-  min-width: 0; width: 264px; max-width: 100%; min-height: 0; max-height: 100%;
-  margin: 0; padding: 0; border: 0; overflow-y: auto; pointer-events: auto;
+.rumi-print-viewer .pv-movement { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.rumi-print-viewer .pv-movement-trigger, .rumi-print-viewer .pv-movement-picker {
+  pointer-events: auto;
+  min-height: 34px;
+  padding-inline: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
 }
-.rumi-print-viewer .pv-motion-controls .av-controls {
-  position: static; width: 100%; max-width: 100%; max-height: none;
-  animation: none;
+.rumi-print-viewer .pv-movement-trigger {
+  border-radius: 999px;
 }
-.rumi-print-viewer .pv-motion-controls:disabled { opacity: .55; }
-.rumi-print-viewer:has(.pv-motion-controls) > .pv-content .av-controls:not(.pv-motion-controls .av-controls) { max-height: calc(50% - 68px); }
-
-.rumi-print-viewer .pv-bottom-controls:not(:has(.pv-motion-controls)) { grid-template-columns: minmax(0, 1fr); }
-
+.rumi-print-viewer .pv-movement .pv-movement-trigger:is(:hover:not(:disabled), [aria-expanded='true']) {
+  background-color: var(--dsw-alias-interactive-bg-hover);
+}
+.rumi-print-viewer .pv-movement .pv-movement-trigger:active:not(:disabled) {
+  background-color: var(--dsw-alias-interactive-bg-active);
+}
+.rumi-print-viewer .pv-movement-picker { display: flex; align-items: center; position: relative; padding: 0; }
+.rumi-print-viewer .pv-movement-picker select {
+  appearance: none; border: 0; border-radius: inherit;
+  min-height: 32px; max-width: 144px; padding: 0 30px 0 12px;
+  font: inherit; color: inherit; background: transparent; cursor: pointer;
+  text-overflow: ellipsis;
+}
+.rumi-print-viewer .pv-movement-picker option { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); }
+.rumi-print-viewer .pv-movement-picker svg { position: absolute; inset-inline-end: 10px; pointer-events: none; }
+.rumi-print-viewer .pv-joint-target {
+  position: absolute; z-index: 1; left: var(--pv-joint-x); top: var(--pv-joint-y);
+  translate: -50% -50%;
+  width: 32px; height: 32px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent;
+  cursor: pointer; pointer-events: auto;
+}
+.rumi-print-viewer .pv-joint-target::before {
+  content: ''; position: absolute; inset: 8px;
+  border: 2px solid var(--dsw-alias-label-primary-foreground); border-radius: 50%; corner-shape: round;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 28%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--dsw-alias-label-primary) 70%, transparent);
+}
+.rumi-print-viewer .pv-joint-target:hover::before,
+.rumi-print-viewer .pv-joint-target[aria-pressed='true']::before {
+  inset: 6px; background: var(--dsw-alias-button-info-fill);
+}
+.rumi-print-viewer .pv-joint-target[aria-pressed='true'] { z-index: 2; }
+.rumi-print-viewer .pv-movement :is(button, select):focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px;
+}
+.rumi-print-viewer .pv-joint-popover {
+  --pv-joint-width: min(232px, calc(100% - 24px));
+  position: absolute; z-index: 3; left: 12px; bottom: 58px;
+  width: var(--pv-joint-width); max-height: calc(100% - 112px);
+  border-radius: 24px; pointer-events: auto; overflow: auto;
+}
+.rumi-print-viewer .pv-joint-popover[data-anchored] {
+  left: clamp(12px, calc(var(--pv-joint-x) + 20px), calc(100% - var(--pv-joint-width) - 12px));
+  top: clamp(48px, calc(var(--pv-joint-y) - 16px), calc(100% - 180px));
+  bottom: auto;
+}
+.rumi-print-viewer .pv-joint-popover[data-anchored][data-left] {
+  left: clamp(12px, calc(var(--pv-joint-x) - var(--pv-joint-width) - 20px), calc(100% - var(--pv-joint-width) - 12px));
+}
+.rumi-print-viewer .pv-joint-popover[data-anchored][data-above] {
+  top: auto;
+  bottom: clamp(58px, calc(100% - var(--pv-joint-y) - 16px), calc(100% - 170px));
+}
+.rumi-print-viewer .pv-joint-popover .av-controls {
+  position: static; width: 100%; max-width: none; max-height: none;
+  padding: 0; overflow: visible; animation: none;
+}
+.rumi-print-viewer .pv-joint-popover .av-glass {
+  border: 0; box-shadow: none; background: transparent; backdrop-filter: none;
+}
+.rumi-print-viewer .pv-joint-popover .av-slider {
+  grid-template-columns: minmax(0, 1fr) auto 32px;
+  gap: 0 8px;
+  padding: 8px 12px 4px;
+  font-size: 13px;
+}
+.rumi-print-viewer .pv-joint-popover .av-slider output { font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-secondary); }
+.rumi-print-viewer .pv-joint-popover .av-slider input { grid-area: 2 / 1 / 3 / 3; }
+.rumi-print-viewer .pv-joint-popover .av-slider .av-reset { grid-area: 2 / 3; }
+.rumi-print-viewer .pv-joint-popover .av-field-header span { white-space: normal; overflow-wrap: anywhere; }
+@container print-viewer (max-width: 540px) {
+  .rumi-print-viewer .pv-joint-popover[data-anchored],
+  .rumi-print-viewer .pv-joint-popover[data-anchored][data-left] {
+    left: clamp(12px, calc(var(--pv-joint-x) - var(--pv-joint-width) / 2), calc(100% - var(--pv-joint-width) - 12px));
+    top: clamp(48px, calc(var(--pv-joint-y) + 20px), calc(100% - 180px));
+  }
+  .rumi-print-viewer .pv-joint-popover[data-anchored][data-above] {
+    top: auto;
+    bottom: clamp(58px, calc(100% - var(--pv-joint-y) + 20px), calc(100% - 170px));
+  }
+}
+@media (pointer: coarse) {
+  .rumi-print-viewer .pv-movement-trigger, .rumi-print-viewer .pv-movement-picker select,
+  .rumi-print-viewer .pv-joint-popover .av-reset { min-height: 44px; }
+  .rumi-print-viewer .pv-joint-target { width: 44px; height: 44px; }
+  .rumi-print-viewer .pv-joint-target::before { inset: 14px; }
+  .rumi-print-viewer .pv-joint-target:is(:hover, [aria-pressed='true'])::before { inset: 12px; }
+}
 
 /* Glass is confined to controls; the canvas never receives a backdrop filter. */
 .rumi-print-viewer .pv-print-flow {

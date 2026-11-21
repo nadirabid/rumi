@@ -16,6 +16,12 @@
 
 [打印机感知技能](skills/inspect-printer/SKILL.md)将实时状态工具和已安装的机器配置用于打印机相关决策，保留未知读数，并要求打印空间具有明确来源。
 
+### 技能提醒
+
+Print Studio 项目轮次即将结束时，完成检查会向 Baseten Bison 发送最新用户请求和回复草稿，各最多 4,000 个字符，以及最多 16 个已变更 USD 模型的区域表状态。配置的凭据可用时会运行检查，适用于任何主模型提供商。发送内容仅包含文本和状态值，不包括附件、模型文件、单独的路径字段或会话历史。两个判断分别检查区域命名和回复简洁性。达到配置阈值的肯定结果可以在同一轮次内引导智能体再执行一步。此时草稿可能已经显示。缺少凭据时跳过检查，超时或失败时结束当前回复。
+
+在 Print Studio 插件配置中设置 `skillReminders.enabled: false` 可关闭检查。默认值为 `credential: BASETEN_API_KEY`、`timeoutMs: 2000`、`threshold: 0.8`、`maxTextChars: 4000` 和 `maxModels: 16`。自定义凭据通过凭据服务保存。检查不依赖提供商的提示缓存。
+
 ## 打印布局
 
 活动实体部件必须分开打印后组装，并保留声明的旋转或滑动功能。智能体按照[分开打印要求](skills/printable-joints/SKILL.md#separate-printing-for-moving-parts)设计可组装的连接结构并说明组装顺序。旧的组装状态打印活动模型仍可查看，但在重新设计前不能发布、通过验证或准备打印。现有模型和脚本参见[迁移说明](upgrade-guide/separate-moving-parts/README.zh.md)。

@@ -14,7 +14,7 @@ import { homedir } from 'node:os'
 import z from '@deepseek-ai/schemastery'
 import * as skillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { createDeveloperMessage } from '@deepseek-ai/dsh-llm'
+import { createDeveloperMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import {
   MODELS, detectSlicer, discoverPrinters, mqttAuthorized, printStudioNextSteps, reachable, readPrinterConfig, text, writePrinterConfig,
@@ -25,6 +25,7 @@ import { handoffToBambuConnect, hasBambuConnect } from './connect.js'
 import { connectSpec, createAppSetup, studioSpec } from './app-setup.js'
 import { readPrinterStatus } from './monitor.js'
 import { applyBlender } from './blender/host.js'
+import { applySkillReminders } from './skill-reminders.js'
 import { applyViewer } from './viewer/host.js'
 import { applyContextRetention } from './viewer/context-retention.js'
 import * as analogWorkflow from './viewer/analog/workflow.js'
@@ -78,6 +79,14 @@ export const Config = z.object({
   printLayout: z.object({
     gap: z.number().min(0).max(50).default(5),
     volume: z.object({ x: z.number().min(1).max(2000).default(300), y: z.number().min(1).max(2000).default(320), z: z.number().min(1).max(2000).default(320) }).default({}),
+  }).default({}),
+  skillReminders: z.object({
+    enabled: z.boolean().default(true),
+    credential: z.string().min(1).default('BASETEN_API_KEY'),
+    timeoutMs: z.number().step(1).min(100).max(10000).default(2000),
+    maxTextChars: z.number().step(1).min(256).max(16000).default(4000),
+    maxModels: z.number().step(1).min(1).max(64).default(16),
+    threshold: z.number().min(0.5).max(1).default(0.8),
   }).default({}),
   viewerLoadTimeoutMs: z.number().step(1).min(1).max(25000).default(8000),
   viewerDiagnosticsDirectory: z.string().default(join(homedir(), '.rumi', 'viewer-logs')),
@@ -255,6 +264,9 @@ export function apply(ctx, config) {
   applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory, config.viewerLoadTimeoutMs, config)
   ctx.inject(['sessionProjections'], scoped => applyContextRetention(scoped, createDeveloperMessage))
   applyBlender(ctx, defineTool, config)
+  applySkillReminders(ctx, config.skillReminders,
+    async () => (await ctx.credentials.resolve(credentialRef(config.skillReminders.credential)))?.value,
+    createUserMessage)
   // A project-type plugin contributes; it does not own the creation flow.
   ctx.inject(['rumiProjectTypes'], (scoped) => {
     scoped.effect(() => scoped.rumiProjectTypes.register(PRINT_TYPE), 'print-studio: project type')

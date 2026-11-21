@@ -16,6 +16,12 @@ Printer IP and serial are stored in `$DSH_HOME/print-studio/printer.json` (owner
 
 The [inspect-printer skill](skills/inspect-printer/SKILL.md) connects live status tools and installed machine profiles to printer-specific decisions, preserving unknown readings and requiring a sourced build envelope.
 
+### Skill reminders
+
+For Print Studio project turns, the completion monitor sends Baseten Bison up to 4,000 characters each of the latest user request and closing draft, plus region-map statuses for up to 16 changed USD models. The review runs when the configured credential is available and applies regardless of the primary model provider. It sends text and status values, without attachments, model files, separate path fields, or the session history. The two decisions cover named regions and reply brevity. Positive decisions above the configured threshold can steer one more step in the same turn. The draft may already be visible. A missing credential skips review, and a timeout or failed review lets the draft finish.
+
+Set `skillReminders.enabled: false` in the Print Studio plugin config to disable the review. The defaults are `credential: BASETEN_API_KEY`, `timeoutMs: 2000`, `threshold: 0.8`, `maxTextChars: 4000`, and `maxModels: 16`. Store custom credentials through the credential service. The review does not rely on provider prompt caching.
+
 ## Print layout
 
 Moving physical parts must print separately and assemble afterward, retaining their declared rotation or sliding. The agent designs accessible connectors and explains the assembly order, following [separate printing](skills/printable-joints/SKILL.md#separate-printing-for-moving-parts). Legacy printed-assembled movement remains viewable, but publishing, validation and print preparation reject it until redesigned. See [migration](upgrade-guide/separate-moving-parts/README.md) for existing models and scripts.

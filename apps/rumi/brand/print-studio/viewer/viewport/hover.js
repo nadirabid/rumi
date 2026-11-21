@@ -12,9 +12,10 @@ const CLICK_SLOP = 4
  * @param {() => void} render - Draw after the hover uniform changes.
  * @param {Function} [onMode] Receives the selected scope when a local or voice command changes it.
  * @param {Function} [pickPreview] Picks edited geometry. Returns null for a miss or undefined to use the CPU surface index.
+ * @param {Function} [onPoint] Receives the current visible hit, ray and whether the hit is pinned.
  * @returns {object} Shared sphere uniform, invalidation, clearing and disposal controls.
  */
-export function createHover(canvas, camera, roots, render, onMode = () => {}, pickPreview) {
+export function createHover(canvas, camera, roots, render, onMode = () => {}, pickPreview, onPoint = () => {}) {
   const sphere = { value: new THREE.Vector4(0, 0, 0, 0) }
   const pointer = new THREE.Vector2()
   const local = new THREE.Vector3()
@@ -62,7 +63,7 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}, pi
     return hit
   }
 
-  function update() {
+  function update(pin = false) {
     pending = null
     if (closed || !inside || pinned) return null
     const rect = canvas.getBoundingClientRect()
@@ -81,13 +82,15 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}, pi
         target = { object: hit.object, faceIndex: hit.faceIndex, surfaceId: hit.surfaceId, point: hit.point, radius, mode: mode.value }
       }
     }
+    if (pin) pinned = target
     show(target)
+    onPoint(target, raycaster.ray, Boolean(pinned))
     render()
     return target
   }
   function invalidate() {
     if (closed || !inside || pinned) return false
-    if (pending === null) pending = requestAnimationFrame(update)
+    if (pending === null) pending = requestAnimationFrame(() => update())
     return true
   }
   function moved(event) {
@@ -114,10 +117,7 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}, pi
     clientX = event.clientX; clientY = event.clientY
     inside = true
     if (release && event.pointerType === 'touch') leave()
-    else {
-      const hit = update()
-      if (!release) pinned = hit
-    }
+    else update(!release)
   }
   function lostCapture(event) {
     if (press?.id === event.pointerId) press = null
@@ -128,6 +128,7 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}, pi
     cancelUpdate()
     if (pinned) return
     show(null)
+    onPoint(null)
     if (!closed) render()
   }
   function clear() {
@@ -175,6 +176,7 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}, pi
       press = null
       pinned = hit
       show(hit)
+      onPoint(null)
     },
     snapshot({ pinnedOnly = false } = {}) {
       if (pinned || pinnedOnly) return pinned

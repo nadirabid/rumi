@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import * as THREE from 'three'
 import { createViewport } from '../viewer/viewport/index.js'
+import { createRegionPicker } from '../viewer/viewport/region-marker.js'
 import { robotUsd } from './fixtures/robot-usd.js'
 import { generateStl } from '../viewer/generation/export.js'
 
@@ -308,8 +309,12 @@ it('coalesces hover, follows placed surfaces, clears on leave, and cancels work 
   const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100)
   camera.position.set(0, 0, 10)
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshStandardMaterial())
+  const overlay = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial())
+  overlay.geometry.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 1, 1, -1, 1, 0, 1, 1], 3))
+  const namedRegion = createRegionPicker(overlay)
+  const presented = vi.fn((hit, ray, pinned) => Boolean(namedRegion(hit, ray)) && (pinned ? 'pinned' : 'hovered'))
   const render = vi.fn()
-  const hover = createHover(canvas, camera, () => [mesh], render)
+  const hover = createHover(canvas, camera, () => [mesh], render, undefined, undefined, presented)
   const flush = () => { const queued = [...frames.values()]; frames.clear(); queued.forEach(callback => callback()) }
   try {
     listeners.get('pointermove')!({ clientX: 0, clientY: 0, pointerType: 'mouse' })
@@ -319,6 +324,20 @@ it('coalesces hover, follows placed surfaces, clears on leave, and cancels work 
     expect(render).toHaveBeenCalledOnce()
     expect(hover.sphere.value.z).toBeCloseTo(1)
     expect(hover.sphere.value.w).toBeGreaterThan(0)
+    expect(presented.mock.results.at(-1)?.value).toBe('hovered')
+    const click = (clientX: number) => {
+      const pointer = { clientX, clientY: 200, pointerType: 'mouse', button: 0, isPrimary: true, pointerId: 1 }
+      listeners.get('pointerdown')!(pointer)
+      listeners.get('pointerup')!(pointer)
+    }
+    click(200)
+    listeners.get('pointerleave')!()
+    expect(presented.mock.results.at(-1)?.value).toBe('pinned')
+    click(250)
+    expect(hover.sphere.value.w).toBeGreaterThan(0)
+    expect(presented.mock.results.at(-1)?.value).toBe(false)
+    listeners.get('pointermove')!({ clientX: 200, clientY: 200, pointerType: 'mouse' })
+    flush()
     const anchor = hover.snapshot()
     listeners.get('pointermove')!({ clientX: 390, clientY: 200, pointerType: 'mouse' })
     expect(hover.refine('surface', anchor).point.toArray()).toEqual(anchor.point.toArray())
@@ -331,6 +350,7 @@ it('coalesces hover, follows placed surfaces, clears on leave, and cancels work 
     hover.invalidate()
     flush()
     expect(hover.sphere.value.z).toBeCloseTo(3)
+    expect(presented.mock.results.at(-1)?.value).toBe(false)
     mesh.visible = false
     hover.invalidate()
     flush()
@@ -353,6 +373,8 @@ it('coalesces hover, follows placed surfaces, clears on leave, and cancels work 
     hover.dispose()
     mesh.geometry.dispose()
     mesh.material.dispose()
+    overlay.geometry.dispose()
+    overlay.material.dispose()
   }
 })
 
@@ -537,7 +559,7 @@ it('captures saved hit coordinates and keeps both fixed and posed parts highligh
     await viewport.applyDesign(spec, null)
     await viewport.applyShape(null)
     state.resize()
-    const saved = new Map(['Door', 'Body'].map(name => {
+    const saved = new Map(['Door', 'Body'].map((name) => {
       const mesh = rendered().getObjectByName(name)
       mesh.updateWorldMatrix(true, false)
       let model = mesh.parent
@@ -595,7 +617,8 @@ it('captures saved hit coordinates and keeps both fixed and posed parts highligh
     const movedPin = viewport.captureCursor()
     expect(movedPin.region.partPath).toEqual(pin.region.partPath)
     expect(movedPin.region.worldPoint).not.toEqual(pin.region.worldPoint)
-    expect(new THREE.Vector3(...movedPin.region.modelLocalPoint).distanceTo(new THREE.Vector3(...pin.region.modelLocalPoint))).toBeLessThan(1e-6)
+    const movedPoint = new THREE.Vector3(...movedPin.region.modelLocalPoint)
+    expect(movedPoint.distanceTo(new THREE.Vector3(...pin.region.modelLocalPoint))).toBeLessThan(1e-6)
   } finally { await viewport.dispose() }
 })
 

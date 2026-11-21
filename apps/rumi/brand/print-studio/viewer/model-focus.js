@@ -1,13 +1,13 @@
 /** Request-time model references and agent-declared work, independent of viewer selection. */
-export const MODEL_FOCUS_GUIDANCE = 'Resolve model references before editing. Explicit model names and captured pointing references take precedence over the selected model. For an otherwise unqualified request, use the selection captured when that request entered the inbox, not a later selection. Voice references include the selection at speech capture; prefer that over inbox-time selection. Continued work stays on its established model. If a new selection conflicts with ongoing work and intent is ambiguous, ask which model the person means. Browsing alone never retargets work. Call viewer_working_model with the discovered model entry before inspecting or editing that model; change it when your work changes targets. Clear it before asking a clarification or when no model is being worked on. The green dot reports your declared work, not a lock, proof of an edit, or the user selection. If the model does not exist yet, create its entry first. Use viewer_load only when you intend to change what the person sees.'
+export const MODEL_FOCUS_GUIDANCE = 'Resolve model references before editing. Explicit model names and captured pointing references take precedence over the selected model. For a request referring to an attached named region, use that message’s regionAtAdmission. It contains the model path, revision, viewer URL and either a regionId in design.regionMap or temporary overlay meshPath. Verify that revision before editing. For an otherwise unqualified request, use the selection captured when that request entered the inbox, not a later selection. Voice references include the selection at speech capture; prefer that over inbox-time selection. Continued work stays on its established model. If a new selection conflicts with ongoing work and intent is ambiguous, ask which model the person means. Browsing alone never retargets work. Call viewer_working_model with the discovered model entry before inspecting or editing that model; change it when your work changes targets. Clear it before asking a clarification or when no model is being worked on. The green dot reports your declared work, not a lock, proof of an edit, or the user selection. If the model does not exist yet, create its entry first. Use viewer_load only when you intend to change what the person sees.'
 
 /**
  * Bind transient focus to each agent and capture selection when human input enters its inbox.
  * @param {object} ctx Host plugin context.
- * @param {{read: Function, notify: Function}} options Viewer lookup and invalidation.
+ * @param {{read: Function, notify: Function, readRegion?: Function}} options Viewer lookup, invalidation and attached region lookup.
  * @returns {object} Work declaration and session-level work paths.
  */
-export function createModelFocus(ctx, { read, notify }) {
+export function createModelFocus(ctx, { read, notify, readRegion = () => null }) {
   const agents = new Map(), running = new Set()
   function state(agent) {
     let value = agents.get(agent)
@@ -27,13 +27,15 @@ export function createModelFocus(ctx, { read, notify }) {
     if (changed) notify(agent.session.id)
   }
   ctx.on('agent/inbox/inserted', ({ agent, message }) => {
-    if (message.source.kind === 'user') state(agent).pending.set(message.id, selection(agent.session.id))
+    if (message.source.kind !== 'user') return
+    const sessionId = agent.session.id, region = readRegion(sessionId)
+    state(agent).pending.set(message.id, { selectionAtAdmission: selection(sessionId), ...(region ? { regionAtAdmission: region } : {}) })
   })
   ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
     if (message.source.kind !== 'user') return
     const value = state(agent)
     if (value.turn !== turn) { value.requests = []; value.turn = turn }
-    value.requests.push({ messageId: message.id, selectionAtAdmission: value.pending.get(message.id) ?? null })
+    value.requests.push({ messageId: message.id, ...(value.pending.get(message.id) ?? { selectionAtAdmission: null }) })
     value.pending.delete(message.id)
   })
   ctx.on('agent/inbox/discarded', ({ agent, message }) => { agents.get(agent)?.pending.delete(message.id) })

@@ -20,6 +20,8 @@ import * as THREE from 'three'
 import { createActivity } from './activity.js'
 import { createHover } from './hover.js'
 import { createHighlight } from './highlight.js'
+import { createRegionPicker, regionAnchor } from './region-marker.js'
+import { modelRegionAt, modelRegionReference } from '../model-regions.js'
 import { createEditPicker } from './edit-picking.js'
 import { disposeModel } from './model.js'
 import { placeMesh } from '../transform.js'
@@ -47,12 +49,13 @@ function token(element, name, fallback) {
  * @param {Function} [onCursorMode] Receives cursor selection scope changes.
  * @param {object} [sharedArtifacts] Client-owned saved GLBs shared with validation.
  * @param {Function} [onPrintLayout] Receives local print placement and issue changes; omitted when no layout UI is mounted.
+ * @param {Function} [onRegionMarker] Receives the projected named highlight, or null when it is unavailable.
  * @returns {object} The owned viewport. `apply(view)` reconciles STL objects;
  * `applyDesign(spec, volume)` loads a source revision and resolves to measured
  * geometry. Stale loads resolve to null; build failures reject and retain the
  * previous design. `dispose()` releases the viewport and invalidates imports.
  */
-export function createViewport(element, onFailure, onCursorMode = () => {}, sharedArtifacts, onPrintLayout = () => {}) {
+export function createViewport(element, onFailure, onCursorMode = () => {}, sharedArtifacts, onPrintLayout = () => {}, onRegionMarker = () => {}) {
   const artifacts = sharedArtifacts ?? createModelArtifacts(), tasks = new Set()
   function track(work) {
     tasks.add(work)
@@ -135,7 +138,36 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   })
   let renderer, controls, observer, volumeNodes = [], volumeKey = 'none', framed = false, closed = false
   const lost = (event) => { event.preventDefault(); activity.dispose(); onFailure() }
-  const render = () => { if (!closed) renderer.render(scene, camera) }
+  let marker = null, mappedHit = null, regionFocused = false, regionPresented = false
+  const projected = new THREE.Vector3()
+  const pinRay = new THREE.Ray(), pinDirection = new THREE.Vector3()
+  function hoveredRegion(hit, pinned) {
+    if (!hit || !designSpec?.regionMap || designUrl !== designSpec.url || shapeDeformer || printPreview) return null
+    const saved = motionPreview?.savedHit(hit.object, hit.point)
+    let parent = saved?.node ?? hit.object
+    while (parent && parent !== designRoot) parent = parent.parent
+    if (!parent) return null
+    const point = saved?.point ?? designRoot.worldToLocal(hit.point.clone())
+    const region = modelRegionAt(designSpec.regionMap, point.toArray())
+    return { id: modelRegionReference(designSpec, region.id), name: region.name, mesh: hit.object,
+      point: hit.object.worldToLocal(hit.point.clone()), interactive: Boolean(pinned) }
+  }
+  const render = () => {
+    if (closed) return
+    renderer.render(scene, camera)
+    const highlight = marker && surfaceOverlay.visible ? marker.hit ?? (regionFocused ? marker.anchor : null) : null
+    const anchor = highlight ? { ...highlight, id: marker.id, name: marker.name, interactive: marker.pinned || regionFocused }
+      : !printPreview && !shapeDeformer ? mappedHit : null
+    if (!anchor) {
+      if (regionPresented) onRegionMarker(null)
+      regionPresented = false
+      return
+    }
+    projected.copy(anchor.point).applyMatrix4(anchor.mesh.matrixWorld).project(camera)
+    const visible = Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1 && Math.abs(projected.z) <= 1
+    regionPresented = visible
+    onRegionMarker(visible ? { id: anchor.id, name: anchor.name, x: (projected.x + 1) * 50, y: (1 - projected.y) * 50, interactive: anchor.interactive } : null)
+  }
 
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -165,7 +197,13 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   const editPicker = createEditPicker(renderer, scene, camera)
   const hover = createHover(renderer.domElement, camera,
     () => printPreview ? [] : [...objects.values()].map(entry => entry.mesh).concat(design ? [designRoot] : []), render, onCursorMode,
-    (pointer, ray) => shapeDeformer ? editPicker.pick(pointer, ray, surfaceOverlay ? [...volumeNodes, surfaceOverlay] : volumeNodes) : undefined)
+    (pointer, ray) => shapeDeformer ? editPicker.pick(pointer, ray, surfaceOverlay ? [...volumeNodes, surfaceOverlay] : volumeNodes) : undefined,
+    (hit, ray, pinned) => {
+      mappedHit = hoveredRegion(hit, pinned)
+      if (!marker) return
+      marker.hit = marker.pick(hit, ray)
+      marker.pinned = Boolean(marker.hit && pinned)
+    })
   const cameraChanged = () => { if (!hover.invalidate()) render() }
 
   function clearVolume() {
@@ -230,6 +268,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   let surfaceOverlay = null, surfaceMaterial = null
   function clearSurfaceOverlay() {
     if (!surfaceOverlay) return
+    if (marker) { marker = null; onRegionMarker(null) }
     surfaceOverlay.removeFromParent()
     surfaceOverlay.traverse(node => { if (node.isMesh) node.geometry.dispose() })
     surfaceMaterial.dispose()
@@ -275,6 +314,19 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       surfaceOverlay.matrixAutoUpdate = false
       surfaceOverlay.matrix = designRoot.matrix
       scene.add(surfaceOverlay)
+      if (highlight.regionName) {
+        let mesh = surfaceOverlay.isMesh ? surfaceOverlay : null
+        for (const child of surfaceOverlay.children) {
+          if (!mesh || child.geometry.getAttribute('position').count > mesh.geometry.getAttribute('position').count) mesh = child
+        }
+        if (mesh) {
+          const pick = createRegionPicker(surfaceOverlay)
+          const pin = hover.snapshot({ pinnedOnly: true })
+          const hit = pin ? pick(pin, pinRay.set(camera.position, pinDirection.copy(pin.point).sub(camera.position).normalize())) : null
+          marker = { id: highlight.id, name: highlight.regionName, pick, anchor: { mesh, point: regionAnchor(mesh) }, hit, pinned: Boolean(hit) }
+          hover.invalidate()
+        }
+      }
     }
     if (highlightOverlay) highlightOverlay.update(highlight?.blobs ? highlight : { blobs: [] })
     else highlightOverlay = createHighlight(motionPreview?.root ?? design.root, highlight?.blobs ? highlight : { blobs: [] }, hover, activity.uniform, editPicker.active)
@@ -541,6 +593,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     },
     /** Change the cursor scope at the pinned point or the next pointer hit. */
     setCursorMode(command) { hover.refine(command) },
+    /** Reveal a named region for keyboard focus and retain its existing mouse or touch state. */
+    setRegionFocused(focused) { regionFocused = focused; render() },
     /** Set local presentation visibility without confirming the proposed region. */
     setHighlightVisible(visible) {
       highlightVisible = visible
@@ -591,12 +645,18 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     },
     async applyDesign(spec, volume) {
       if (closed) return null
+      const mapChanged = designSpec?.regionMap?.key !== spec?.regionMap?.key
       if (designSpec?.url !== spec?.url || JSON.stringify(designSpec?.transform) !== JSON.stringify(spec?.transform)) {
         hover.clear(); cursorAnchors.clear()
       }
       if (printLayout && (!spec || spec.url !== designUrl || printLayout.identity !== printLayoutIdentity(spec, volume ?? printLayout.volume))) clearPrint(true)
       designSpec = spec
       designVolume = volume
+      if (mapChanged) {
+        const pin = hover.snapshot({ pinnedOnly: true })
+        mappedHit = hoveredRegion(pin, true)
+        hover.invalidate()
+      }
       if (!spec) {
         generation++
         clearShape(); clearMotion(); clearHighlight()

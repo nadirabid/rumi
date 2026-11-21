@@ -7,6 +7,7 @@ import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createSource } from '../viewer/source.js'
+import { modelRegionAt } from '../viewer/model-regions.js'
 
 const cleanup: (() => Promise<void>)[] = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
@@ -164,6 +165,33 @@ it('reuses unchanged USD bytes but rereads them for explicit validation', async 
     expect(source.state().revision).toBe(before.revision + 1)
     expect(read).toHaveBeenCalledTimes(2)
   } finally { read.mockRestore(); syncBuiltinESMExports() }
+})
+
+it('loads hover names separately from USD and clears them for a different revision', async () => {
+  const f = await fixture(), path = join(f.directory, 'model.usda'), metadata = join(f.directory, 'model.regions.json')
+  await writeFile(path, '#usda 1.0\n# revision 0\n')
+  const source = await createSource(f.ctx, path, f.root)
+  cleanup.push(() => source.dispose())
+  const initial = source.state()
+  expect(initial.regionStatus).toBe('missing')
+  const region = { id: 'tip', name: 'Tail tip', boxes: [[-1, -1, 8, 1, 1, 10]] }
+  const tail = { id: 'tail', name: 'Tail', boxes: [[-2, -2, 4, 2, 2, 11]] }
+  const map = { sourceHash: initial.contentHash, regions: [region, tail], remainder: 'Body' }
+  await writeFile(metadata, JSON.stringify(map))
+  await source.poll()
+  const named = source.state()
+  expect(named).toMatchObject({ url: initial.url, revision: initial.revision, regionStatus: 'ready' })
+  expect(modelRegionAt(named.regionMap, [0, 0, 9]).name).toBe('Tail tip')
+  expect(modelRegionAt(named.regionMap, [0, 0, 6]).name).toBe('Tail')
+  expect(modelRegionAt(named.regionMap, [0, 0, 2]).name).toBe('Body')
+  await writeFile(metadata, JSON.stringify({ ...map, regions: [region, region] }))
+  await source.poll()
+  expect(source.state()).toMatchObject({ regionStatus: 'invalid', regionMap: null, error: null })
+  await writeFile(metadata, JSON.stringify(map))
+  await writeFile(path, '#usda 1.0\n# revision 1\n')
+  await source.poll()
+  await source.poll()
+  expect(source.state()).toMatchObject({ revision: initial.revision + 1, regionStatus: 'outdated', regionMap: null })
 })
 
 it('reports invalid or escaped USD changes instead of serving a cached success', async () => {

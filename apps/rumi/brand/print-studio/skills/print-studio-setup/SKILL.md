@@ -1,11 +1,11 @@
 ---
 name: print-studio-setup
-description: "Set up and diagnose Print Studio: Bambu Studio, H2D LAN mode, access code, and print readiness."
+description: "Set up or repair Bambu Studio, printer discovery, and local printer access."
 ---
 
 # Print Studio setup
 
-Use this skill whenever a person asks to set up, fix, or check the 3D printer, or when
+Use this skill whenever a person asks to set up or repair the 3D printer, or when
 `print_studio_status` reports something missing. Call `print_studio_status` first and
 work from its `nextSteps`; do not guess.
 
@@ -46,33 +46,8 @@ The H2D profiles ship inside Bambu Studio. If the probe finds none, the installe
 Bambu Studio is too old for the H2D: ask the adult to update it, then re-run
 `print_studio_status`.
 
-## Before any print
-
-- Use `printer-awareness` to resolve the selected machine profile, nozzle mode and loaded filament. Do not infer these from installed presets.
-- Call the current `meshState` context before saying what the preview shows. Load editable USD or JavaScript models with `viewer_load`, or STL with `mesh_open`; pass only a verified build envelope. The viewer's rectangular box does not include every nozzle or exclusion constraint.
-- Use `viewer_transform` for editable-model placement or `mesh_transform` for STL scene placement. Opening the same STL again adds a second copy.
-- Follow `fdm-design` for geometry, bed attachment, supports and slicer validation. Preview checks do not establish print readiness.
-- Ask the adult which loaded AMS filament to use.
-- Never send a print without the adult confirming the prepared job.
-
 ## Reporting
 
 Speak in plain language and name the one next step. Do not dump raw JSON at the person;
 translate the status into "Bambu Studio is installed, the printer is not connected yet",
-and so on.
-
-## Worked examples
-
-**First run, nothing installed.** The person says "I want to print something." Call `print_studio_status`, read `nextSteps`, and report only the first step: "Bambu Studio isn't installed yet — press Set up Bambu Studio in Plugins → Print Studio, and I'll check again." Do not list every later step.
-
-**Installed but no printer.** "Is the printer ready?" The probe finds Bambu Studio but no configured printer. Say: "Bambu Studio is installed. I can see the printer on your network but it isn't connected yet — sign in with Bambu once and I'll take it from there." Never ask for the access code or password in chat.
-
-**Access code rejected.** The sign-in completed but local access fails. Say the code was rejected and offer the printer-side step: enable LAN Only Mode, and Developer Mode if the firmware shows that switch. Do not retry the same probe unchanged and do not fall back to cloud printing.
-
-**Profiles too old.** The probe finds no H2D profiles. Say the installed Bambu Studio predates the H2D and ask the adult to update it, then re-check. Do not attempt to install or patch a slicer.
-
-**A print request, not a setup request.** "Print this." Setup is already complete, so this is a job, not a repair. Follow the Before any print checks, and use [fdm-design](../fdm-design/SKILL.md) for the geometry side. Do not re-run installation steps.
-
-## Checking a print job before it is sent
-
-After the setup checks pass, the order that prevents mistakes is: confirm the printer is reachable, confirm the selected machine profile matches the physical machine, confirm the filament that will actually be used, then confirm the model dimensions fit the usable region. Only then prepare the job and ask for confirmation. A job prepared against an assumed printer or an assumed spool is the failure this sequence exists to stop.
+and so on. For an existing connection, use [Inspect Printer](../inspect-printer/SKILL.md) for status or [Prepare Print Job](../prepare-print-job/SKILL.md) to check and send a model.

@@ -3,11 +3,11 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write apps/rumi/brand/print-studio/README.md
 /print-studio:
-  en: 85674279108443f7
-  zh: a4c20df31ccaebc7
+  en: ab24b5e55c91aa37
+  zh: d1831863c9afbc13
 /print-studio/print-layout:
-  en: 112b6d35b73bbd17
-  zh: 834192c9af712479
+  en: 4fc4553a4550386f
+  zh: c9116249d10a0487
 /print-studio/test-print:
   en: 9a60197d35201e39
   zh: 93cbf14689151364
@@ -24,8 +24,8 @@
   en: d5d901e4edea32f2
   zh: 3a95521f4153b966
 /print-studio/blender-editing-and-usd-previews:
-  en: 40b6dab9fec5f320
-  zh: 3e429f8da8ea0a80
+  en: 51dc6b921bef9325
+  zh: f9f875e12efcd40e
 /print-studio/explicit-validation-tools:
   en: cf1407935c74425c
   zh: 545e024dcdd82053
@@ -39,8 +39,8 @@
   en: 780adad83c44d0ae
   zh: 4ac1e0afd3c4b54e
 /print-studio/editable-three-js-models/visual-clarification:
-  en: ddb2ea47b689a1cf
-  zh: 2805b1caa53ce696
+  en: b4c4fe4dca555e98
+  zh: b01b7be23558e383
 /print-studio/editable-three-js-models/highlight-diagnostics:
   en: 50e9aa998a3a99a3
   zh: 66fdc5d522c45ca4
@@ -48,8 +48,8 @@
   en: 00c090a72eee3a31
   zh: b19739f5d93bf218
 /print-studio/analog-mesh-editing:
-  en: b20337c8fe4845ce
-  zh: c6a9486213df26e4
+  en: 42dbce40f6a4b3f5
+  zh: 19941e7ae342b795
 /print-studio/live-model-context:
   en: 391d18501eed9de1
   zh: 8730661248666fa4

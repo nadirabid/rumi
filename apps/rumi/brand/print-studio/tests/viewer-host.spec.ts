@@ -50,22 +50,24 @@ afterEach(async () => {
 it('documents creating multiple models and bringing a named entry into view', async () => {
   const f = fixture()
   expect({
-    printer: await readFile(new URL('../skills/printer-awareness/SKILL.md', import.meta.url), 'utf8'),
+    printer: await readFile(new URL('../skills/inspect-printer/SKILL.md', import.meta.url), 'utf8'),
+    printJob: await readFile(new URL('../skills/prepare-print-job/SKILL.md', import.meta.url), 'utf8'),
     setup: await readFile(new URL('../skills/print-studio-setup/SKILL.md', import.meta.url), 'utf8'),
     fdm: await readFile(new URL('../skills/fdm-design/SKILL.md', import.meta.url), 'utf8'),
-    joints: await readFile(new URL('../skills/joints/SKILL.md', import.meta.url), 'utf8'),
+    joints: await readFile(new URL('../skills/printable-joints/SKILL.md', import.meta.url), 'utf8'),
     blender: await readFile(new URL('../skills/blender-modeling/SKILL.md', import.meta.url), 'utf8'),
     instructions: await readFile(new URL('../AGENTS_TEMPLATE.md', import.meta.url), 'utf8'),
     load: f.raw('viewer_load').description,
     cursor: f.raw('viewer_cursor_snapshot').description,
     highlight: f.raw('viewer_highlight').description,
     clarification: await readFile(new URL('../skills/clarify-mesh-changes/SKILL.md', import.meta.url), 'utf8'),
+    regionNaming: await readFile(new URL('../skills/name-model-regions/SKILL.md', import.meta.url), 'utf8'),
     stateToolAvailable: Boolean(f.raw('mesh_state')),
     working: f.raw('viewer_working_model').description,
     analog: f.raw('viewer_controls').description,
     meshEdits: await readFile(new URL('../skills/mesh-edit-controls/SKILL.md', import.meta.url), 'utf8'),
-    interactive: await readFile(new URL('../skills/interactive-controls/SKILL.md', import.meta.url), 'utf8'),
-    shaping: await readFile(new URL('../skills/analog-shaping/SKILL.md', import.meta.url), 'utf8'),
+    interactive: await readFile(new URL('../skills/control-widgets/SKILL.md', import.meta.url), 'utf8'),
+    shaping: await readFile(new URL('../skills/built-in-mesh-operations/SKILL.md', import.meta.url), 'utf8'),
   }).toMatchSnapshot()
 })
 

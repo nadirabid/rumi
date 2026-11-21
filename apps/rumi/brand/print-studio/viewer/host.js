@@ -242,7 +242,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   ctx.inject(['systemPrompt'], scoped => {
     scoped.effect(() => scoped.systemPrompt.section({
       name: 'rumi:naming-model-regions', order: scoped.systemPrompt.getSectionOrder('TOOL_WORKFLOW'),
-      text: 'Keep a complete hover-name map beside each USD model you create or revise. If the current editable model is your work target and meshState.design.regionStatus is missing, outdated, or invalid, inspect its distinct features and write its map in the same modeling turn. See clarify-mesh-changes. Use short, familiar names in the person’s language, and use a precise feature name when it helps the person describe a future edit.',
+      text: 'Keep a complete hover-name map beside each USD model you create or revise. If the current editable model is your work target and meshState.design.regionStatus is missing, outdated, or invalid, inspect its distinct features and write its map in the same modeling turn. See name-model-regions. Use short, familiar names in the person’s language, and use a precise feature name when it helps the person describe a future edit.',
     }), 'print viewer: name model features')
     scoped.effect(() => scoped.systemPrompt.context({
       name: 'rumi:mesh-state', order: scoped.systemPrompt.getContextOrder('WEB_SURFACE'), interpolate: false, required: true,

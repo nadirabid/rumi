@@ -531,6 +531,54 @@ it('shows USD movement, retains its pose across reloads and restores saved geome
   } finally { viewport.dispose() }
 })
 
+it('draws the latest slider pose once per frame and hides the joint when viewed through the assembly', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(robotUsd())))
+  const requestFrame = vi.fn()
+  vi.stubGlobal('requestAnimationFrame', requestFrame.mockReturnValue(17))
+  vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  const spec = { path: 'models/car/model.usda', format: 'usd', url: 'https://example.test/model.usda', transform: {} }
+  try {
+    await viewport.applyDesign(spec, null)
+    const renderer = state.renderer
+    const camera = renderer.render.mock.lastCall[1]
+    const pivot = rendered().getObjectByName('Body').localToWorld(new THREE.Vector3(.015, 0, 0))
+    camera.position.copy(pivot).add(new THREE.Vector3(0, 0, 100))
+    camera.lookAt(pivot)
+    camera.updateMatrixWorld(true)
+    const draw = vi.fn()
+    const unsubscribe = viewport.observeMotionAnchors(spec.url, draw)
+    const [anchor] = draw.mock.lastCall[0]
+    expect(anchor.x).toBeCloseTo(50, 1)
+    expect(anchor.y).toBeCloseTo(50, 1)
+    const draws = renderer.render.mock.calls.length
+    const settings = { id: spec.url, deferDraw: true }
+    requestFrame.mockClear()
+    expect(viewport.updateMotion({ joint0: 30 }, settings)).toBe(true)
+    expect(viewport.updateMotion({ joint0: 60 }, settings)).toBe(true)
+    expect(viewport.updateMotion({ joint0: 90 }, { ...settings, id: '/replaced.usda' })).toBe(false)
+    expect(requestFrame).toHaveBeenCalledTimes(1)
+    expect(renderer.render).toHaveBeenCalledTimes(draws)
+    requestFrame.mock.lastCall[0]()
+    expect(renderer.render).toHaveBeenCalledTimes(draws + 1)
+    expect(viewport.motionControls().values).toEqual({ joint0: 60 })
+    expect(draw.mock.lastCall[0]).toEqual([anchor])
+    camera.position.copy(pivot).add(new THREE.Vector3(-100, 0, 0))
+    camera.lookAt(pivot)
+    camera.updateMatrixWorld(true)
+    viewport.setRegionFocused(false)
+    expect(draw.mock.lastCall[0]).toEqual([null])
+    camera.position.copy(pivot).add(new THREE.Vector3(0, 0, 100))
+    camera.lookAt(pivot)
+    camera.updateMatrixWorld(true)
+    viewport.setRegionFocused(false)
+    expect(draw.mock.lastCall[0]).toEqual([anchor])
+    unsubscribe()
+    viewport.updateMotion({ joint0: 0 })
+    expect(draw).toHaveBeenCalledTimes(4)
+  } finally { await viewport.dispose() }
+})
+
 it('captures saved hit coordinates and keeps both fixed and posed parts highlighted', async () => {
   const viewport = createViewport(container(), vi.fn())
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))

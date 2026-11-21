@@ -71,6 +71,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   scene.add(designRoot)
   let shapeDeformer = null, shapeId = null, shapeOperation = null, shapeFrame = null, shapeValues = null, inputTime = 0
   let motion = null, motionPreview = null
+  let motionOverlay = null, motionFrame = null
   let printPreview = null, printableParts = null, printLayout = null, printPlate = 0, printSelected = null, printDrag = null
   const printUndo = []
   let printFrame = null
@@ -139,6 +140,31 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   const lost = (event) => { event.preventDefault(); activity.dispose(); onFailure() }
   let marker = null, mappedHit = null, regionFocused = false, regionPresented = false
   const projected = new THREE.Vector3()
+  const motionViewportSize = new THREE.Vector2()
+  const jointPoint = new THREE.Vector3()
+  const motionProjection = { owner: null, values: null, points: [], camera: new THREE.Matrix4(),
+    projection: new THREE.Matrix4(), placement: new THREE.Matrix4() }
+  function drawMotionOverlay() {
+    if (!motionOverlay || motionOverlay.id !== designUrl || !motion || !design || shapeDeformer || printPreview) return
+    const owner = motionPreview ?? design
+    if (motionProjection.owner !== owner || motionProjection.values !== motion.values ||
+        !motionProjection.camera.equals(camera.matrixWorldInverse) || !motionProjection.projection.equals(camera.projectionMatrix) ||
+        !motionProjection.placement.equals(designRoot.matrixWorld)) {
+      motionProjection.owner = owner
+      motionProjection.values = motion.values
+      motionProjection.camera.copy(camera.matrixWorldInverse)
+      motionProjection.projection.copy(camera.projectionMatrix)
+      motionProjection.placement.copy(designRoot.matrixWorld)
+      motionProjection.points = motion.controls.map((_, index) => {
+        owner.motionAnchor(index, jointPoint).applyMatrix4(designRoot.matrixWorld)
+        projected.copy(jointPoint).project(camera)
+        if (Math.abs(projected.x) > 1 || Math.abs(projected.y) > 1 || Math.abs(projected.z) > 1 ||
+            owner.motionOccluded(index, camera.position, jointPoint)) return null
+        return { x: (projected.x + 1) * 50, y: (1 - projected.y) * 50 }
+      })
+    }
+    motionOverlay.draw(motionProjection.points, renderer.getSize(motionViewportSize).x)
+  }
   const pinRay = new THREE.Ray(), pinDirection = new THREE.Vector3()
   function hoveredRegion(hit, pinned) {
     if (!hit || !designSpec?.regionMap || designUrl !== designSpec.url || shapeDeformer || printPreview) return null
@@ -153,7 +179,9 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   }
   const render = () => {
     if (closed) return
+    if (motionFrame !== null) { cancelAnimationFrame(motionFrame); motionFrame = null }
     renderer.render(scene, camera)
+    drawMotionOverlay()
     const highlight = marker && surfaceOverlay.visible ? marker.hit ?? (regionFocused ? marker.anchor : null) : null
     const anchor = highlight ? { ...highlight, id: marker.id, name: marker.name, interactive: marker.pinned || regionFocused }
       : !printPreview && !shapeDeformer ? mappedHit : null
@@ -466,9 +494,21 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     modelParameters() { return { ...design?.parameters } },
     /** Movement is a local pose; it never changes saved parameters or validation inputs. */
     motionControls() { return motion ? { ...motion, id: designUrl } : null },
-    updateMotion(values) {
-      if (activity.mode !== 'idle') return false
-      if (!motion || shapeDeformer) return false
+    /** Publish each handle's viewport percentages and the viewport width in CSS pixels. Returns the subscription disposer. */
+    observeMotionAnchors(id, draw) {
+      const subscription = { id, draw }
+      motionOverlay = subscription
+      drawMotionOverlay()
+      return () => {
+        if (motionOverlay !== subscription) return
+        motionOverlay = null
+        motionProjection.owner = null
+      }
+    },
+    /** Return the physical display unit for an active movement axis. */
+    motionUnit(key) { return design?.motionUnit?.(key) },
+    updateMotion(values, { id = designUrl, deferDraw = false } = {}) {
+      if (activity.mode !== 'idle' || id !== designUrl || !motion || shapeDeformer || printPreview) return false
       const next = controlValues(motion, values), previous = motion.values
       const pin = hover.snapshot({ pinnedOnly: true })
       const saved = pin && (motionPreview?.savedHit(pin.object, pin.point)
@@ -481,7 +521,9 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         ? motionPreview.posedHit(saved.node, saved.point)
         : { object: saved.node, point: designRoot.localToWorld(saved.point) })
       hover.replacePin(relocated ? { ...pin, ...relocated } : null)
-      syncHighlight(); render()
+      syncHighlight()
+      if (!deferDraw) render()
+      else if (motionFrame === null) motionFrame = requestAnimationFrame(() => { motionFrame = null; render() })
       return true
     },
     async applyShape(spec) {
@@ -759,6 +801,9 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     dispose() {
       if (closed) return Promise.allSettled([...tasks])
       closed = true
+      if (motionFrame !== null) cancelAnimationFrame(motionFrame)
+      motionOverlay = null
+      motionProjection.owner = null
       activity.dispose()
       clearPrint(true, false); clearShape(); clearMotion(); poses.clear()
       generation++

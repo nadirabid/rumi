@@ -7,7 +7,7 @@ export function createAnalogPanel(React) {
   const clamp = value => Math.max(0, Math.min(1, value))
   const fraction = (axis, value) => (value - axis.min) / (axis.max - axis.min)
   const fromFraction = (axis, value) => Math.max(axis.min, Math.min(axis.max, axis.min + Math.round(clamp(value) * (axis.max - axis.min) / axis.step) * axis.step))
-  return function AnalogPanel({ spec, t, onChange, onRelease }) {
+  return function AnalogPanel({ spec, t, onChange, onRelease, controlIndex, formatValue }) {
     const [values, setValues] = React.useState(spec.values)
     const current = React.useRef(spec.values), dragging = React.useRef(false)
     const committed = React.useRef(spec.values), sequence = React.useRef(0), pending = React.useRef(Promise.resolve())
@@ -74,10 +74,11 @@ export function createAnalogPanel(React) {
     }
     function render(control) {
       const [x, y] = control.axes, key = control.axes.map(axis => axis.key).join(':')
+      const valueText = formatValue?.(x, values[x.key])
       if (control.kind === 'slider') return h('div', { className: 'av-glass av-slider', key },
-        h('span', null, control.label), h('input', {
+        h('span', null, control.label), valueText && h('output', { 'aria-hidden': true }, valueText), h('input', {
           type: 'range', min: x.min, max: x.max, step: x.step, value: values[x.key], disabled: locked,
-          'aria-label': control.label, style: { '--av-value': `${fraction(x, values[x.key]) * 100}%` },
+          'aria-label': control.label, 'aria-valuetext': valueText, style: { '--av-value': `${fraction(x, values[x.key]) * 100}%` },
           onPointerDown: () => { dragging.current = true }, onInput: event => update({ [x.key]: Number(event.currentTarget.value) }),
           onPointerUp: release, onPointerCancel: release, onKeyUp: release, onBlur: () => { if (dragging.current) release() },
         }), reset(control))
@@ -99,6 +100,10 @@ export function createAnalogPanel(React) {
         ]))
     }
     if (spec.frozen) return h('div', { className: 'av-saving av-glass', role: 'status' }, t('shapeFrozen'))
-    return h('section', { className: 'av-controls', 'aria-label': `${t('shapeControls')}: ${spec.label}`, 'aria-busy': locked }, definitions.map(render))
+    const visible = controlIndex === undefined ? definitions : controlIndex === null ? [] : [definitions[controlIndex]]
+    return h('section', { className: 'av-controls',
+      'aria-label': controlIndex === undefined ? `${t('shapeControls')}: ${spec.label}` : spec.label,
+      'aria-busy': locked,
+    }, visible.map(render))
   }
 }

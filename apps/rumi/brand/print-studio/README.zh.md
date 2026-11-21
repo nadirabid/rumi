@@ -30,7 +30,7 @@ Print Studio 项目轮次即将结束时，完成检查会向 Baseten Bison 发�
 
 拖动部件调整板上位置。所选部件显示轮廓。**撤销** 保留最多 32 次更改；**自动排列** 重新放置部件。包围矩形重叠、间距不足、超出打印板或过高都会阻止导出。完成编辑后，系统会在项目旁自动为每个模型原子保存独立的摆放信息。保存按顺序执行，并合并排队的编辑；选择部件或打印板不会写入布局。保存失败时保留草稿并提供 **重试保存**。返回模型、切换模型和打开切片软件会等待当前保存完成。保存的布局必须匹配源内容、查看器变换和打印板尺寸；模型更改后提供新排列供检查。无法读取的保存状态保持不变，直到用户明确开始新布局。
 
-**在 Bambu Studio 中打开此板** 仅将选中的打印板导出为二进制 STL，存放于新的私有 `.rumi-print-*` 项目文件夹，然后请求 macOS 在 Bambu Studio 中打开它。相对位置和比例保持不变；STL 不含颜色或材料分配。打印前请在 Bambu Studio 中检查打印板、材料、支撑和切片。此操作不会发送打印任务。启动失败时保留导出文件，并报告交接状态不确定。`printLayout.gap` 配置部件及边缘间距（默认 5 毫米），`printLayout.volume` 配置备用打印范围（默认 300 × 320 × 320 毫米）；明确设置的场景打印体积优先。
+**在 Bambu Studio 中打开此板** 将选中的打印板导出为标准 3MF 文件，存放于新的私有 `.rumi-print-*` 项目文件夹。每个可打印部件都是可独立选择的对象，并保留比例、朝向和相对位置。纯色材质按面保存，同一网格可以包含多种颜色。在 Bambu Studio 的颜色导入窗口中将颜色映射到耗材。在 Bambu Studio 2.8.2 中，如果提示仅加载几何数据，请选择**确定**。打印前请检查打印板、支撑和切片。此操作不会发送打印任务。启动失败时保留导出文件，并报告交接状态不确定。`printLayout.gap` 配置部件及边缘间距（默认 5 毫米），`printLayout.volume` 配置备用打印范围（默认 300 × 320 × 320 毫米）；明确设置的场景打印体积优先。
 
 打印预览借用原始几何和材质，暂停悬停叠层而不丢弃已准备的索引，并将拖动绘制合并为每动画帧一次。关闭、替换源或销毁查看器时，先释放预览资源，再释放其源模型。悬停索引使用存储有界的紧凑面分块，同时保留精确三角形和材质接缝。所属模块的[性能测量](tests/viewer-hover.perf-results.json)涵盖 CPU 准备、拾取和叠层暂停，不测量 GPU 帧时间或端到端浏览器输入延迟。
 
@@ -222,7 +222,7 @@ Rumi 在 `agent/request` 中通过持久化的表面替换移除先前的运行�
 
 ### Bambu 应用安装
 
-在 macOS 上，Print Studio 中的 **Set up Bambu Studio** 和 **Set up Bambu Connect** 按请求安装对应应用。Bambu Connect 2.5.0-beta.15 从 Bambu CDN 下载 Apple Silicon 或 Intel 版本。Bambu Studio 02.08.02.61 从 `bambulab/BambuStudio` 的 GitHub 发布下载通用磁盘映像。下载使用固定 SHA-256 校验和；暂存应用在安装前必须通过 Bambu 团队 `T3UBR9Y3B2` 的深度代码签名验证和 macOS Gatekeeper 评估。Rumi 将应用存放在 `$DSH_HOME/print-studio/applications`，也识别 `/Applications` 和 `~/Applications` 中的副本。
+在 macOS 上，Print Studio 中的 **Set up Bambu Studio** 和 **Set up Bambu Connect** 按请求安装对应应用。Bambu Connect 2.5.0-beta.15 从 Bambu CDN 下载 Apple Silicon 或 Intel 版本。Bambu Studio 02.09.01.70 从 `bambulab/BambuStudio` 的 GitHub 发布下载通用磁盘映像。下载使用固定 SHA-256 校验和；暂存应用在安装前必须通过 Bambu 团队 `T3UBR9Y3B2` 的深度代码签名验证和 macOS Gatekeeper 评估。Rumi 将应用存放在 `$DSH_HOME/print-studio/applications`，也识别 `/Applications` 和 `~/Applications` 中的副本。
 
 两个安装器共用 `app-setup.js` 的实现，由下载规格配置。安装过程报告下载、验证、安装及失败状态。同一应用的并发请求共用一个操作。安装失败不会替换现有应用；重试会重新下载。插件关闭等待有界操作及暂存清理完成。磁盘映像卸载失败时保留暂存目录并报告清理失败。`appDownloadTimeoutSeconds`（900）和 `appDownloadRetries`（2）配置每次下载的网络预算；每个挂载、复制、签名和 Gatekeeper 步骤限时 600 秒。更新固定版本必须同时更新校验和，并在每个目标平台验证发布者签名和启动。应用保留自身的更新行为，Bambu Connect 也保留确认窗口。
 

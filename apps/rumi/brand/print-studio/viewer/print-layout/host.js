@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { detectSlicer } from '../../probe.js'
-import { parseStl, STL_LIMITS } from '../stl.js'
+import { MAX_PRINT_PLATE_BYTES } from './plate-payload.js'
+import { makePrint3mf } from './three-mf.js'
 import { parsePrintLayout, printLayoutIdentity } from './state.js'
 
 const run = promisify(execFile)
@@ -67,19 +68,20 @@ export function registerPrintLayout(ctx, withSource, options) {
             await savePrintLayout(cwd, model, layout)
             return json({ ok: true })
           }
-          const bytes = await request.arrayBuffer()
-          if (bytes.byteLength > STL_LIMITS.maxBytes) return json({ error: 'layoutFailed' }, 413)
-          let positions
-          try { positions = parseStl(bytes) } catch (_error) { return json({ error: 'layoutFailed' }, 400) }
-          for (let i = 0; i < positions.length; i += 3) {
-            if (Math.abs(positions[i]) > resolved.volume.x / 2 + .001 || Math.abs(positions[i + 1]) > resolved.volume.y / 2 + .001
-              || positions[i + 2] < -.001 || positions[i + 2] > resolved.volume.z + .001) return json({ error: 'layoutOutside' }, 400)
+          const body = await request.arrayBuffer()
+          if (body.byteLength > MAX_PRINT_PLATE_BYTES) return json({ error: 'layoutFailed' }, 413)
+          let bytes
+          try {
+            const form = await new Response(body, { headers: request.headers }).formData()
+            bytes = await makePrint3mf(form, resolved.volume)
+          } catch (error) {
+            return json({ error: error.message === 'layoutOutside' ? 'layoutOutside' : 'layoutFailed' }, 400)
           }
           const slicer = detectSlicer()
           if (!slicer.found) return json({ error: 'layoutSlicerMissing' }, 409)
           const directory = await mkdtemp(join(await realpath(cwd), '.rumi-print-'))
-          const file = join(directory, 'plate.stl')
-          await writeFile(file, new Uint8Array(bytes), { flag: 'wx', mode: 0o600 })
+          const file = join(directory, 'plate.3mf')
+          await writeFile(file, bytes, { flag: 'wx', mode: 0o600 })
           try { await run('/usr/bin/open', ['-a', slicer.path, file], { timeout: 15_000, signal: request.signal, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !/KEY|SECRET|TOKEN|PASSWORD/i.test(key))) }) }
           catch (_error) { return json({ error: 'layoutOpenFailed' }, 502) }
           return json({ ok: true })

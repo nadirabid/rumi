@@ -14,7 +14,7 @@ const connectHashes = {
   arm64: '3f3398d1fc3f087f0317e82cf788b741b7ac83c9461a7ac3755d011a1f1890b6',
   x64: 'ec3fca35f3d655451cb44b6ca5a7429fbabd9ff6df7cf30ac2b8aa070f1eaa33',
 }
-const studioHash = 'cf648a95858fb630e1353c4987038df60d6caab693f18411fb95fb809f2d6926'
+const studioHash = 'e4f42ac1542cb107cb21cbf98717de7b17e735bdb46fd2a18249e30929e3310d'
 const bambuTeam = 'T3UBR9Y3B2'
 
 /** Bambu Connect: one dmg per architecture from Bambu's CDN. */
@@ -31,7 +31,7 @@ export const connectSpec = {
 export const studioSpec = {
   label: 'Bambu Studio',
   appName: 'BambuStudio.app',
-  url: () => 'https://github.com/bambulab/BambuStudio/releases/download/v02.08.02.61/Bambu_Studio_mac-v02.08.02.61-20260820225108.dmg',
+  url: () => 'https://github.com/bambulab/BambuStudio/releases/download/v02.09.01.70/Bambu_Studio_mac-v02.09.01.70-20261103183404.dmg',
   hash: () => studioHash,
   requirement: `anchor apple generic and identifier "com.bambulab.bambu-studio" and certificate leaf[subject.OU] = "${bambuTeam}"`,
   find: findBambuStudio,

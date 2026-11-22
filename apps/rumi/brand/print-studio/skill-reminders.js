@@ -229,16 +229,17 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
       const reminders = []
       if (unresolved.length) {
         state.sent.add('namedRegions')
-        reminders.push(`Reread name-model-regions and complete the region maps for these saved revisions: ${JSON.stringify(unresolved)}.`)
+        reminders.push(`Reread name-model-regions and apply it to the saved revisions you keep. If edits or validation are still in progress, carry this reminder forward to the resulting revisions.\nCurrent region map findings\n${JSON.stringify(unresolved)}`)
       }
       if (flags.conciseReply && draft && textStep === state.textStep && !state.sent.has('conciseReply')) {
         state.sent.add('conciseReply')
         reminders.push('Reread the project reply guidance. Keep the reply short while preserving requested detail and safety information.')
       }
       if (reminders.length) {
+        const guidance = "Print Studio skill reminder for the active request. Keep working toward the user's goal, including any remaining edits or checks. Apply this guidance as part of that work and report the outcome of the original request."
         agent.steer(createUserMessage({
           source: { kind: 'rumi-skill-reminder' },
-          content: [{ type: 'text', text: `Print Studio skill review:\n${reminders.join('\n')}` }],
+          content: [{ type: 'text', text: [guidance, ...reminders].join('\n\n') }],
         }))
       }
     } catch (_error) {

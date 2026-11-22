@@ -76,11 +76,13 @@ it('removes a project directory and refuses unknown or invalid ids', async () =>
   await expect(projects.remove('../escape')).rejects.toThrow('invalid id')
 })
 
-it('serves the gallery over the connection routes', async () => {
+it('serves the gallery from the project scope workspace over the connection routes', async () => {
+  const workspaceRoot = root()
   const routes = new Map<string, (request: Request) => Promise<Response>>()
   const cleanup: (() => void)[] = []
   const provided = new Map<string, unknown>()
   apply({
+    rumiProjectScope: { workspaceRoot },
     inject: () => {},
     effect: (effect: () => (() => void)) => cleanup.push(effect()),
     provide: (name: string, value: unknown) => {
@@ -91,13 +93,14 @@ it('serves the gallery over the connection routes', async () => {
       routes.set(route.path, route.fetch)
       return () => { routes.delete(route.path) }
     } } },
-  }, { root: root() })
+  })
   const request = (path: string, init?: RequestInit) => routes.get(path.split('?')[0])!(new Request(`http://rumi${path}`, init))
 
   const created = await (await request('/api/rumi-projects', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Tiny rover' }),
   })).json()
   expect(created.project.name).toBe('Tiny rover')
+  expect(created.project.path).toBe(join(workspaceRoot, created.project.id))
   expect(provided.has('rumiProjectTypes')).toBe(true)
   expect(readFileSync(join(created.project.path, 'AGENTS.md'), 'utf8')).toContain('# Tiny rover')
 

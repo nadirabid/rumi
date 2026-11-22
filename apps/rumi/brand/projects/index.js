@@ -12,7 +12,6 @@
  */
 import { readFileSync } from 'node:fs'
 import { mkdir, readFile, readdir, writeFile, stat, rename, rm, unlink } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { canonical, checkedPath } from './isolation/paths.js'
@@ -21,7 +20,7 @@ import { canonical, checkedPath } from './isolation/paths.js'
 export const name = 'rumi-projects'
 
 /** Services this host half reaches. */
-export const inject = ['connection']
+export const inject = ['connection', 'rumiProjectScope']
 
 const ROUTE = '/api/rumi-projects'
 const SUBDIRECTORIES = ['artifacts', 'source', 'references']
@@ -251,12 +250,12 @@ export function createProjectStore(root) {
 
 /**
  * Register the project routes.
- * @param {object} ctx - Cordis host context with connection.
- * @param {{root?: string}} [config] - Project directory root; defaults to `~/.rumi/workspace`.
+ * @param {object} ctx - Cordis host context with connection and project scope.
+ * @param {{root?: string}} [config] - Project directory root; defaults to the project scope's workspace root.
  * @returns {void}
  */
 export function apply(ctx, config = {}) {
-  const store = createProjectStore(config.root ?? join(homedir(), '.rumi', 'workspace'))
+  const store = createProjectStore(config.root ?? ctx.rumiProjectScope.workspaceRoot)
   const types = createProjectTypes()
   // A project-type plugin contributes here instead of importing this one.
   ctx.provide('rumiProjectTypes', types)

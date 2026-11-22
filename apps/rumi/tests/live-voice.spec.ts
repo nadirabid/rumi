@@ -195,6 +195,7 @@ it('supplies current scope to existing backend sessions and removes it on unload
   const owner = new Context()
   try {
     owner.provide('connection', { fetch: { register: () => () => {} } })
+    owner.provide('rumiProjectScope', { workspaceRoot: '/test/rumi-workspace' })
     await owner.plugin(SessionProjectionRegistry)
     await owner.plugin(SystemPrompt)
     const fork = owner.plugin(Projects)

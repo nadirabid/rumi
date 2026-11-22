@@ -715,9 +715,11 @@ exports[`keeps one full context across changed and unchanged requests with durab
   [
     [
       {
-        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+        "text": "<system-reminder>
+The following information describes your current session:
 
-{"meshState":{"selection":"helmet","workingModel":"helmet"}}",
+{"meshState":{"selection":"helmet","workingModel":"helmet"}}
+</system-reminder>",
         "type": "text",
       },
     ],
@@ -725,9 +727,11 @@ exports[`keeps one full context across changed and unchanged requests with durab
   [
     [
       {
-        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+        "text": "<system-reminder>
+The following information describes your current session. It replaces earlier versions of this context, including any retained in conversation summaries.
 
-{"meshState":{"selection":"helmet","workingModel":"helmet"}}",
+{"meshState":{"selection":"helmet","workingModel":"helmet"}}
+</system-reminder>",
         "type": "text",
       },
     ],
@@ -735,9 +739,11 @@ exports[`keeps one full context across changed and unchanged requests with durab
   [
     [
       {
-        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+        "text": "<system-reminder>
+The following information describes your current session. It replaces earlier versions of this context, including any retained in conversation summaries.
 
-{"meshState":{"selection":"cube","workingModel":"helmet"}}",
+{"meshState":{"selection":"cube","workingModel":"helmet"}}
+</system-reminder>",
         "type": "text",
       },
     ],
@@ -745,9 +751,11 @@ exports[`keeps one full context across changed and unchanged requests with durab
   [
     [
       {
-        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+        "text": "<system-reminder>
+The following information describes your current session. It replaces earlier versions of this context, including any retained in conversation summaries.
 
-{"meshState":{"selection":"dragon","workingModel":"helmet"}}",
+{"meshState":{"selection":"dragon","workingModel":"helmet"}}
+</system-reminder>",
         "type": "text",
       },
     ],
@@ -755,9 +763,11 @@ exports[`keeps one full context across changed and unchanged requests with durab
   [
     [
       {
-        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+        "text": "<system-reminder>
+The following information describes your current session. It replaces earlier versions of this context, including any retained in conversation summaries.
 
-{"meshState":{"selection":"dragon","workingModel":"helmet"}}",
+{"meshState":{"selection":"dragon","workingModel":"helmet"}}
+</system-reminder>",
         "type": "text",
       },
     ],

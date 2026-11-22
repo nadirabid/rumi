@@ -52,9 +52,19 @@ export function applyValidationSmoke(ctx, config) {
         releaseAdapter = ctx.effect(() => ctx.llm.registerAdapter(['validation-smoke'], adapter))
         handle = await ctx.agents.create({ sessionId, meta: { cwd: root }, agentOptions: { provider: 'validation-smoke', model: 'scripted' } })
         let call = 0
+        const executeValidation = async (stage, args, timeoutMs) => {
+          const id = ToolCallId(`validation-smoke-${++call}`)
+          const batch = await ctx.tools.execute({
+            calls: [{ type: 'tool-call', id, name: `validation_${stage}`, arguments: JSON.stringify(args) }],
+            agent: handle.agent, signal: AbortSignal.timeout(timeoutMs),
+          })
+          assert.equal(batch.results.length, 1)
+          const outcome = batch.results[0]
+          assert.equal(outcome.callId, id)
+          return outcome.result
+        }
         const invoke = async (stage, args = {}) => {
-          const result = await ctx.tools.execute({ name: `validation_${stage}`, arguments: args, agent: handle.agent,
-            callId: ToolCallId(`validation-smoke-${++call}`), signal: AbortSignal.timeout(720000) })
+          const result = await executeValidation(stage, args, 720000)
           assert.equal(result.isError, false, JSON.stringify(result.content))
           const text = result.content.find(block => block.type === 'text')
           assert(text, 'Validation must return a text report')
@@ -115,8 +125,7 @@ export function applyValidationSmoke(ctx, config) {
           assert.notEqual((await invoke('accept', { path, fingerprint: result.fingerprint })).status, 'accepted')
           console.log('validation smoke:', name, code, 'acceptance blocked')
         }
-        const denied = await ctx.tools.execute({ name: 'validation_mechanics', arguments: { path: '../outside/model.usda' },
-          agent: handle.agent, callId: ToolCallId('validation-smoke-denied'), signal: AbortSignal.timeout(10000) })
+        const denied = await executeValidation('mechanics', { path: '../outside/model.usda' }, 10000)
         assert.equal(denied.isError, true)
         assert(JSON.stringify(denied.content).includes('Project isolation denied access'))
         const solid = 'models/solid/model.usda'

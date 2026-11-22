@@ -109,7 +109,7 @@ it.each([
       expect(reminders[0]).toContain("Keep working toward the user's goal, including any remaining edits or checks.")
     }
     if (expected.includes('name-model-regions')) {
-      expect(reminders[0]).toContain('Reread name-model-regions and apply it to the saved revisions you keep. If edits or validation are still in progress, carry this reminder forward to the resulting revisions.')
+      expect(reminders[0]).toContain('Before ending this turn, follow name-model-regions and save maps that match the final revisions you keep. Finish any edits and validation first.')
       expect(reminders[0]).toContain('[{"path":"models/box/model.usda","status":"missing"}]')
     } else {
       expect(reminders[0] ?? '').not.toContain('name-model-regions')
@@ -277,7 +277,7 @@ it('steers at the next step when the every-other-step review flags a missing reg
     const thirdReply = events.find(event => event.type === 'assistant/message' && event.data.step === 3)
     const finalReply = events.find(event => event.type === 'assistant/message' && event.data.step === 4)
     expect(reminders).toHaveLength(1)
-    expect(reminders[0]?.data.content).toEqual([{ type: 'text', text: expect.stringContaining('carry this reminder forward to the resulting revisions') }])
+    expect(reminders[0]?.data.content).toEqual([{ type: 'text', text: expect.stringContaining('Before ending this turn, follow name-model-regions and save maps that match the final revisions you keep.') }])
     expect(reminders[0]?.seq).toBeGreaterThan(thirdReply?.seq ?? Infinity)
     expect(reminders[0]?.seq).toBeLessThan(finalReply?.seq ?? -1)
     expect(events.filter(event => event.type === 'turn/end').map(event => event.data.reason)).toEqual([{ kind: 'completed' }])

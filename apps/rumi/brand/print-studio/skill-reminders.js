@@ -13,7 +13,7 @@ const model = 'decision-models/baseten-bison-latest'
 const questions = {
   namedRegions: {
     type: 'noul',
-    instructions: 'Would reminding the agent to read name-model-regions help at this point in the turn? Use the request, task plan, recent actions, and saved model status. Flag a missing, invalid, or outdated region map if the agent has moved on or is finishing. Keep observing while the agent is preparing the revision or its map.',
+    instructions: 'Does the agent need a reminder to finish the region map before ending this turn? Each model created or revised this turn needs a valid region map for its final saved revision, even if the user did not ask for labels. Answer yes when the agent is wrapping up and that revision has a missing, invalid, or outdated map. Keep observing while the agent is still editing, validating, or writing the map.',
   },
   conciseReply: {
     type: 'noul',
@@ -229,7 +229,7 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
       const reminders = []
       if (unresolved.length) {
         state.sent.add('namedRegions')
-        reminders.push(`Reread name-model-regions and apply it to the saved revisions you keep. If edits or validation are still in progress, carry this reminder forward to the resulting revisions.\nCurrent region map findings\n${JSON.stringify(unresolved)}`)
+        reminders.push(`Before ending this turn, follow name-model-regions and save maps that match the final revisions you keep. Finish any edits and validation first.\nCurrent region map findings\n${JSON.stringify(unresolved)}`)
       }
       if (flags.conciseReply && draft && textStep === state.textStep && !state.sent.has('conciseReply')) {
         state.sent.add('conciseReply')

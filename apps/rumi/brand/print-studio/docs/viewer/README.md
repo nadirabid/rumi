@@ -1,0 +1,73 @@
+# Mesh preview and selection
+
+English | [中文](README.zh.md)
+
+The Three.js viewer loads published USD models and converts imported STL geometry to USD for display. Each conversation owns its preview. Run the highlight performance diagnostic from the repository root.
+
+## Editable Three.js models
+
+`viewer_transform` applies uniform scale, XYZ rotation in degrees, and bottom-centre position in millimetres without changing source. `viewer_camera` frames the design from an azimuth and elevation without altering its geometry. Both operate on the loaded design as a whole; edit named parts in source. Camera state and placement survive successful rebuilds. Failed imports or builds leave the last successful model visible and show an error; the `meshState` runtime context includes the source revision, build error, and renderer-reported measurements. Measurements require the preview to be mounted and never certify print readiness. The existing STL import and scene tools remain available separately.
+
+Each conversation owns its live preview. Opening a project requests its state immediately; passive polling pauses in the gallery and while the document is hidden, and resumes immediately when visible. The last selected entry and plate dimensions are saved atomically in the project’s `.rumi-viewer.json` and restored when a preview opens after restart; without a saved selection, the first discovered model opens.
+
+Switching models refreshes the preview as soon as the host accepts the selection, without waiting for the periodic poll, and resets camera and placement. A missing or unreadable saved entry shows an error instead of substituting another model; select an available model to recover. Discovery excludes symlinked folders and entries. Only the selected source is loaded; other model files remain on disk. STL scene objects remain in memory.
+
+Source loading and snapshots are Cordis effects owned by the Print Studio plugin. Snapshot effects collect the route registrations’ exact disposers. Unloading stops source polling, awaits admitted loads and polls, and releases routes; the viewer discards late imports and disposes its GPU resources. Orbit controls disconnect before the canvas leaves its document. Scene eviction releases the corresponding validation state; active checks retain their scene until completion. Tests exercise these paths with real Cordis contexts.
+
+## STL scene objects
+
+Each scene object places a shared mesh datablock. Scale and rotation use the mesh centre. Position places its bottom centre on the plate. Opening the same file twice creates two placements of one mesh. Commands return a new scene document, so earlier documents retain the undo history. The bake and measurement paths apply the same placement transform. Imports accept up to 20 MiB and 200,000 triangles. Up to eight conversations retain scenes in memory until eviction or plugin unload.
+
+`GET /api/print-studio/viewer/state?sessionId=…` returns the scene as the browser draws it (one placement matrix per object, statuses, and counts). `GET /api/print-studio/viewer/model?sessionId=…&datablockId=…` returns one datablock's bytes, which never change once opened and are cached as immutable.
+
+## Live model context
+
+Print Studio maintains viewer state as selection, source, measurements, highlights, and shape controls change. Its required `rumi:mesh-state` context provider synchronously reads that state before each model attempt, including retries; it performs no file discovery or viewer operation. The snapshot includes the complete scene report and working models. Before the viewer initializes, it reports `viewer_not_initialized` rather than claiming an empty scene. Model discovery and source polling remain viewer-owned. State changes alone do not wake the agent.
+
+Rumi retires previous runtime-context snapshots through native durable surface replacements during `agent/request`; empty developer replacements contribute no model-visible message, and the ordinary agent loop admits the fresh snapshot. Original snapshots remain in the session log, while human messages, action results, and request-time references remain intact. This refresh also replaces unchanged snapshots and can reduce provider prefix-cache reuse; it guarantees one current snapshot across route preparation and retries without modifying shared harness code. The `mesh_state` tool is not registered. Tools validate revision identity when acting because viewer state can change during model generation.
+
+## Model selection and agent work
+
+The selected model is the user's browsing state. A small green dot on a model selector button identifies the agent's declared work independently of selection; its accessible name explains the dot. The `viewer_working_model` tool validates a discovered model entry, sets or clears the declaration, and never switches the preview. Concurrent agents may identify different models. Idle, cancellation settling to idle, agent disposal, and plugin disposal clear their indicators. Selected-model placement, highlighting, and shaping reject a selection that conflicts with the declared work target. A declaration reports intent; it does not verify which files a shell command edits.
+
+The required `rumi:model-focus` runtime context uses `ctx.systemPrompt.context` and is recorded by the agent loop. It includes current selection, available models, the agent's work target, and message-ID-linked selections captured when human requests enter the inbox. Queued requests retain their individual references even if the user browses elsewhere. References unavailable after restart remain unknown rather than borrowing the current selection. Voice additionally records selection at the initial transcript capture alongside its pointing reference. Names and pointing references take precedence; selection supplies a default, browsing alone never retargets ongoing work, and conflicting intent requires clarification. Clear the work declaration before asking that clarification. New models acquire an indicator after their entry exists and the agent declares it.
+
+## Pointing and named regions
+
+For an editable model loaded with `viewer_load`, pass the current design revision and URL, a label and `meshPath` to `viewer_highlight`. Use the design path or the project-relative `selectedModel` as the model path. Write the ASCII or binary STL outside the watched model directory in project-relative storage. Use model-local millimetres, Z up, with part transforms applied before viewer placement. One mesh can contain disconnected surface patches. While Movement is active, overlay triangles on saved surfaces follow their corresponding assembly parts.
+
+For whole-model hover labels, Rumi saves a region map beside the USD as `model.regions.json`. Every surface hit chooses the first matching named feature or the named remainder. The viewer resolves hits locally even when no highlight is active. The map identifies one USD by its SHA-256. A changed model needs a matching map, and malformed maps leave the model available for inspection. A region attached to chat carries its map feature ID and source revision. See [naming the whole model](../../skills/name-model-regions/SKILL.md).
+
+Rumi can supply a short `regionName` in the person's language for the feature covered by those triangles. Hover over the named surface to see the name. Click or tap the surface to pin the label while you orbit. With a keyboard, focus the preview to reveal the label. Activate the label to attach the region above the chat composer. Click the chat chip to reopen the preview or its close button to remove the reference. The chip lasts while that highlight is current, and each admitted request records its attached feature and source revision in `modelFocus.requests`. A replacement highlight or model revision clears the chip.
+
+The viewer draws the overlay triangles in teal with depth testing against the model. Measurements, exports and covers exclude the overlay. An empty `meshPath`, a source revision change, or model replacement clears it. Only `rendered` confirms that the visible viewer drew the mesh. The blue cursor retains its independent selection modes.
+
+`viewer_cursor_snapshot` requests a fresh capture from the open viewer in the calling conversation. A session-scoped long poll wakes the viewer, which captures the pinned region or samples a fresh hover hit when it processes the request. A mounted preview can capture a pin while the window is hidden. A successful result includes a PNG attachment, capture time, pointed object or part path, triangle index, world-space point and Gaussian radius, camera, and geometry/placement identity. Use `region.modelLocalPoint` and the captured part and scope to locate the marked surface on `identity.design`. During Movement, the saved model point remains in the coordinates accepted by `viewer_highlight` while the world-space point follows the posed part.
+
+Only requested captures cross to the host. Live Voice requests one at the first transcript chunk since its preceding delegation and records the timestamped result and image in separate background context linked to the spoken message ID. The user’s voice bubble contains only their words. This approximates pointing during speech; it is not audio-onset sampling. The agent must use that attached reference for the utterance rather than substitute a later cursor position. Viewer wakeups also deliver highlight changes without waiting for the two-second scene poll. The tool's structured result and durable image attachment enter the normal conversation log, making the agent's visual input replayable.
+
+Missing intersections report `no_hit`. An unavailable capture returns `viewer_unavailable` with a reason such as a closed preview, hidden window without a pin, active temporary edit, moved preview pose, or print layout. An unanswered request reports `response_timeout` after eight seconds. Changed source/placement identities report `stale_view`, capture or image-storage failures report `capture_failed`, and a concurrent request reports `busy`. Cancellation, scene eviction, and plugin disposal release pending requests.
+
+Responses are session/request scoped and validated before entering tool output. Images are limited to a 960-pixel longest edge and three million encoded characters; the attachment service validates and stores their PNG bytes. Agent highlights remain independently controlled by `viewer_highlight` and do not move with the cursor.
+
+## Cursor selection
+
+Click a model surface in the 3D preview to pin the pale blue tint. Click anywhere in the preview canvas again to release it and resume hover. The point stays pinned while you orbit, zoom, or move the pointer out of the preview. Switching to Local patch, Surface, Whole part, or Edge changes the highlighted area around that same point. A model or placement change clears the pin.
+
+The cursor clips its Gaussian patch to the pointed mesh and a connected surface. Surfaces stop at open edges, material seams and creases of at least 35 degrees; they are geometric regions, not semantic anatomy. The local controls select a patch, full surface, whole mesh part, or nearby boundary edge. They share the model selector’s rounded glass material, with an inset selected segment and visible keyboard focus.
+
+The viewer builds geometry-local face-block bounds and surface attributes once per display copy; pointer movement updates uniforms at most once per frame without model calls, host requests, geometry uploads, or flood fills. Index preparation happens when a model loads; it is not included in steady-state picking latency.
+
+Cursor modes sit in a compact glass pill at the bottom left. With a mouse or trackpad, only the active mode is visible until hover or keyboard focus reveals all four choices; focus keeps the choices open while selecting. Touch controls remain expanded with 44px targets. Reduced transparency and increased contrast use an opaque background.
+
+## Highlight diagnostics
+
+`viewerDiagnosticsDirectory` defaults to `~/.rumi/viewer-logs`. Private JSONL files record highlight request IDs, host wakeups and state delivery, client apply and feedback phases, document visibility, viewport dimensions, identity comparisons, and settlement latency. Client durations use a monotonic clock; host receipt times establish cross-process order. No model source, images, audio, transcript text, or credentials are recorded. Files remain until deleted. Journal I/O errors fail the owning operation; failed client trace delivery also reports to the browser console.
+
+`not_rendered` includes `reason`: `ack_timeout` means no matching acknowledgment arrived and does not establish that the highlight was absent; `viewer_hidden` and `render_failed` are explicit renderer reports. Returning a hidden document to view redraws and reports the current highlight. A highlight-only update reuses the geometry, materials, and measurement report; only region uniforms change. Placement, volume, and source changes invalidate measurements. The CPU diagnostic `node --import tsx/esm apps/rumi/brand/print-studio/tests/viewer-highlight.perf.ts` compares uniform updates with `--rebuild`; it excludes network, model response, and GPU time.
+
+## Rendering during edits and checks
+
+The viewer signals active agent work with a continuous teal surface sheen and model validation with a brighter scan that travels up and down the model. These effects use existing display geometry and one shared animation clock, draw at most 30 times per second, pause when hidden or offscreen, and remain still with Reduce Motion. Editing, model selection and print actions are disabled during work; camera orbit, zoom, precise pointing and returning to the model remain available. Work effects do not appear in project covers or alter model geometry. Validation results use the existing compact status indicator rather than a persistent text banner.
+
+Print previews borrow original geometry and materials, suspend hover overlays without discarding their prepared indexes, and coalesce drag drawing to one animation frame. Closing, replacing the source or disposing the viewer releases preview resources before their source model. The hover index uses compact face blocks with bounded storage while retaining exact triangles and material seams. Owner-local [performance measurements](../../tests/viewer-hover.perf-results.json) cover CPU preparation, picking, and overlay suspension; they do not measure GPU frame time or end-to-end browser input latency.

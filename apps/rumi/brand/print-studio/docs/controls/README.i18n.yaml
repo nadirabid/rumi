@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/rumi/brand/print-studio/docs/controls/README.md
+/movement-and-mesh-edit-controls:
+  en: 06aeefe3878f32ee
+  zh: 8b51af7484b8682e
+/movement-and-mesh-edit-controls/persistent-movement-controls:
+  en: 43c9dd5df4a53348
+  zh: 8a94036ad5565b03
+/movement-and-mesh-edit-controls/analog-mesh-editing:
+  en: 080d8a0793ac65d0
+  zh: 2d513dece5027d09
+/movement-and-mesh-edit-controls/freeze-and-save:
+  en: 85431ab53e98daa3
+  zh: bcd863b08d27dbbc
+/movement-and-mesh-edit-controls/deformations-and-cuts:
+  en: b0b9cd7022d663e0
+  zh: dcfbda75a278d5fd
+/movement-and-mesh-edit-controls/surface-regression-checks:
+  en: 41f919ab068fb48e
+  zh: ae40192ba289610c

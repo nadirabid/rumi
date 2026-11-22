@@ -3,62 +3,14 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write apps/rumi/brand/print-studio/README.md
 /print-studio:
-  en: 7553d9b1ee5b2167
-  zh: f5ad510cc3a8c133
+  en: c39ceba195e54fa1
+  zh: e6b7376b1c21aa7c
+/print-studio/where-to-make-a-change:
+  en: f9c2cfb2e78c6254
+  zh: dfe7d81b4fca0ab4
 /print-studio/skill-reminders:
-  en: 5b1b28573a55b0b6
-  zh: 6c41fa7368bf91f2
-/print-studio/print-layout:
-  en: 089e2e1b6e52a6c7
-  zh: 7aa66b16c4bc05f3
-/print-studio/print-monitoring:
-  en: 85c5a68a4664e410
-  zh: a76a70cbfe7ca98d
-/print-studio/mesh-preview:
-  en: a5986976e6b6e551
-  zh: f14c9a1d8975cb75
-/print-studio/client-build:
-  en: bebe7ccf8177c5dd
-  zh: 7233a8d3b4a7eb93
-/print-studio/account-sign-in:
-  en: 8613ead209c1eee1
-  zh: cf1a1ace76cfbdf9
-/print-studio/source-ownership:
-  en: d5d901e4edea32f2
-  zh: 3a95521f4153b966
-/print-studio/blender-editing-and-usd-previews:
-  en: 51dc6b921bef9325
-  zh: f9f875e12efcd40e
-/print-studio/explicit-validation-tools:
-  en: cf1407935c74425c
-  zh: 545e024dcdd82053
-/print-studio/mechanical-validation:
-  en: 8e5048977798ac92
-  zh: 8b1d42a9be9fc67f
-/print-studio/persistent-movement-controls:
-  en: 08925381aff0e48c
-  zh: 6d769130bcf79189
-/print-studio/editable-three-js-models:
-  en: 780adad83c44d0ae
-  zh: 4ac1e0afd3c4b54e
-/print-studio/editable-three-js-models/visual-clarification:
-  en: b4c4fe4dca555e98
-  zh: b01b7be23558e383
-/print-studio/editable-three-js-models/highlight-diagnostics:
-  en: 50e9aa998a3a99a3
-  zh: 66fdc5d522c45ca4
-/print-studio/editable-three-js-models/cursor-driven-mesh-highlighting:
-  en: 00c090a72eee3a31
-  zh: b19739f5d93bf218
-/print-studio/analog-mesh-editing:
-  en: 42dbce40f6a4b3f5
-  zh: 19941e7ae342b795
-/print-studio/live-model-context:
-  en: 391d18501eed9de1
-  zh: 8730661248666fa4
-/print-studio/model-selection-and-agent-work:
-  en: 21b84251009e76da
-  zh: 4bdada6a7c56d625
-/print-studio/model-selection-and-agent-work/bambu-app-setup:
-  en: 615c33d239497b2f
-  zh: cff4ce4a3986d974
+  en: cbb64ceb09776eb1
+  zh: dff210220ec25c76
+/print-studio/build-and-test:
+  en: af1c202953bda567
+  zh: d7f9740ca316249e

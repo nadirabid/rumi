@@ -1,0 +1,31 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/rumi/brand/print-studio/docs/viewer/README.md
+/mesh-preview-and-selection:
+  en: 0f8545172f0644ce
+  zh: 990cac4190a7f90f
+/mesh-preview-and-selection/editable-three-js-models:
+  en: 86d7660d37b81423
+  zh: f4e2f1cb18d3e423
+/mesh-preview-and-selection/stl-scene-objects:
+  en: 2456311c299307cb
+  zh: 07726b182548c568
+/mesh-preview-and-selection/live-model-context:
+  en: 391d18501eed9de1
+  zh: 8730661248666fa4
+/mesh-preview-and-selection/model-selection-and-agent-work:
+  en: 3ca14c0cb56b7ebc
+  zh: a77b1fb4aa0b06a8
+/mesh-preview-and-selection/pointing-and-named-regions:
+  en: fa6b1f0b0f68974d
+  zh: ac1c6ad02a217868
+/mesh-preview-and-selection/cursor-selection:
+  en: 3c5bf487916f2f7c
+  zh: 41b50971f43a8286
+/mesh-preview-and-selection/highlight-diagnostics:
+  en: 7ecc7c6c04d6a06f
+  zh: f4ffe3e01746044d
+/mesh-preview-and-selection/rendering-during-edits-and-checks:
+  en: baeddea9a3afb6cc
+  zh: 03c6f97cf331866b

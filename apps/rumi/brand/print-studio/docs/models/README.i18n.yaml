@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/rumi/brand/print-studio/docs/models/README.md
+/model-files-and-revisions:
+  en: c3d8d25bf58e3b3d
+  zh: 41aff5de15fe54b2
+/model-files-and-revisions/blender-editing-and-usd-previews:
+  en: 962176500424a0ae
+  zh: 33906d8646ba82ca
+/model-files-and-revisions/legacy-model-migration:
+  en: e991fe6ab510a3cb
+  zh: 8de86f46230a1a86
+/model-files-and-revisions/blender-modeling-helpers:
+  en: 6db3802ac39852e5
+  zh: a7e433aea93fe65c

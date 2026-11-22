@@ -14,7 +14,6 @@ work from its `nextSteps`; do not guess.
 - **Bambu Studio** — the slicer for the H2D.
 - **A printer on the same network** — Print Studio finds its IP address and serial
   number; the LAN access code is fetched after the adult signs in to Bambu.
-- **A test slice** — a small cube, before anything is printed.
 
 ## If the slicer is missing
 
@@ -25,7 +24,7 @@ Do not download or install applications yourself.
 
 ## Signing in does not require LAN mode
 
-Print Studio talks to the printer's local MQTT and FTPS ports. Bambu Cloud sign-in is used only to retrieve the LAN access code; printing stays local. A printer reporting `DevConnect: cloud` can still accept local access after that sign-in. Only if the code is rejected should the adult enable **LAN Only Mode** on the printer, and **Developer Mode** if the firmware shows that switch.
+Print Studio uses local MQTT to read printer status. Bambu Cloud sign-in retrieves the LAN access code for that connection. A printer reporting `DevConnect: cloud` can still accept local access after sign-in. Keep the printer’s current connection mode when the adult uses Bambu Studio to print.
 Ask the adult to use the **Sign in with Bambu** button. Never ask them to paste account credentials into chat.
 
 ## If the printer is not configured
@@ -37,8 +36,7 @@ Ask the adult to use the **Sign in with Bambu** button. Never ask them to paste 
 3. Re-run `print_studio_status` and confirm the access code was accepted before
    proceeding.
 
-If the printer is on a different network or the ports are blocked, say so and stop;
-do not fall back to cloud printing.
+If the printer is on a different network or local access is blocked, say that Print Studio cannot read live status. The adult can check the printer connection in Bambu Studio.
 
 ## If the H2D profiles are missing
 
@@ -50,4 +48,4 @@ Bambu Studio is too old for the H2D: ask the adult to update it, then re-run
 
 Speak in plain language and name the one next step. Do not dump raw JSON at the person;
 translate the status into "Bambu Studio is installed, the printer is not connected yet",
-and so on. For an existing connection, use [Inspect Printer](../inspect-printer/SKILL.md) for status or [Prepare Print Job](../prepare-print-job/SKILL.md) to check and send a model.
+and so on. Use [Inspect Printer](../inspect-printer/SKILL.md) for status or [Prepare Print Job](../prepare-print-job/SKILL.md) to prepare a model for Bambu Studio.

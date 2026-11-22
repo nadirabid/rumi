@@ -23,8 +23,6 @@
     "icon.svg",
     "lib/desktop",
     "assets",
-    "slicer.js",
-    "connect.js",
     "app-setup.js",
     "monitor.js",
     "skill-reminders.js",

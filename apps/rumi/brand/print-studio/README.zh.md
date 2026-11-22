@@ -4,13 +4,13 @@
 
 为 Rumi 的 3D 打印工作流提供环境检测和 Bambu Lab 配置引导。
 
-此功能涵盖环境配置和实际测试打印，回答三个配置问题，并提供一条端到端打印路径：
+Print Studio 检查以下三项配置。
 
 - 是否已安装 Bambu Studio？
 - 是否包含 H2D 配置文件？
 - 是否已配置打印机，并且可通过局域网访问？
 
-主机端通过 SSDP 发现打印机，提供 `GET /api/print-studio/status`、`/api/print-studio/cloud/*` 下的 Bambu Cloud 路由、`/api/print-studio/viewer/*` 下的网格预览路由，以及面向模型的工具。登录会获取已绑定打印机的 `dev_access_code`；Bambu Connect 负责发送切片后的任务。浏览器端包括**插件 → 内置插件设置**中的 Print Studio 卡片和 3D 预览标签页。内置的[配置技能](skills/print-studio-setup/SKILL.md)和 [FDM 设计技能](skills/fdm-design/SKILL.md)在插件加载时注册，供智能体发现。它们提供配置引导和设计约束；智能体在需要时加载相应说明。
+主机通过 SSDP 发现打印机，并提供配置状态、Bambu 账号登录、网格查看器路由和智能体工具。登录后获取已绑定打印机的访问码，用于监控状态。Print Studio 卡片位于**插件 → 内置插件设置**。内置的[配置技能](skills/print-studio-setup/SKILL.md)和 [FDM 设计技能](skills/fdm-design/SKILL.md)分别指导打印机配置和模型设计。
 
 打印机 IP 和序列号存储在 `$DSH_HOME/print-studio/printer.json` 中，仅所有者可访问。局域网访问码通过 `ctx.credentials` 存储为 `BAMBU_LAN_ACCESS_CODE`；它不会返回给客户端，也不会写入配置补丁。
 
@@ -42,11 +42,9 @@ Bison 的每个问题都根据这份执行上下文判断是否需要发出特�
 
 查看器以持续流动的青绿色表面光泽表示智能体正在处理模型，以沿模型上下移动的更亮扫描带表示模型验证。效果复用现有显示几何和一个共享动画时钟，每秒最多绘制 30 次，在隐藏或移出屏幕时暂停，启用减少动态效果时保持静止。处理期间禁用编辑、模型选择和打印操作；仍可旋转视角、缩放、精确指向以及返回模型。工作效果不会出现在项目封面中，也不会改变模型几何。验证结果使用现有的紧凑状态指示器，而不是持续显示文本横幅。
 
-## 测试打印
+## 打印监控
 
-`POST /api/print-studio/print/test`（以及 `print_studio_print_test` 工具）使用 Bambu Studio 对内置的 10 x 10 x 1.2 mm 测试块进行切片，设置 H2D 双挤出机项目和 Supertack 打印板，并将切片后的 3MF 交给 Bambu Connect。Bambu Connect 要求成年人点击**发送**；macOS 上没有支持这一步最终授权的 API。`GET /api/print-studio/print/status` 和 `print_studio_progress` 通过本地 MQTT 读取进度、层数、温度、AMS 和错误。
-
-测试块的打印时间约为六分钟。
+`GET /api/print-studio/print/status` 和 `print_studio_progress` 通过本地 MQTT 读取进度、层数、温度、AMS 和错误。
 
 ## 网格预览
 
@@ -226,8 +224,8 @@ Rumi 在 `agent/request` 中通过持久化的表面替换移除先前的运行�
 
 ### Bambu 应用安装
 
-在 macOS 上，Print Studio 中的 **Set up Bambu Studio** 和 **Set up Bambu Connect** 按请求安装对应应用。Bambu Connect 2.5.0-beta.15 从 Bambu CDN 下载 Apple Silicon 或 Intel 版本。Bambu Studio 02.09.01.70 从 `bambulab/BambuStudio` 的 GitHub 发布下载通用磁盘映像。下载使用固定 SHA-256 校验和；暂存应用在安装前必须通过 Bambu 团队 `T3UBR9Y3B2` 的深度代码签名验证和 macOS Gatekeeper 评估。Rumi 将应用存放在 `$DSH_HOME/print-studio/applications`，也识别 `/Applications` 和 `~/Applications` 中的副本。
+在 macOS 上，选择 **Set up Bambu Studio**，即可从 `bambulab/BambuStudio` 的 GitHub 发布安装 Bambu Studio 02.09.01.70。安装器使用固定的 SHA-256 校验和验证通用磁盘映像。暂存的应用必须通过 Bambu 团队 `T3UBR9Y3B2` 的深度代码签名验证和 macOS Gatekeeper 评估。Rumi 将应用安装到 `$DSH_HOME/print-studio/applications`，也识别 `/Applications` 和 `~/Applications` 中的副本。
 
-两个安装器共用 `app-setup.js` 的实现，由下载规格配置。安装过程报告下载、验证、安装及失败状态。同一应用的并发请求共用一个操作。安装失败不会替换现有应用；重试会重新下载。插件关闭等待有界操作及暂存清理完成。磁盘映像卸载失败时保留暂存目录并报告清理失败。`appDownloadTimeoutSeconds`（900）和 `appDownloadRetries`（2）配置每次下载的网络预算；每个挂载、复制、签名和 Gatekeeper 步骤限时 600 秒。更新固定版本必须同时更新校验和，并在每个目标平台验证发布者签名和启动。应用保留自身的更新行为，Bambu Connect 也保留确认窗口。
+安装过程报告下载、验证、安装及失败状态。并发请求共用一次安装。安装失败时保留现有副本，重试时重新下载。插件关闭时等待安装和暂存清理完成。磁盘映像卸载失败时保留暂存目录，并报告清理失败。`appDownloadTimeoutSeconds`（900）和 `appDownloadRetries`（2）配置每次下载的网络时限和重试次数。挂载、复制、签名和 Gatekeeper 步骤分别限时 600 秒。更新固定版本时，要更新校验和，并在每个目标平台验证发布者签名和应用启动。
 
 模型专用控件使用 `operation: fields` 和纯数据位移网格。预览在选定 USD 网格的副本上插值并混合位移，取消后恢复原始几何体。冻结配方在 Blender 中使用相同的插值方法。预览器不会执行项目代码。这些编辑保持网格连接关系，但不保证壁厚或无自相交。参见[位移场编写](skills/mesh-edit-controls/references/fields.md)。 每个控制轴都需要在 `values` 中提供条目，位移场的初始值为零。验证分别报告缺少或格式错误的 `values`、缺少或重复的绑定、无效数值以及超过 32 个参数，并说明修正方法。

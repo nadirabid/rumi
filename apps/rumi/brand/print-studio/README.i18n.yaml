@@ -3,17 +3,17 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write apps/rumi/brand/print-studio/README.md
 /print-studio:
-  en: ab24b5e55c91aa37
-  zh: d1831863c9afbc13
+  en: 7553d9b1ee5b2167
+  zh: f5ad510cc3a8c133
 /print-studio/skill-reminders:
   en: 5b1b28573a55b0b6
   zh: 6c41fa7368bf91f2
 /print-studio/print-layout:
   en: 089e2e1b6e52a6c7
   zh: 7aa66b16c4bc05f3
-/print-studio/test-print:
-  en: 9a60197d35201e39
-  zh: 93cbf14689151364
+/print-studio/print-monitoring:
+  en: 85c5a68a4664e410
+  zh: a76a70cbfe7ca98d
 /print-studio/mesh-preview:
   en: a5986976e6b6e551
   zh: f14c9a1d8975cb75
@@ -60,5 +60,5 @@
   en: 21b84251009e76da
   zh: 4bdada6a7c56d625
 /print-studio/model-selection-and-agent-work/bambu-app-setup:
-  en: a8387224b4d69bf0
-  zh: 15feae6e7f1fc3b2
+  en: 615c33d239497b2f
+  zh: cff4ce4a3986d974

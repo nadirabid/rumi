@@ -20,9 +20,7 @@ import {
   MODELS, detectSlicer, discoverPrinters, mqttAuthorized, printStudioNextSteps, reachable, readPrinterConfig, text, writePrinterConfig,
 } from './probe.js'
 import { loginMessageToken, accessCodeFor, devices as cloudDevices } from './cloud.js'
-import { sliceMesh } from './slicer.js'
-import { handoffToBambuConnect, hasBambuConnect } from './connect.js'
-import { connectSpec, createAppSetup, studioSpec } from './app-setup.js'
+import { createAppSetup } from './app-setup.js'
 import { readPrinterStatus } from './monitor.js'
 import { applyBlender } from './blender/host.js'
 import { applySkillReminders } from './skill-reminders.js'
@@ -119,37 +117,6 @@ async function adoptCloud(ctx, token) {
   await ctx.credentials.set(ACCESS_CODE, match.code)
   await ctx.credentials.set(CLOUD_TOKEN, token)
   return match
-}
-
-/** Slice the bundled test tile and hand it to Bambu Connect for a manual Send. */
-async function printTestTile(ctx) {
-  const printer = readPrinterConfig()
-  if (printer.host === null) throw new Error('No printer has been discovered')
-  if (!hasBambuConnect()) throw new Error('Bambu Connect is not installed')
-  const accessCode = await readAccessCode(ctx)
-  if (accessCode === null) throw new Error('The printer access code is not stored')
-  const status = await readPrinterStatus({ host: printer.host, serial: printer.serial, accessCode })
-  const tray = (status.ams?.trays ?? [])
-    .filter(entry => entry.type === 'PLA' && (entry.remain ?? 0) > 5)
-    .sort((left, right) => (right.remain ?? 0) - (left.remain ?? 0))[0]
-  if (tray === undefined) throw new Error('No loaded PLA AMS tray was found')
-  const result = await sliceMesh(join(import.meta.dirname, 'assets', 'test-tile.stl'), {
-    bedType: 'supertack_plate',
-    jobName: 'print-studio-test-tile',
-    filamentColor: `#${String(tray.color).slice(0, 6)}`,
-    filamentType: 'PLA',
-  })
-  const handoff = await handoffToBambuConnect(result.file, 'Print Studio 5 min tile')
-  return {
-    status: 'awaiting-send',
-    file: result.file,
-    name: result.name,
-    bedType: result.bedType,
-    filament: { type: result.filamentType, color: result.filamentColor, tray: tray.id, remain: tray.remain },
-    seconds: Math.round(result.seconds),
-    handoff,
-    instructions: 'Bambu Connect is open. Select the H2D, Supertack Plate, and a PLA tray, then press Send.',
-  }
 }
 
 /** Resolve the stored LAN access code without exposing it to the caller. */
@@ -281,16 +248,13 @@ export function apply(ctx, config) {
     }), `print-studio: ${ROUTE}${path}`)
   }
 
-  const budget = { downloadTimeoutSeconds: config.appDownloadTimeoutSeconds, downloadRetries: config.appDownloadRetries }
-  for (const [id, spec] of [['connect', connectSpec], ['studio', studioSpec]]) {
-    const setup = createAppSetup(spec, budget)
-    ctx.effect(() => () => setup.dispose(), `print-studio: ${spec.label} setup`)
-    register(`/${id}/status`, ['GET'], async () => json(setup.status()))
-    register(`/${id}/install`, ['POST'], async () => {
-      setup.start()
-      return json(setup.status(), 202)
-    })
-  }
+  const setup = createAppSetup({ downloadTimeoutSeconds: config.appDownloadTimeoutSeconds, downloadRetries: config.appDownloadRetries })
+  ctx.effect(() => () => setup.dispose(), 'print-studio: Bambu Studio setup')
+  register('/studio/status', ['GET'], async () => json(setup.status()))
+  register('/studio/install', ['POST'], async () => {
+    setup.start()
+    return json(setup.status(), 202)
+  })
 
   register('/status', ['GET'], async (request) => {
     const refresh = new URL(request.url).searchParams.get('refresh') === '1'
@@ -304,14 +268,6 @@ export function apply(ctx, config) {
     if (accessCode === null) return json({ error: 'print-studio: the printer access code is not stored' }, 400)
     try {
       return json(await readPrinterStatus({ host: printer.host, serial: printer.serial, accessCode }))
-    } catch (error) {
-      return json({ error: error instanceof Error ? error.message : String(error) }, 502)
-    }
-  })
-
-  register('/print/test', ['POST'], async () => {
-    try {
-      return json(await printTestTile(ctx))
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 502)
     }
@@ -376,19 +332,6 @@ export function apply(ctx, config) {
     timeoutMs: 20_000,
     execute: async () => JSON.stringify(await collectStatus(ctx), undefined, 2),
   })), 'print-studio: status tool')
-
-  ctx.effect(() => ctx.tools.register(defineTool({
-    name: 'print_studio_print_test',
-    description: 'Slice a bundled five-minute test tile for the configured Bambu H2D and open Bambu Connect for the adult to confirm Send. Use only after print_studio_status reports ready.',
-    parameters: {},
-    output: {
-      schema: { type: 'string' },
-      render: (_args, value) => [{ type: 'text', text: value }],
-    },
-    isConcurrencySafe: () => false,
-    timeoutMs: 120_000,
-    execute: async () => JSON.stringify(await printTestTile(ctx), undefined, 2),
-  })), 'print-studio: test print tool')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'print_studio_progress',

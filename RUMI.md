@@ -179,9 +179,9 @@ Additional 3D models require an explicit user request or agreement to a clearly 
 
 ## Print Studio
 
-`apps/rumi/brand/print-studio/` is the 3D-print setup slice. It installs Bambu Studio and Bambu Connect on request (verified downloads into a Rumi-owned folder), detects Bambu Studio, the H2D profiles, and discovers the printer over SSDP; the **Plugins → Print Studio** card adopts the printer automatically and signs in once with a Bambu account to fetch the configured printer’s access code. A different account-bound printer never supplies a fallback code for a known serial. The bundled `print-studio-setup` skill guides setup. The access code lives in the credential store, never in the profile patch.
+`apps/rumi/brand/print-studio/` installs Bambu Studio on request, detects its H2D profiles, and discovers the printer over SSDP. The **Plugins → Print Studio** card can sign in to Bambu to fetch the discovered printer’s access code. A different account-bound printer never supplies a fallback code for a known serial. The bundled `print-studio-setup` skill guides setup. The access code lives in the credential store.
 
-The setup status checks MQTT authentication, not authorization to start a print. H2D firmware can allow telemetry while rejecting control commands. The test-print flow slices a tile with Bambu Studio and hands it to Bambu Connect for confirmation; progress is read from the printer. Never describe an authenticated connection or a successfully sliced file as a confirmed print.
+Rumi reads printer status and progress over local MQTT. To print, open a plate from the 3D preview and review, slice, and send it in Bambu Studio.
 
 ### Mesh preview
 

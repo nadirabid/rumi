@@ -4,7 +4,7 @@ import { installViewer } from './viewer/client.js'
  *
  * The setup card under Plugins → Built-in plugin settings. The host discovers
  * the printer on the LAN; an adult signs in once with their Bambu account so
- * the host can fetch the printer's access code. Bambu Connect sends sliced jobs.
+ * the host can fetch the printer's access code for monitoring.
  * The page uses the shared settings-form primitives so it matches every other
  * plugin settings page.
  */
@@ -20,7 +20,6 @@ window.__ModuleLoader__.load({
     const NS = 'rumi.printStudio';
 
     const en = {
-      connect: 'Bambu Connect',
       studio: 'Bambu Studio',
       setupButton: 'Set up {app}',
       setupReady: 'Installed',
@@ -31,23 +30,14 @@ window.__ModuleLoader__.load({
       setupUnsupported: '{app} setup requires a Mac with Apple Silicon or Intel.',
       setupDestination: 'An incomplete {app} copy is blocking setup. Move it out of Rumi’s print-studio/applications folder, then retry.',
       setupCleanup: 'Setup could not remove its temporary files. Restart Rumi and try again.',
-      connectHint: 'Rumi downloads Bambu Connect from Bambu Lab. An adult confirms Send before printing.',
-      studioHint: 'Rumi downloads Bambu Studio from Bambu Lab. It slices the models before printing.',
+      studioHint: 'Open a plate from the 3D preview to slice and print it in Bambu Studio.',
       hostedSignIn: 'Sign in with Bambu',
-      printTest: 'Print 5-minute test tile',
-      printTestHint: 'Slices a small tile, opens Bambu Connect, and waits for you to press Send.',
-      slicing: 'Slicing…',
-      awaitingSend: 'Bambu Connect is open. Select the H2D and Supertack Plate, then press Send.',
-      printProgress: 'Print progress',
-      printFinished: 'Print finished.',
-      printFailed: 'Print failed.',
-      printRemaining: 'min remaining',
       desktopRequired: 'Open Rumi on your Mac to sign in with Bambu.',
       title: 'Print Studio',
       checking: 'Looking for the printer…',
       ready: 'Ready to make something',
       needsSetup: 'Setup needed',
-      intro: 'Print Studio finds your printer. Sign in with your Bambu account to read its status. Sliced jobs open in Bambu Connect for you to send.',
+      intro: 'Print Studio finds your printer. Sign in with your Bambu account to read its status.',
       notInstalled: 'not installed',
       profilesMissing: 'The installed Bambu Studio has no H2D profiles. Update Bambu Studio.',
       printer: 'Printer',
@@ -56,7 +46,7 @@ window.__ModuleLoader__.load({
       scan: 'Scan again',
       choose: 'Choose the printer',
       cloudMode: 'Cloud mode',
-      cloudDetail: 'The printer is connected to Bambu Cloud. Sign in to fetch its access code for status monitoring. Bambu Connect sends print jobs.',
+      cloudDetail: 'The printer is connected to Bambu Cloud. Sign in to fetch its access code for status monitoring.',
       next: 'Next steps',
       ssoWaitingDetail: 'Complete sign-in in the Bambu window.',
       signedIn: 'Signed in to Bambu',
@@ -70,7 +60,6 @@ window.__ModuleLoader__.load({
     };
 
     const zh = {
-      connect: 'Bambu Connect',
       studio: 'Bambu Studio',
       setupButton: '设置 {app}',
       setupReady: '已安装',
@@ -81,23 +70,14 @@ window.__ModuleLoader__.load({
       setupUnsupported: '{app} 设置需要 Apple 芯片或 Intel Mac',
       setupDestination: '不完整的 {app} 阻止了设置，请将其移出 Rumi 的 print-studio/applications 文件夹后重试',
       setupCleanup: '无法删除设置临时文件，请重启 Rumi 后重试',
-      connectHint: 'Rumi 从 Bambu Lab 下载 Bambu Connect，打印前由成人确认发送',
-      studioHint: 'Rumi 从 Bambu Lab 下载 Bambu Studio，用于在打印前切片模型',
+      studioHint: '从 3D 预览中打开打印板，在 Bambu Studio 中切片并打印。',
       hostedSignIn: '登录 Bambu 账号',
-      printTest: '打印 5 分钟测试片',
-      printTestHint: '切一个小测试片，打开 Bambu Connect，等待你点击发送。',
-      slicing: '切片中…',
-      awaitingSend: 'Bambu Connect 已打开。请选择 H2D 和 Supertack 打印板，然后点击发送。',
-      printProgress: '打印进度',
-      printFinished: '打印完成。',
-      printFailed: '打印失败。',
-      printRemaining: '分钟剩余',
       desktopRequired: '请在 Mac 上打开 Rumi 并登录 Bambu 账号',
       title: '打印工作室',
       checking: '正在寻找打印机…',
       ready: '可以开始创作了',
       needsSetup: '需要设置',
-      intro: '打印工作室会自动寻找打印机。请登录 Bambu 账号以读取打印机状态。切片后会打开 Bambu Connect，由你发送打印任务。',
+      intro: '打印工作室会自动寻找打印机。请登录 Bambu 账号以读取打印机状态。',
       notInstalled: '未安装',
       profilesMissing: '已安装的 Bambu Studio 没有 H2D 配置文件，请更新 Bambu Studio',
       printer: '打印机',
@@ -106,7 +86,7 @@ window.__ModuleLoader__.load({
       scan: '重新扫描',
       choose: '选择打印机',
       cloudMode: '云模式',
-      cloudDetail: '打印机已连接 Bambu 云端。登录后可获取访问码以监控状态。打印任务通过 Bambu Connect 发送。',
+      cloudDetail: '打印机已连接 Bambu 云端。登录后可获取访问码以监控状态。',
       next: '下一步',
       ssoWaitingDetail: '请在 Bambu 窗口中完成登录',
       signedIn: '已登录 Bambu',
@@ -129,8 +109,8 @@ window.__ModuleLoader__.load({
         h('span', { style: subtle }, children));
     }
 
-    /** Poll one plugin-owned installer and expose its start action. */
-    function useAppSetup(id, active) {
+    /** Poll Bambu Studio setup while the settings page is active. */
+    function useStudioSetup(active) {
       const [setup, setSetup] = React.useState(null);
       const [requestFailed, setRequestFailed] = React.useState(false);
       React.useEffect(() => {
@@ -139,7 +119,7 @@ window.__ModuleLoader__.load({
         let timer;
         const poll = async () => {
           try {
-            const response = await fetch(`/api/print-studio/${id}/status`, { credentials: 'same-origin', cache: 'no-store' });
+            const response = await fetch('/api/print-studio/studio/status', { credentials: 'same-origin', cache: 'no-store' });
             if (!response.ok) throw new Error('Setup status unavailable');
             const result = await response.json();
             if (live) { setSetup(result); setRequestFailed(false); }
@@ -151,12 +131,12 @@ window.__ModuleLoader__.load({
         };
         void poll();
         return () => { live = false; clearTimeout(timer); };
-      }, [id, active]);
+      }, [active]);
       const start = async () => {
         setRequestFailed(false);
         setSetup({ installed: false, phase: 'downloading', error: null });
         try {
-          const response = await fetch(`/api/print-studio/${id}/install`, { method: 'POST', credentials: 'same-origin' });
+          const response = await fetch('/api/print-studio/studio/install', { method: 'POST', credentials: 'same-origin' });
           if (!response.ok) throw new Error('Setup unavailable');
           setSetup(await response.json());
         } catch (error) { setRequestFailed(true); setSetup(null); }
@@ -164,18 +144,18 @@ window.__ModuleLoader__.load({
       return { setup, requestFailed, start };
     }
 
-    /** Install state, button, progress, and failure for one app; `app` is the product-name locale key. */
-    function AppSetup({ app, label, installedText, hint, installer, t }) {
+    /** Bambu Studio installation status and action. */
+    function StudioSetup({ installedText, installer, t }) {
       const { setup, requestFailed, start } = installer;
-      const name = t(app);
+      const name = t('studio');
       const busy = ['downloading', 'verifying', 'installing'].includes(setup?.phase);
       return h('div', { style: { display: 'grid', gap: 8 } },
-        h(StatusLine, { label }, setup?.installed ? installedText : t('notInstalled')),
+        h(StatusLine, { label: name }, setup?.installed ? installedText : t('notInstalled')),
         setup?.installed ? null : h(Button, { variant: 'outline', disabled: busy,
           onClick: () => { void start(); } }, t('setupButton', { app: name })),
         h('p', { style: subtle, role: 'status' }, busy
           ? t({ downloading: 'setupDownloading', verifying: 'setupVerifying', installing: 'setupInstalling' }[setup.phase], { app: name })
-          : t(hint)),
+          : t('studioHint')),
         requestFailed || setup?.phase === 'failed'
           ? h('p', { role: 'alert', style: subtle }, t(setup?.error === 'unsupported' ? 'setupUnsupported'
             : setup?.error === 'cleanupFailed' ? 'setupCleanup' : setup?.error === 'destinationExists' ? 'setupDestination' : 'setupFailed', { app: name })) : null);
@@ -187,16 +167,11 @@ window.__ModuleLoader__.load({
      */
     function PrintStudio({ view, t }) {
       const [status, setStatus] = React.useState(null);
-      const connect = useAppSetup('connect', view !== 'summary');
-      const studio = useAppSetup('studio', view !== 'summary');
+      const studio = useStudioSetup(view !== 'summary');
 
       const [error, setError] = React.useState('');
       const [note, setNote] = React.useState('');
       const [ssoWaiting, setSsoWaiting] = React.useState(false);
-      const [printJob, setPrintJob] = React.useState(null);
-      const [printStatus, setPrintStatus] = React.useState(null);
-      const [printBusy, setPrintBusy] = React.useState(false);
-      const [printError, setPrintError] = React.useState('');
 
       const load = React.useCallback(async (refresh = false) => {
         try {
@@ -265,45 +240,6 @@ window.__ModuleLoader__.load({
         }
       };
 
-      const startTestPrint = async () => {
-        setPrintBusy(true);
-        setPrintError('');
-        setPrintStatus(null);
-        try {
-          const response = await fetch('/api/print-studio/print/test', { method: 'POST', credentials: 'same-origin' });
-          const result = await response.json().catch(() => ({}));
-          if (!response.ok || result.error) throw new Error(result.error ?? `status ${response.status}`);
-          setPrintJob(result);
-        } catch (cause) {
-          setPrintError(cause instanceof Error ? cause.message : String(cause));
-        } finally {
-          setPrintBusy(false);
-        }
-      };
-
-      React.useEffect(() => {
-        if (printJob === null) return;
-        let active = true;
-        const poll = async () => {
-          try {
-            const response = await fetch('/api/print-studio/print/status', { credentials: 'same-origin', cache: 'no-store' });
-            const result = await response.json().catch(() => ({}));
-            if (!active) return;
-            if (!response.ok || result.error) {
-              setPrintError(result.error ?? `status ${response.status}`);
-              return;
-            }
-            setPrintStatus(result);
-            if (result.state === 'FINISH' || result.state === 'FAILED') active = false;
-          } catch {
-            // Keep polling while the printer is warming up.
-          }
-        };
-        void poll();
-        const timer = setInterval(() => { void poll(); }, 2000);
-        return () => { active = false; clearInterval(timer); };
-      }, [printJob]);
-
       if (view === 'summary') {
         if (status === null) return h('span', null, t('checking'));
         return h('span', null, status.ready ? t('ready') : t('needsSetup'));
@@ -313,7 +249,6 @@ window.__ModuleLoader__.load({
       const discovered = status?.discovered ?? [];
       const signedIn = status?.cloud?.signedIn === true;
       const slicer = status === null ? null : status.slicer;
-      const studioInstalled = studio.setup?.installed === true;
 
       const statusPanel = status === null ? null : h('div', { style: { display: 'grid', gap: 6 } },
         printer.mode === 'cloud' ? h(Tag, { tone: 'warning' }, t('cloudMode')) : null,
@@ -351,29 +286,8 @@ window.__ModuleLoader__.load({
               onClick: () => { void startSso(); } }, t('hostedSignIn')),
             ssoWaiting ? h('p', { style: subtle }, t('ssoWaitingDetail')) : null);
 
-
-      const studioSection = h(AppSetup, { app: 'studio', label: t('studio'), hint: 'studioHint', t, installer: studio,
+      const studioSection = h(StudioSetup, { t, installer: studio,
         installedText: slicer?.found ? `${slicer.name}${slicer.version === null ? '' : ` ${slicer.version}`}` : t('setupReady') });
-      const connectSection = h(AppSetup, { app: 'connect', label: t('connect'), hint: 'connectHint', t, installer: connect,
-        installedText: t('setupReady') });
-
-      const printSection = status?.ready && connect.setup?.installed && studioInstalled
-        ? h('div', { style: { display: 'grid', gap: 8 } },
-          h(Button, { variant: 'outline', disabled: printBusy, onClick: () => { void startTestPrint(); } },
-            printBusy ? t('slicing') : t('printTest')),
-          h('p', { style: subtle }, t('printTestHint')),
-          printJob === null ? null : h('div', { style: { display: 'grid', gap: 4 } },
-            printStatus === null
-              ? h('p', { style: subtle }, t('awaitingSend'))
-              : printStatus.state === 'FINISH'
-                ? h(StatusLine, { label: t('printProgress') }, t('printFinished'))
-                : printStatus.state === 'FAILED' || (printStatus.printError !== null && printStatus.printError !== 0)
-                  ? h('p', { role: 'alert', style: { margin: 0, fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' } },
-                    `${t('printFailed')} ${printStatus.failReason ?? printStatus.printError ?? ''}`)
-                  : h(StatusLine, { label: t('printProgress') },
-                    `${printStatus.percent ?? 0}% · ${printStatus.layer ?? 0}/${printStatus.totalLayers ?? 0} · ${printStatus.remainingMinutes ?? 0} ${t('printRemaining')}`),
-            printError === '' ? null : h('p', { role: 'alert', style: { margin: 0, fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' } }, printError)))
-        : null;
 
       const feedback = h(React.Fragment, null,
         error !== ''
@@ -385,7 +299,7 @@ window.__ModuleLoader__.load({
         h('p', { style: subtle }, t('intro')),
         status === null
           ? h('p', { style: subtle }, t('checking'))
-          : h('div', { style: { display: 'grid', gap: 12 } }, statusPanel, studioSection, connectSection, account, printSection, feedback),
+          : h('div', { style: { display: 'grid', gap: 12 } }, statusPanel, studioSection, account, feedback),
       );
     }
 

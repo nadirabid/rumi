@@ -8,10 +8,14 @@ import { connect } from 'node:net'
 import dgram from 'node:dgram'
 import { connect as tlsConnect } from 'node:tls'
 import { randomBytes } from 'node:crypto'
-import { managedAppRoot } from './connect.js'
 
 /** Printer profiles Print Studio knows how to configure. */
 export const MODELS = ['H2D', 'X1C', 'X1E', 'P1S', 'P1P', 'A1', 'A1 mini', 'H2S', 'X2D']
+
+/** Return Rumi’s managed Bambu Studio installation directory. @returns {string} */
+export function managedAppRoot() {
+  return join(process.env.DSH_RUMI_HOME || process.env.DSH_HOME || join(homedir(), '.rumi'), 'print-studio', 'applications')
+}
 
 /** Bambu Studio locations in priority order; the managed root is read lazily so `DSH_HOME` overrides apply. */
 const bambuApps = () => [join(managedAppRoot(), 'BambuStudio.app'), '/Applications/BambuStudio.app', join(homedir(), 'Applications', 'BambuStudio.app')]

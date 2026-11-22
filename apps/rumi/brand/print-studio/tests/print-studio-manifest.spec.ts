@@ -18,7 +18,7 @@ it('declares the bundle, client, patch, locale, icon, and runtime files', () => 
   expect(manifest.exports['./locale/*.json']).toBe('./locale/*.json')
   expect(manifest.exports['./icon']).toBe('./icon.svg')
   expect(manifest.files).toEqual(expect.arrayContaining([
-    'index.js', 'lib/client.js', 'lib/THREE-LICENSE.txt', 'viewer', 'slicer.js', 'connect.js', 'monitor.js', 'cordis.patch.yml', 'locale/*.json', 'icon.svg', 'lib/desktop', 'assets',
+    'index.js', 'lib/client.js', 'lib/THREE-LICENSE.txt', 'viewer', 'app-setup.js', 'monitor.js', 'cordis.patch.yml', 'locale/*.json', 'icon.svg', 'lib/desktop', 'assets',
   ]))
 })
 

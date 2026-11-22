@@ -7,11 +7,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 
 const fixture = vi.hoisted(() => ({ root: '', installed: false, calls: 0,
   release: null as null | (() => void) }))
-vi.mock('../brand/print-studio/connect.js', () => ({
-  managedAppRoot: () => fixture.root,
-  findBambuConnect: () => fixture.installed ? '/existing/Bambu Connect.app' : null,
-}))
 vi.mock('../brand/print-studio/probe.js', () => ({
+  managedAppRoot: () => fixture.root,
   findBambuStudio: () => fixture.installed ? '/existing/BambuStudio.app' : null,
 }))
 vi.mock('node:child_process', () => ({
@@ -22,7 +19,7 @@ vi.mock('node:child_process', () => ({
 }))
 // The plugin is shipped as JavaScript and has no generated declarations.
 // @ts-expect-error JavaScript plugin module
-import { connectSpec, createAppSetup, studioSpec, verifyArchive } from '../brand/print-studio/app-setup.js'
+import { createAppSetup, verifyArchive } from '../brand/print-studio/app-setup.js'
 
 afterEach(async () => {
   if (fixture.root) await rm(fixture.root, { recursive: true, force: true })
@@ -30,7 +27,7 @@ afterEach(async () => {
 })
 
 it('rejects modified downloads before mounting', async () => {
-  fixture.root = await mkdtemp(join(tmpdir(), 'rumi-connect-test-'))
+  fixture.root = await mkdtemp(join(tmpdir(), 'rumi-studio-test-'))
   const archive = join(fixture.root, 'archive')
   await writeFile(archive, 'verified fixture')
   const hash = createHash('sha256').update('verified fixture').digest('hex')
@@ -39,47 +36,44 @@ it('rejects modified downloads before mounting', async () => {
   await expect(verifyArchive(archive, hash)).rejects.toThrow('checksum mismatch')
 })
 
-const specs = [['Bambu Connect', connectSpec], ['Bambu Studio', studioSpec]] as const
-for (const [label, spec] of specs) {
-  it.skipIf(process.platform !== 'darwin')(`${label}: shares a download and waits for cleanup on shutdown`, async () => {
-    fixture.root = await mkdtemp(join(tmpdir(), 'rumi-connect-test-'))
-    const setup = createAppSetup(spec, { downloadTimeoutSeconds: 30, downloadRetries: 0 })
-    const first = setup.start()
-    expect(setup.start()).toBe(first)
+it.skipIf(process.platform !== 'darwin')('shares a download and waits for cleanup on shutdown', async () => {
+  fixture.root = await mkdtemp(join(tmpdir(), 'rumi-studio-test-'))
+  const setup = createAppSetup({ downloadTimeoutSeconds: 30, downloadRetries: 0 })
+  const first = setup.start()
+  expect(setup.start()).toBe(first)
+  await vi.waitFor(() => expect(fixture.release).not.toBeNull())
+  let disposed = false
+  const stopping = setup.dispose().then(() => { disposed = true })
+  expect(disposed).toBe(false)
+  fixture.release!()
+  await stopping
+  expect(fixture.calls).toBe(1)
+  expect(setup.status()).toEqual({ phase: 'failed', error: 'stopped', installed: false })
+  expect(await readdir(fixture.root)).toEqual([])
+  expect(setup.start()).toBeUndefined()
+})
+
+it.skipIf(process.platform !== 'darwin')('retains an existing app without downloading', async () => {
+  fixture.installed = true
+  const setup = createAppSetup({ downloadTimeoutSeconds: 30, downloadRetries: 0 })
+  await setup.start()
+  expect(setup.status()).toEqual({ phase: 'ready', error: null, installed: true })
+  expect(fixture.calls).toBe(0)
+  await setup.dispose()
+})
+
+it.skipIf(process.platform !== 'darwin')('allows retry after a failed download without retaining partial files', async () => {
+  fixture.root = await mkdtemp(join(tmpdir(), 'rumi-studio-test-'))
+  const setup = createAppSetup({ downloadTimeoutSeconds: 30, downloadRetries: 0 })
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    fixture.release = null
+    const pending = setup.start()
     await vi.waitFor(() => expect(fixture.release).not.toBeNull())
-    let disposed = false
-    const stopping = setup.dispose().then(() => { disposed = true })
-    expect(disposed).toBe(false)
     fixture.release!()
-    await stopping
-    expect(fixture.calls).toBe(1)
-    expect(setup.status()).toEqual({ phase: 'failed', error: 'stopped', installed: false })
+    await pending
+    expect(setup.status()).toEqual({ phase: 'failed', error: 'setupFailed', installed: false })
     expect(await readdir(fixture.root)).toEqual([])
-    expect(setup.start()).toBeUndefined()
-  })
-
-  it.skipIf(process.platform !== 'darwin')(`${label}: retains an existing app without downloading`, async () => {
-    fixture.installed = true
-    const setup = createAppSetup(spec, { downloadTimeoutSeconds: 30, downloadRetries: 0 })
-    await setup.start()
-    expect(setup.status()).toEqual({ phase: 'ready', error: null, installed: true })
-    expect(fixture.calls).toBe(0)
-    await setup.dispose()
-  })
-
-  it.skipIf(process.platform !== 'darwin')(`${label}: allows retry after a failed download without retaining partial files`, async () => {
-    fixture.root = await mkdtemp(join(tmpdir(), 'rumi-connect-test-'))
-    const setup = createAppSetup(spec, { downloadTimeoutSeconds: 30, downloadRetries: 0 })
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      fixture.release = null
-      const pending = setup.start()
-      await vi.waitFor(() => expect(fixture.release).not.toBeNull())
-      fixture.release!()
-      await pending
-      expect(setup.status()).toEqual({ phase: 'failed', error: 'setupFailed', installed: false })
-      expect(await readdir(fixture.root)).toEqual([])
-      expect(fixture.calls).toBe(attempt)
-    }
-    await setup.dispose()
-  })
-}
+    expect(fixture.calls).toBe(attempt)
+  }
+  await setup.dispose()
+})

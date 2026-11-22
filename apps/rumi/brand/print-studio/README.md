@@ -4,13 +4,13 @@ English | [中文](README.zh.md)
 
 Setup detection and guided Bambu Lab configuration for Rumi's 3D print workflow.
 
-This slice covers setup plus a real test print. It answers three setup questions and adds one end-to-end print path:
+Print Studio checks three parts of setup.
 
 - Is Bambu Studio installed?
 - Does it have the H2D profiles?
 - Is a printer configured and reachable on the LAN?
 
-The host half discovers the printer over SSDP, exposes `GET /api/print-studio/status`, the Bambu Cloud routes under `/api/print-studio/cloud/*`, the mesh viewer routes under `/api/print-studio/viewer/*`, and the model-facing tools. Signing in fetches the bound printer's `dev_access_code`; Bambu Connect sends the sliced job. The browser half is the Print Studio card under **Plugins → Built-in plugin settings**, plus the 3D preview tab. The bundled [setup skill](skills/print-studio-setup/SKILL.md) and [FDM design skill](skills/fdm-design/SKILL.md) are registered at plugin load for agent discovery. They provide setup guidance and design constraints; the agent loads their instructions when relevant.
+The host discovers printers over SSDP and exposes setup status, Bambu account sign-in, mesh viewer routes, and agent tools. Signing in fetches the bound printer’s access code for monitoring. The Print Studio card lives under **Plugins → Built-in plugin settings**. The bundled [setup skill](skills/print-studio-setup/SKILL.md) and [FDM design skill](skills/fdm-design/SKILL.md) guide printer setup and model design.
 
 Printer IP and serial are stored in `$DSH_HOME/print-studio/printer.json` (owner-only). The LAN access code is stored through `ctx.credentials` as `BAMBU_LAN_ACCESS_CODE`; it is never returned to the client and never belongs in the profile patch.
 
@@ -42,11 +42,9 @@ The viewer keeps arrangement actions on floating glass controls. Select and drag
 
 The viewer signals active agent work with a continuous teal surface sheen and model validation with a brighter scan that travels up and down the model. These effects use existing display geometry and one shared animation clock, draw at most 30 times per second, pause when hidden or offscreen, and remain still with Reduce Motion. Editing, model selection and print actions are disabled during work; camera orbit, zoom, precise pointing and returning to the model remain available. Work effects do not appear in project covers or alter model geometry. Validation results use the existing compact status indicator rather than a persistent text banner.
 
-## Test print
+## Print monitoring
 
-`POST /api/print-studio/print/test` (and the `print_studio_print_test` tool) slices the bundled 10 x 10 x 1.2 mm tile with Bambu Studio, sets the H2D dual-extruder project and the Supertack plate, and hands the sliced 3MF to Bambu Connect. Bambu Connect requires an adult to press **Send**; there is no supported API for that final authorization on macOS. `GET /api/print-studio/print/status` and `print_studio_progress` read progress, layers, temperatures, AMS, and errors over local MQTT.
-
-The test tile is about six minutes.
+`GET /api/print-studio/print/status` and `print_studio_progress` read progress, layers, temperatures, AMS, and errors over local MQTT.
 
 ## Mesh preview
 
@@ -221,8 +219,8 @@ Opening a project restores validation history without running checks. Publishing
 
 ### Bambu app setup
 
-On macOS, **Set up Bambu Studio** and **Set up Bambu Connect** in Print Studio install each app on request. Bambu Connect version 2.5.0-beta.15 downloads from Bambu's CDN for Apple Silicon or Intel. Bambu Studio version 02.09.01.70 downloads one universal disk image from the `bambulab/BambuStudio` GitHub release. Downloads use pinned SHA-256 checksums; the staged app must pass deep code-signature verification against Bambu's team `T3UBR9Y3B2` and macOS Gatekeeper assessment before installation. Rumi stores the apps under `$DSH_HOME/print-studio/applications` and also recognizes copies in `/Applications` and `~/Applications`.
+On macOS, choose **Set up Bambu Studio** to install Bambu Studio 02.09.01.70 from the `bambulab/BambuStudio` GitHub release. The installer verifies the universal disk image against a pinned SHA-256 checksum. The staged app must pass deep code-signature verification against Bambu’s team `T3UBR9Y3B2` and macOS Gatekeeper assessment. Rumi installs it under `$DSH_HOME/print-studio/applications` and recognizes copies in `/Applications` and `~/Applications`.
 
-Both installers share one implementation in `app-setup.js`, parameterized by a download specification. Setup reports downloading, verifying, installing, and failure states. Concurrent requests for one app share one operation. Failed setup does not replace an existing app; retry starts a new download. Plugin shutdown waits for the bounded operation and staging cleanup. A failed disk-image detach retains its staging directory and reports a cleanup failure. `appDownloadTimeoutSeconds` (900) and `appDownloadRetries` (2) configure network budgets for each download; each mount, copy, signature, and Gatekeeper step is limited to 600 seconds. Updating a pinned version requires updating its checksums and verifying the publisher signature and launch on each target. The apps retain their own update behavior and, for Bambu Connect, its confirmation window.
+Setup reports downloading, verifying, installing, and failure states. Concurrent requests share one installation. Failed setup preserves existing copies, and retry starts a new download. Plugin shutdown waits for the operation and staging cleanup. A failed disk-image detach retains the staging directory and reports a cleanup failure. `appDownloadTimeoutSeconds` (900) and `appDownloadRetries` (2) govern each download. Mount, copy, signature, and Gatekeeper steps each have a 600-second limit. When updating the pinned version, update its checksum and verify the publisher signature and launch on each target.
 
 Model-specific controls use `operation: fields` with data-only displacement lattices. Each control axis needs an entry in `values`, initially zero for fields. Validation distinguishes missing or malformed `values`, missing or duplicate bindings, invalid numbers, and more than 32 parameters; errors name the correction. The viewer interpolates and blends these fields on copies of selected USD mesh geometry; cancel restores the original. Frozen recipes use the same interpolation in Blender. No project code executes in the viewer. These edits preserve connectivity but do not guarantee thickness or freedom from intersections. See [field authoring](skills/mesh-edit-controls/references/fields.md).

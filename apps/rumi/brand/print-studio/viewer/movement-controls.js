@@ -15,7 +15,7 @@ export function createMovementControls(React, { Button, IconSlidersTwoOutlineReg
     element.style.setProperty('--pv-joint-y', `${point.y.toFixed(2)}%`)
   }
 
-  return function MovementControls({ spec, viewport, disabled, hidden, onError, t }) {
+  return function MovementControls({ spec, viewport, stage, disabled, hidden, onError, t }) {
     const [open, setOpen] = React.useState(true)
     const [selected, setSelected] = React.useState(null)
     const root = React.useRef(null), trigger = React.useRef(null)
@@ -53,7 +53,7 @@ export function createMovementControls(React, { Button, IconSlidersTwoOutlineReg
         const space = panelWidth + 32
         panel.toggleAttribute('data-left', left >= space && (left < right || right < space))
         panel.toggleAttribute('data-above', anchor.y > 50)
-      })
+      }, selected === null ? undefined : () => setSelected(null))
     }, [interactive, selected, spec.id, viewport])
 
     React.useLayoutEffect(() => {
@@ -65,7 +65,7 @@ export function createMovementControls(React, { Button, IconSlidersTwoOutlineReg
       const element = root.current
       const document = element.ownerDocument
       function dismiss(event) {
-        if (!element.contains(event.target)) setSelected(null)
+        if (!element.contains(event.target) && !stage.current?.contains(event.target)) setSelected(null)
       }
       function escape(event) {
         if (event.key !== 'Escape' || !element.closest('.pv-content').contains(event.target)) return
@@ -80,7 +80,7 @@ export function createMovementControls(React, { Button, IconSlidersTwoOutlineReg
         document.removeEventListener('pointerdown', dismiss)
         document.removeEventListener('keydown', escape)
       }
-    }, [interactive])
+    }, [interactive, stage])
 
     function change(values) {
       try { return viewport.current?.updateMotion(values, { id: spec.id, deferDraw: true }) ?? false }

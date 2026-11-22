@@ -230,6 +230,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       if (!marker) return
       marker.hit = marker.pick(hit, ray)
       marker.pinned = Boolean(marker.hit && pinned)
+    }, () => {
+      if (motionOverlay?.id === designUrl) motionOverlay.onCanvasClick?.()
     })
   const cameraChanged = () => { if (!hover.invalidate()) render() }
 
@@ -494,9 +496,15 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     modelParameters() { return { ...design?.parameters } },
     /** Movement is a local pose; it never changes saved parameters or validation inputs. */
     motionControls() { return motion ? { ...motion, id: designUrl } : null },
-    /** Publish each handle's viewport percentages and the viewport width in CSS pixels. Returns the subscription disposer. */
-    observeMotionAnchors(id, draw) {
-      const subscription = { id, draw }
+    /**
+     * Publish handle positions in viewport percentages and viewport width in CSS pixels.
+     * @param {string} id Loaded design URL.
+     * @param {Function} draw Receives handle positions and viewport width.
+     * @param {Function} [onCanvasClick] Receives a canvas click after the gesture ends.
+     * @returns {Function} Dispose the subscription.
+     */
+    observeMotionAnchors(id, draw, onCanvasClick) {
+      const subscription = { id, draw, onCanvasClick }
       motionOverlay = subscription
       drawMotionOverlay()
       return () => {

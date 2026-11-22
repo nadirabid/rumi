@@ -547,7 +547,8 @@ it('draws the latest slider pose once per frame and hides the joint when viewed 
     camera.lookAt(pivot)
     camera.updateMatrixWorld(true)
     const draw = vi.fn()
-    const unsubscribe = viewport.observeMotionAnchors(spec.url, draw)
+    const onCanvasClick = vi.fn()
+    const unsubscribe = viewport.observeMotionAnchors(spec.url, draw, onCanvasClick)
     const [anchor] = draw.mock.lastCall[0]
     expect(anchor.x).toBeCloseTo(50, 1)
     expect(anchor.y).toBeCloseTo(50, 1)
@@ -573,9 +574,19 @@ it('draws the latest slider pose once per frame and hides the joint when viewed 
     camera.updateMatrixWorld(true)
     viewport.setRegionFocused(false)
     expect(draw.mock.lastCall[0]).toEqual([anchor])
+    const listener = name => renderer.domElement.addEventListener.mock.calls.find(([kind]) => kind === name)[1]
+    const pointer = { isPrimary: true, button: 0, pointerId: 1, clientX: 200, clientY: 150, pointerType: 'mouse' }
+    listener('pointerdown')(pointer)
+    listener('pointermove')({ ...pointer, clientX: 220 })
+    listener('pointerup')({ ...pointer, clientX: 220 })
+    expect(onCanvasClick).not.toHaveBeenCalled()
+    listener('pointerdown')(pointer)
+    listener('pointerup')(pointer)
+    expect(onCanvasClick).toHaveBeenCalledOnce()
+    const drawn = draw.mock.calls.length
     unsubscribe()
     viewport.updateMotion({ joint0: 0 })
-    expect(draw).toHaveBeenCalledTimes(4)
+    expect(draw).toHaveBeenCalledTimes(drawn)
   } finally { await viewport.dispose() }
 })
 

@@ -585,7 +585,7 @@ export function installViewer(ctx, React, primitives) {
       view?.design && h(PrintLayoutPanel, { state: printState, available: !view.design.analog && !failed,
         busy: printBusy, working, message: printMessage, saveStatus, t, action: printAction }),
       h('div', { className: 'pv-bottom-controls', hidden: printState?.active },
-      motion && h(MovementControls, { key: motion.id, spec: { ...motion, label: t('motionControls') }, t, viewport,
+      motion && h(MovementControls, { key: motion.id, spec: { ...motion, label: t('motionControls') }, t, viewport, stage: holder,
         hidden: printState?.active, disabled: failed || working || Boolean(view?.design?.analog) || view?.design?.url !== motion.id,
         onError: () => setBuildError('buildFailed') }),
       h('div', { className: 'pv-cursor-controls', role: 'group', 'aria-label': t('cursorHighlighting') },

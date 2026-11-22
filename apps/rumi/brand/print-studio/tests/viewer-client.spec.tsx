@@ -12,6 +12,10 @@ import { en, zh } from '../viewer/locales.js'
 import { encodeStl } from '../viewer/stl.js'
 
 vi.mock('../viewer/viewer.module.css', () => ({ default: '' }))
+type JointProjection = { x: number; y: number } | null
+const observeMotionAnchors = vi.hoisted(() => vi.fn(
+  (_id: string, draw: (points: JointProjection[], width: number) => void, _onCanvasClick?: () => void) => draw([{ x: 40, y: 48 }, null], 750),
+))
 const viewport = vi.hoisted(() => ({ setActivity: vi.fn(), closePrintLayout: vi.fn(), motionControls: vi.fn(), updateMotion: vi.fn(), modelParameters: vi.fn(() => ({ width: 12 })), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setCursorMode: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
 vi.mock('../viewer/viewport/index.js', () => ({
   createViewport: (...args: unknown[]) => {
@@ -19,7 +23,7 @@ vi.mock('../viewer/viewport/index.js', () => ({
     return {
       setActivity: viewport.setActivity, closePrintLayout: viewport.closePrintLayout,
       motionControls: viewport.motionControls, updateMotion: viewport.updateMotion,
-      observeMotionAnchors: (_id: string, draw: (points: ({ x: number, y: number } | null)[], width: number) => void) => draw([{ x: 40, y: 48 }, null], 750),
+      observeMotionAnchors,
       motionUnit: () => 'degree',
       modelParameters: viewport.modelParameters, renderedHighlight: viewport.renderedHighlight,
       captureCursor: viewport.captureCursor, setCursorMode: viewport.setCursorMode, setHighlightVisible: viewport.setHighlightVisible,
@@ -38,6 +42,7 @@ const disposers: (() => void | Promise<void>)[] = []
 beforeEach(() => {
   vi.useFakeTimers()
   viewport.motionControls.mockReset().mockReturnValue(null)
+  observeMotionAnchors.mockClear()
   viewport.updateMotion.mockReset().mockReturnValue(true)
   viewport.applyDesign.mockReset().mockResolvedValue(null)
   viewport.captureCursor.mockReset().mockReturnValue({ status: 'no_hit' })
@@ -467,15 +472,35 @@ it('opens a single joint control, keeps its pose across dismissal and reload, an
   expect(slider.closest('.pv-joint-popover')?.hasAttribute('data-anchored')).toBe(true)
   expect(slider.closest('.pv-joint-popover')?.hasAttribute('data-left')).toBe(true)
   fireEvent.input(slider, { target: { value: '58' } })
-  expect([movement.textContent, slider.getAttribute('aria-label'), slider.getAttribute('aria-valuetext')]).toMatchInlineSnapshot(`
-    [
-      "Movement",
-      "Doors",
-      "58°",
-    ]
-  `)
   expect(viewport.updateMotion).toHaveBeenCalledWith({ doorAngle: 58, wheelAngle: 0 }, { id: motion.id, deferDraw: true })
-  fireEvent.keyDown(slider, { key: 'Escape' })
+  const model = screen.getByTestId('print-viewport')
+  fireEvent.pointerDown(model, { button: 2 })
+  fireEvent.pointerMove(model, { clientX: 200 })
+  fireEvent.pointerUp(model, { button: 2 })
+  fireEvent.wheel(model, { deltaY: -100 })
+  const [, draw, canvasClick] = observeMotionAnchors.mock.lastCall!
+  draw([null, null], 750)
+  expect(screen.getByRole('slider', { name: 'Doors' })).toBe(slider)
+  expect({
+    anchored: slider.closest('.pv-joint-popover')?.hasAttribute('data-anchored'),
+    joint: slider.getAttribute('aria-label'),
+    angle: slider.getAttribute('aria-valuetext'),
+  }).toMatchInlineSnapshot(`
+    {
+      "anchored": false,
+      "angle": "58°",
+      "joint": "Doors",
+    }
+  `)
+  draw([{ x: 60, y: 45 }, null], 750)
+  expect(slider.closest('.pv-joint-popover')?.hasAttribute('data-anchored')).toBe(true)
+  act(() => canvasClick?.())
+  expect(screen.queryByRole('slider')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Doors' }))
+  fireEvent.pointerDown(document.body)
+  expect(screen.queryByRole('slider')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Doors' }))
+  fireEvent.keyDown(screen.getByRole('slider', { name: 'Doors' }), { key: 'Escape' })
   expect(document.activeElement).toBe(movement)
   expect(movement.getAttribute('aria-expanded')).toBe('false')
   expect(screen.queryByRole('slider')).toBeNull()

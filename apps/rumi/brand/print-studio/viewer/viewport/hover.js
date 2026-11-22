@@ -13,9 +13,10 @@ const CLICK_SLOP = 4
  * @param {Function} [onMode] Receives the scope selected in the viewer.
  * @param {Function} [pickPreview] Picks edited geometry. Returns null for a miss or undefined to use the CPU surface index.
  * @param {Function} [onPoint] Receives the current visible hit, ray and whether the hit is pinned.
+ * @param {Function} [onClick] Called for a completed primary click, including a click on empty canvas.
  * @returns {object} Shared sphere uniform, invalidation, clearing and disposal controls.
  */
-export function createHover(canvas, camera, roots, render, onMode = () => {}, pickPreview, onPoint = () => {}) {
+export function createHover(canvas, camera, roots, render, onMode = () => {}, pickPreview, onPoint = () => {}, onClick = () => {}) {
   const sphere = { value: new THREE.Vector4(0, 0, 0, 0) }
   const pointer = new THREE.Vector2()
   const local = new THREE.Vector3()
@@ -110,6 +111,7 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}, pi
     const click = event.button === 0 && !moved(event)
     press = null
     if (!click) return
+    onClick()
     const release = Boolean(pinned)
     pinned = null
     cancelUpdate()

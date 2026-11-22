@@ -487,7 +487,8 @@ export async function packageTarget(
     await execute(['--dir', 'native/system/packages/entry', 'pack', '--pack-destination', buildPaths.packedLandlock], buildEnv, REPOSITORY_ROOT)
   }
   const prepareRuntime = async (): Promise<void> => {
-    await execute(['run', 'prepare:runtime', ...(signPrimaryRuntime ? ['--defer-primary-runtime-smoke'] : [])], downloadEnv)
+    const deferPrimaryRuntimeSmoke = target.platform === 'darwin' || signPrimaryRuntime
+    await execute(['run', 'prepare:runtime', ...(deferPrimaryRuntimeSmoke ? ['--defer-primary-runtime-smoke'] : [])], downloadEnv)
   }
   if (target.platform === 'darwin') {
     const results = await Promise.allSettled([packWorkspace(), prepareRuntime()])
@@ -509,14 +510,22 @@ export async function packageTarget(
       ...desktopElectronBuilderArguments(target, true),
       '--config.mac.notarize=false',
     ], electronBuilderEnv)
-    await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts'], targetEnv)
-    await withMacOSNotarizationProxy(mac?.notarizationProxy, () => packageMacOSArtifacts({
+    const verifyApplication = () => execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts'], targetEnv)
+    const notaryProxy = mac?.notarizationProxy
+    if (notaryProxy !== undefined) await verifyApplication()
+    const zipBuilderEnv = {
+      ...electronBuilderEnv,
+      ELECTRON_BUILDER_COMPRESSION_LEVEL: electronBuilderEnv.ELECTRON_BUILDER_COMPRESSION_LEVEL ?? '3',
+    }
+    await withMacOSNotarizationProxy(notaryProxy, () => packageMacOSArtifacts({
       arch: target.arch,
       // electron-builder named these artifacts after the published version, so locating them uses the same identifier.
       version: resolveDesktopBuildVersion(environment, packageVersion(join(APP_ROOT, 'package.json'), 'desktop package')),
       artifactsRoot: buildPaths.artifacts,
       environment: electronBuilderEnv,
-    }, artifact => execute(desktopElectronBuilderArguments(target, false, artifact), electronBuilderEnv)), undefined, undefined, proxyEvent)
+      ...(notaryProxy === undefined ? { verifyApplication } : {}),
+    }, artifact => execute(desktopElectronBuilderArguments(target, false, artifact),
+      artifact.format === 'zip' ? zipBuilderEnv : electronBuilderEnv)), undefined, undefined, proxyEvent)
   } else if (target.platform === 'darwin' && !invocation.unsigned && !invocation.skipNotarization) {
     await execute([...desktopElectronBuilderArguments(target, true), '--config.mac.notarize=false'], electronBuilderEnv)
     await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts'], targetEnv)

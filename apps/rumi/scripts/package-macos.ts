@@ -32,6 +32,8 @@ export interface MacOSArtifactRequest {
   readonly version: string
   readonly artifactsRoot: string
   readonly environment: NodeJS.ProcessEnv
+  /** Verify the original signed app before either artifact can be promoted. */
+  readonly verifyApplication?: () => Promise<void>
 }
 
 /** Apple-tool operations replaced by deterministic fixtures in orchestration tests. */
@@ -59,10 +61,10 @@ async function timed(label: string, action: () => Promise<void>, secrets: readon
 }
 
 /**
- * Notarize independent App/DMG copies concurrently, then promote their completed artifacts.
- * Both lanes settle before cleanup or rejection. The ZIP contains a stapled App; the DMG
+ * Notarize independent App/DMG copies while verifying the original signed app.
+ * All operations settle before promotion, cleanup, or rejection. The ZIP contains a stapled App; the DMG
  * carries its own ticket and encloses the signed App without an individually stapled ticket.
- * @param request - Signed directory build, release version, architecture, and credentials.
+ * @param request - Signed directory build, release version, architecture, credentials, and optional app verification.
  * @param build - Runs electron-builder with publishing disabled; resolves only after its DMG
  * notarization and verification hook succeeds, and rejects on build or hook failure.
  * @param apple - Apple signing, copying, and notarization operations.
@@ -73,7 +75,7 @@ export async function packageMacOSArtifacts(
   build: (artifact: DesktopPrepackagedArtifact) => Promise<void>,
   apple: MacOSArtifactOperations = operations,
 ): Promise<void> {
-  const { arch, version, artifactsRoot, environment } = request
+  const { arch, version, artifactsRoot, environment, verifyApplication } = request
   const secrets = Object.entries(environment).filter(([name]) => /KEY|SECRET|TOKEN|PASSWORD|APPLE_ID/iu.test(name)).map(([, value]) => value ?? '')
   const expected = resolveMacOSSigningEnvironment(environment)
   const credentials = resolveMacOSNotarizationEnvironment(environment)
@@ -86,14 +88,14 @@ export async function packageMacOSArtifacts(
   const dmgOutput = join(root, 'dmg-artifacts')
   try {
     await verifyMacOSAppUpdateConfig(appPath, update)
-    await apple.copyApp(appPath, zipApp)
-    await apple.copyApp(appPath, dmgApp)
-    await verifyMacOSAppUpdateConfig(zipApp, update)
-    await verifyMacOSAppUpdateConfig(dmgApp, update)
-    apple.verifySignature(zipApp, expected)
-    apple.verifySignature(dmgApp, expected)
+    const prepareCopy = async (destination: string) => {
+      await apple.copyApp(appPath, destination)
+      await verifyMacOSAppUpdateConfig(destination, update)
+      apple.verifySignature(destination, expected)
+    }
     const results = await Promise.allSettled([
       timed('App notarization and ZIP', async () => {
+        await timed('App notarization copy preparation', () => prepareCopy(zipApp), secrets)
         await timed('App notarization and verification', async () => {
           await apple.notarize({ appPath: zipApp, ...credentials })
           apple.verifyNotarization(zipApp, expected)
@@ -101,12 +103,14 @@ export async function packageMacOSArtifacts(
         await timed('ZIP and update metadata creation', () => build({ format: 'zip', appPath: zipApp, output: zipOutput }), secrets)
       }, secrets),
       timed('DMG creation and notarization', async () => {
+        await timed('DMG notarization copy preparation', () => prepareCopy(dmgApp), secrets)
         await build({ format: 'dmg', appPath: dmgApp, output: dmgOutput })
       }, secrets),
+      Promise.resolve().then(verifyApplication),
     ])
     const failures = results.filter(result => result.status === 'rejected')
     if (failures.length > 0) {
-      throw new AggregateError(failures.map(result => result.reason), 'desktop macOS packaging: artifact lanes failed')
+      throw new AggregateError(failures.map(result => result.reason), 'desktop macOS packaging: release qualification failed')
     }
     await verifyMacOSAppUpdateConfig(zipApp, update)
     await verifyMacOSAppUpdateConfig(dmgApp, update)

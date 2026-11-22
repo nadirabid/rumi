@@ -56,7 +56,11 @@ Artifacts land in `apps/rumi/.desktop-build/targets/mac-arm64/unsigned-artifacts
 
 Electron archives, including cached copies, are verified against the checksums shipped with the matching installed Electron npm package.
 
-macOS packaging prepares the bundled runtimes while packing the workspace dependencies. Both stages must finish before assembly. The release log reports app notarization and update ZIP creation separately.
+macOS packaging prepares the bundled runtimes while packing the workspace dependencies. Electron, the primary runtime, and Blender prepare concurrently. Bullet uses Electron’s minimum macOS version. Assembly waits for all runtimes and workspace packages. The full package runs the primary runtime’s execution check after runtime preparation and any native signing.
+
+For signed macOS releases, each notarization task prepares and verifies its own copy of the signed app. The packaged runtime check runs on the original app while notarization runs on the copies. Packaging moves the verified artifacts into the release directory after both artifact tasks and the runtime check succeed. A configured system notarization proxy is applied after the runtime check. The log reports copy preparation, app notarization, and update ZIP creation separately.
+
+The macOS update ZIP uses Electron Builder compression level 3 by default and produces a blockmap from the finished archive. Packaging accepts an explicit `ELECTRON_BUILDER_COMPRESSION_LEVEL` override.
 
 Rumi packages the full Blender runtime under `Resources/runtime/blender`; no separate Blender installation is required. `apps/rumi/scripts/blender-runtime.lock.json` pins each binary and the source archive by SHA-256. Preparation downloads verified archives through Blender's mirror service, retains the original license notices and macOS signatures, and includes the Blender source archive. Update the lock together when changing Blender versions. The packaged smoke creates a mesh, saves its editable original, exports USD, and reopens the original using only bundled paths. The macOS launcher disables Python bytecode writes and user Python paths; the smoke rechecks Blender’s signature after execution.
 

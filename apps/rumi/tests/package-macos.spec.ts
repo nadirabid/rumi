@@ -1,4 +1,4 @@
-/** Exercise notarization overlap and artifact isolation without Apple credentials or network. */
+/** Exercise runtime verification, notarization overlap, and artifact isolation without Apple credentials or network. */
 
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -66,40 +66,57 @@ async function fixture(arch: 'arm64' | 'x64' = 'arm64') {
 describe('parallel macOS artifacts', () => {
   it.each(['arm64', 'x64'] as const)('overlaps notarization on isolated %s copies and promotes only completed payloads', async (arch) => {
     const f = await fixture(arch)
-    const appStarted = barrier()
     const appAccepted = barrier()
+    const dmgCopyReady = barrier()
     const dmgCompleted = barrier()
-    const zipCompleted = barrier()
+    const smokeCompleted = barrier()
+    const verifyStarted = vi.fn()
     const starts: string[] = []
+    const built: string[] = []
     const copies: string[] = []
-    const operation = packageMacOSArtifacts(f.request, async (artifact) => {
+    const operation = packageMacOSArtifacts({
+      ...f.request,
+      verifyApplication: async () => {
+        verifyStarted()
+        await smokeCompleted.promise
+        expect(await readFile(join(f.appPath, 'payload'), 'utf8')).toBe('signed content')
+        expect(existsSync(join(f.appPath, 'ticket'))).toBe(false)
+      },
+    }, async (artifact) => {
       starts.push(artifact.format)
       if (artifact.format === 'dmg') await dmgCompleted.promise
       await f.build(artifact)
-      if (artifact.format === 'zip') zipCompleted.release()
+      built.push(artifact.format)
     }, {
       ...f.apple,
       copyApp: async (source, destination) => {
         copies.push(destination)
+        if (dirname(destination).endsWith('dmg')) await dmgCopyReady.promise
         await f.apple.copyApp(source, destination)
       },
       notarize: async (options) => {
         starts.push('app')
-        appStarted.release()
         await appAccepted.promise
         await f.apple.notarize(options)
       },
     })
     try {
-      await appStarted.promise
+      await vi.waitFor(() => {
+        expect(starts).toEqual(['app'])
+        expect(verifyStarted).toHaveBeenCalledOnce()
+      })
+      dmgCopyReady.release()
       await vi.waitFor(() => { expect([...starts]).toEqual(expect.arrayContaining(['app', 'dmg'])) })
       expect(new Set(copies).size).toBe(2)
       expect(copies.every(path => path !== f.appPath)).toBe(true)
       appAccepted.release()
-      await zipCompleted.promise
+      await vi.waitFor(() => { expect(built).toEqual(['zip']) })
       expect(existsSync(join(f.appPath, 'ticket'))).toBe(false)
       expect(existsSync(join(f.request.artifactsRoot, `${f.base}.zip`))).toBe(false)
       dmgCompleted.release()
+      await vi.waitFor(() => { expect(built).toEqual(['zip', 'dmg']) })
+      expect(await readdir(f.request.artifactsRoot)).toEqual([arch === 'arm64' ? 'mac-arm64' : 'mac'])
+      smokeCompleted.release()
       await operation
       expect(JSON.parse(await readFile(join(f.request.artifactsRoot, `${f.base}.zip`), 'utf8')))
         .toEqual({ payload: 'signed content', appTicket: true })
@@ -113,7 +130,9 @@ describe('parallel macOS artifacts', () => {
       expect(f.apple.verifyNotarization).toHaveBeenCalledTimes(1)
     } finally {
       appAccepted.release()
+      dmgCopyReady.release()
       dmgCompleted.release()
+      smokeCompleted.release()
       await Promise.allSettled([operation])
       await rm(f.root, { recursive: true, force: true })
     }
@@ -161,7 +180,7 @@ describe('parallel macOS artifacts', () => {
     }
   })
 
-  it.each(['copy', 'signature', 'post-signature', 'ticket', 'metadata', 'update-config', 'post-update-config'] as const)('rejects incomplete %s qualification without promoting artifacts', async (failure) => {
+  it.each(['copy', 'signature', 'post-signature', 'ticket', 'metadata', 'update-config', 'post-update-config', 'runtime'] as const)('rejects incomplete %s qualification without promoting artifacts', async (failure) => {
     const f = await fixture()
     try {
       if (failure === 'update-config') {
@@ -179,7 +198,10 @@ describe('parallel macOS artifacts', () => {
         } : {}),
         ...(failure === 'ticket' ? { verifyNotarization: () => { throw new Error('ticket failed') } } : {}),
       }
-      await expect(packageMacOSArtifacts(f.request, async (artifact) => {
+      await expect(packageMacOSArtifacts({
+        ...f.request,
+        verifyApplication: async () => { if (failure === 'runtime') throw new Error('runtime check failed') },
+      }, async (artifact) => {
         await f.build(artifact)
         if (failure === 'metadata' && artifact.format === 'zip') {
           await writeFile(join(artifact.output, 'nightly-mac.yml'), '')

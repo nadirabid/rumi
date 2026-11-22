@@ -4,7 +4,6 @@ import { constants } from 'node:fs'
 import { open, lstat, realpath } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { parseExitStatus } from '@deepseek-ai/dsh-shell'
 import { discoverModels } from './viewer/catalog.js'
 import { readModelRegions } from './viewer/model-regions.js'
 import { USD_MAX_BYTES } from './viewer/usd.js'
@@ -60,8 +59,8 @@ function recordToolOutcome(action, message) {
   if (message.isError || action.tool !== 'bash') return
   const output = message.content.find(block => block.type === 'text')?.text ?? ''
   const tail = output.slice(-4096)
-  const { exitCode, signal } = parseExitStatus(tail)
-  if (signal || exitCode !== 0 || /(?:^|\n)\[(?:timed out after |stopped: )/u.test(tail)) action.outcome = 'failed'
+  const exitMarker = /\n\[(?:exit code: 0*[1-9]\d*|killed by signal: [^\]\n]+)\]$/u
+  if (exitMarker.test(tail) || /(?:^|\n)\[(?:timed out after |stopped: )/u.test(tail)) action.outcome = 'failed'
   if (output.startsWith('started background job ') || tail.includes('[still running after ')) action.outcome = 'background'
   const match = /(?:^|\n)RUMI_CHECKS (\{[^\n]{1,65536}\})/u.exec(output)
   if (match) {

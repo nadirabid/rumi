@@ -83,6 +83,7 @@ export const Config = z.object({
   skillReminders: z.object({
     enabled: z.boolean().default(true),
     credential: z.string().min(1).default('BASETEN_API_KEY'),
+    everySteps: z.number().step(1).min(1).max(2).default(1),
     timeoutMs: z.number().step(1).min(100).max(10000).default(2000),
     maxTextChars: z.number().step(1).min(256).max(16000).default(4000),
     maxModels: z.number().step(1).min(1).max(64).default(16),

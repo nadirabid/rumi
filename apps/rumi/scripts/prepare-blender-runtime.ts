@@ -18,8 +18,15 @@ type Target = keyof typeof lock.targets
  */
 export async function prepareBlenderRuntime(target: Target, runtime: string, cache: string): Promise<void> {
   const artifact = lock.targets[target]
-  const archive = await downloadPrimaryRuntimeAsset(`https://mirror.blender.org/release/Blender${lock.version.split('.').slice(0, 2).join('.')}/${artifact.filename}`, artifact.sha256, cache)
-  const source = await downloadPrimaryRuntimeAsset(lock.source.url, lock.source.sha256, cache)
+  const release = lock.version.split('.').slice(0, 2).join('.')
+  const [binaryDownload, sourceDownload] = await Promise.allSettled([
+    downloadPrimaryRuntimeAsset(`https://mirror.blender.org/release/Blender${release}/${artifact.filename}`, artifact.sha256, cache),
+    downloadPrimaryRuntimeAsset(lock.source.url, lock.source.sha256, cache),
+  ])
+  if (binaryDownload.status === 'rejected') throw binaryDownload.reason
+  if (sourceDownload.status === 'rejected') throw sourceDownload.reason
+  const archive = binaryDownload.value
+  const source = sourceDownload.value
   mkdirSync(runtime, { recursive: true })
   const stage = mkdtempSync(join(runtime, '.blender-'))
   const destination = join(runtime, 'blender')

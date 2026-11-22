@@ -11,7 +11,9 @@ const state = vi.hoisted(() => ({
   target: 'mac-arm64' as 'mac-arm64' | 'mac-x64' | 'win-x64',
   pnpm: '11.7.0' as string | undefined,
   failure: undefined as 'electron' | 'primary' | 'bullet' | 'cli' | undefined,
+  downloadElectron: vi.fn(),
   preparePrimary: vi.fn(),
+  prepareBlender: vi.fn(),
   prepareBullet: vi.fn(),
   commandLink: vi.fn(),
 }))
@@ -22,7 +24,7 @@ vi.mock('../scripts/desktop-build-paths.mjs', async importOriginal => ({
     runtime: join(state.root, 'runtime'), electron: join(state.root, 'electron'), downloads: join(state.root, 'downloads'),
   }),
 }))
-vi.mock('@electron/get', () => ({ downloadArtifact: async () => 'electron.zip' }))
+vi.mock('@electron/get', () => ({ downloadArtifact: state.downloadElectron }))
 vi.mock('extract-zip', () => ({ default: async () => {
   if (state.failure === 'electron') throw new Error('Electron extraction failed')
 } }))
@@ -44,10 +46,9 @@ vi.mock('node:fs', async (importOriginal) => {
 vi.mock('../scripts/prepare-primary-runtime.ts', () => ({
   preparePrimaryRuntime: state.preparePrimary,
 }))
-vi.mock('../scripts/prepare-blender-runtime.ts', () => ({ prepareBlenderRuntime: vi.fn() }))
+vi.mock('../scripts/prepare-blender-runtime.ts', () => ({ prepareBlenderRuntime: state.prepareBlender }))
 vi.mock('../scripts/prepare-bullet-runtime.ts', () => ({ prepareBulletRuntime: state.prepareBullet }))
 
-const originalArgv = process.argv
 beforeEach(() => {
   vi.resetModules()
   vi.clearAllMocks()
@@ -55,8 +56,9 @@ beforeEach(() => {
   state.target = 'mac-arm64'
   state.pnpm = '11.7.0'
   state.failure = undefined
-  process.argv = [process.execPath, 'prepare-runtime.ts']
   vi.stubEnv('DSH_DESKTOP_PACKAGING_RUN_DIR', undefined)
+  state.downloadElectron.mockResolvedValue('electron.zip')
+  state.prepareBlender.mockResolvedValue(undefined)
   state.prepareBullet.mockImplementation(async () => {
     if (state.failure === 'bullet') throw new Error('Bullet preparation failed')
     mkdirSync(join(state.root, 'runtime', 'bullet'), { recursive: true })
@@ -76,7 +78,6 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-  process.argv = originalArgv
   vi.unstubAllEnvs()
   await rm(state.root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
 })
@@ -84,10 +85,10 @@ afterEach(async () => {
 it.each(['mac-arm64', 'mac-x64', 'win-x64'] as const)('prepares %s with one pnpm distribution and its CLI resources', async (target) => {
   state.target = target
   const windows = target === 'win-x64'
-  if (windows) process.argv.push('--defer-primary-runtime-smoke')
   const runtime = join(state.root, 'runtime')
   mkdirSync(join(runtime, 'pnpm'), { recursive: true })
-  await import('../scripts/prepare-runtime.ts')
+  const { prepareDesktopRuntime } = await import('../scripts/prepare-runtime.ts')
+  await prepareDesktopRuntime(windows)
   expect(existsSync(join(runtime, 'pnpm'))).toBe(false)
   expect(existsSync(join(runtime, 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.mjs'))).toBe(true)
   expect(existsSync(join(runtime, 'bin', 'node'))).toBe(true)
@@ -113,7 +114,10 @@ it.each([
   const runtime = join(state.root, 'runtime')
   mkdirSync(runtime)
   writeFileSync(join(runtime, 'versions.json'), 'stale versions')
-  await expect(import('../scripts/prepare-runtime.ts')).rejects.toThrow(error)
+  const { prepareDesktopRuntime } = await import('../scripts/prepare-runtime.ts')
+  const preparing = prepareDesktopRuntime(false)
+  if (failure === 'cli') await expect(preparing).rejects.toThrow(error)
+  else await expect(preparing).rejects.toMatchObject({ errors: [new Error(error)] })
   expect(existsSync(join(runtime, 'versions.json'))).toBe(false)
 })
 
@@ -122,8 +126,48 @@ it.each([
   [undefined, 'primary-runtime manifest has no pnpm version'],
 ])('rejects pnpm metadata %s even when Windows smoke is deferred', async (pnpm, error) => {
   state.target = 'win-x64'
-  process.argv.push('--defer-primary-runtime-smoke')
   state.pnpm = pnpm
-  await expect(import('../scripts/prepare-runtime.ts')).rejects.toThrow(error)
+  const { prepareDesktopRuntime } = await import('../scripts/prepare-runtime.ts')
+  await expect(prepareDesktopRuntime(true)).rejects.toThrow(error)
   expect(existsSync(join(state.root, 'runtime', 'versions.json'))).toBe(false)
+})
+
+it('starts independent runtimes while Electron is downloading and drains them on failure', async () => {
+  const runtime = join(state.root, 'runtime')
+  const downloads = join(state.root, 'downloads')
+  const electron = Promise.withResolvers<string>()
+  const primary = Promise.withResolvers<void>()
+  const blender = Promise.withResolvers<void>()
+  const bullet = Promise.withResolvers<void>()
+  state.downloadElectron.mockReturnValueOnce(electron.promise)
+  state.preparePrimary.mockReturnValueOnce(primary.promise)
+  state.prepareBlender.mockReturnValueOnce(blender.promise)
+  state.prepareBullet.mockReturnValueOnce(bullet.promise)
+  const { prepareDesktopRuntime } = await import('../scripts/prepare-runtime.ts')
+  const complete = vi.fn<(outcome: unknown) => void>()
+  const preparing = prepareDesktopRuntime(false).then(complete, complete)
+  try {
+    expect(state.preparePrimary).toHaveBeenCalledWith({ deferSmoke: false })
+    expect(state.prepareBlender).toHaveBeenCalledWith('mac-arm64', runtime, downloads)
+    expect(state.prepareBullet).not.toHaveBeenCalled()
+
+    electron.resolve('electron.zip')
+    await vi.waitFor(() => {
+      expect(state.prepareBullet).toHaveBeenCalledWith('mac-arm64', runtime, downloads, '12.0')
+    })
+
+    primary.reject(new Error('primary preparation failed'))
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(complete).not.toHaveBeenCalled()
+    expect(existsSync(runtime)).toBe(true)
+    expect(existsSync(join(runtime, 'versions.json'))).toBe(false)
+  } finally {
+    electron.resolve('electron.zip')
+    primary.resolve()
+    blender.resolve()
+    bullet.resolve()
+    await preparing
+  }
+  expect(complete).toHaveBeenCalledWith(expect.objectContaining({ errors: [new Error('primary preparation failed')] }))
+  expect(existsSync(runtime)).toBe(false)
 })

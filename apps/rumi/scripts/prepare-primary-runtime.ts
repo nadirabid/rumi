@@ -9,7 +9,7 @@ import { scrubWindowsSigningEnvironment } from './windows-sign.mjs'
 
 /**
  * Prepare Desktop resources for its selected packaging target.
- * @param options - Signed Windows packaging defers execution until its supervised signing stage.
+ * @param options - macOS and signed Windows packaging defer execution until after runtime preparation and any native signing.
  * @returns Resolves after preparation and, unless deferred, native-target execution checks.
  */
 export async function preparePrimaryRuntime(options: { deferSmoke?: boolean } = {}): Promise<void> {

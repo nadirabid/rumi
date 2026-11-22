@@ -56,27 +56,45 @@ function prepareCli({ platform, arch }: DesktopTarget): void {
   cpSync(join(import.meta.dirname, 'command-path.ps1'), join(cli, 'command-path.ps1'))
 }
 
-async function main(): Promise<void> {
-  const { values } = parseArgs({ options: { 'defer-primary-runtime-smoke': { type: 'boolean', default: false } } })
-  const target = desktopTargetPlatform(resolveDesktopBuildTarget())
+/**
+ * Prepare the target runtimes and publish their versions after all stages succeed.
+ * @param deferPrimaryRuntimeSmoke - Leave the execution check to the later full-package preparation stage.
+ * @returns Resolves after every payload is ready. A failure drains the other stages before removing the incomplete runtime.
+ */
+export async function prepareDesktopRuntime(deferPrimaryRuntimeSmoke: boolean): Promise<void> {
+  const targetName = resolveDesktopBuildTarget()
+  const target = desktopTargetPlatform(targetName)
+  const journal = process.env.DSH_DESKTOP_PACKAGING_RUN_DIR
   rmSync(RUNTIME_ROOT, { recursive: true, force: true })
   mkdirSync(RUNTIME_ROOT, { recursive: true })
-  const nodeVersion = await prepareElectron(target)
-  await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:primary-runtime',
-    () => preparePrimaryRuntime({ deferSmoke: values['defer-primary-runtime-smoke'] }))
-  await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:blender',
-    () => prepareBlenderRuntime(resolveDesktopBuildTarget(), RUNTIME_ROOT, BUILD_PATHS.downloads))
-  await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:bullet',
-    () => prepareBulletRuntime(resolveDesktopBuildTarget(), RUNTIME_ROOT, BUILD_PATHS.downloads,
-      target.platform === 'darwin' ? minimumMacOSVersion() : undefined))
-  const { pnpm } = await readPrimaryRuntime(join(RUNTIME_ROOT, 'primary-runtime'))
-  if (pnpm === undefined) throw new Error('desktop runtime: primary-runtime manifest has no pnpm version')
-  await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:cli', async () => { prepareCli(target) })
-  writeFileSync(join(RUNTIME_ROOT, 'versions.json'), `${JSON.stringify({
-    schemaVersion: 1,
-    node: nodeVersion,
-    pnpm,
-  }, undefined, 2)}\n`)
+  try {
+    const electron = prepareElectron(target)
+    const results = await Promise.allSettled([
+      packagingStep(journal, 'prepare:primary-runtime', () => preparePrimaryRuntime({ deferSmoke: deferPrimaryRuntimeSmoke })),
+      packagingStep(journal, 'prepare:blender', () => prepareBlenderRuntime(targetName, RUNTIME_ROOT, BUILD_PATHS.downloads)),
+      electron.then(() => packagingStep(journal, 'prepare:bullet', () => prepareBulletRuntime(
+        targetName, RUNTIME_ROOT, BUILD_PATHS.downloads, target.platform === 'darwin' ? minimumMacOSVersion() : undefined,
+      ))),
+    ])
+    const failures = results.filter(result => result.status === 'rejected').map(({ reason }): unknown => reason)
+    if (failures.length > 0) throw new AggregateError(failures, 'desktop runtime: preparation failed')
+    const { pnpm } = await readPrimaryRuntime(join(RUNTIME_ROOT, 'primary-runtime'))
+    if (pnpm === undefined) throw new Error('desktop runtime: primary-runtime manifest has no pnpm version')
+    await packagingStep(journal, 'prepare:cli', async () => { prepareCli(target) })
+    writeFileSync(join(RUNTIME_ROOT, 'versions.json'), `${JSON.stringify({
+      schemaVersion: 1,
+      node: await electron,
+      pnpm,
+    }, undefined, 2)}\n`)
+  } catch (error) {
+    try { rmSync(RUNTIME_ROOT, { recursive: true, force: true }) } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'desktop runtime: could not remove incomplete preparation')
+    }
+    throw error
+  }
 }
 
-await main()
+if (import.meta.main) {
+  const { values } = parseArgs({ options: { 'defer-primary-runtime-smoke': { type: 'boolean', default: false } } })
+  await prepareDesktopRuntime(values['defer-primary-runtime-smoke'])
+}

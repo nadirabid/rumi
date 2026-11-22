@@ -1,10 +1,36 @@
 /** Packaged modeling resolves its own runtime even when a separate Blender is installed. */
-import { mkdtemp, mkdir, copyFile, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, copyFile, readdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { expect, it } from 'vitest'
-import { smokeBlenderRuntime } from '../scripts/prepare-blender-runtime.ts'
+import { expect, it, vi } from 'vitest'
+import * as downloads from '../../../scripts/primary-runtime/prepare.ts'
+import { prepareBlenderRuntime, smokeBlenderRuntime } from '../scripts/prepare-blender-runtime.ts'
+
+it('waits for both Blender downloads to settle before reporting a failure', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-blender-downloads-'))
+  const binary = Promise.withResolvers<string>()
+  const failure = new Error('source download failed')
+  const download = vi.spyOn(downloads, 'downloadPrimaryRuntimeAsset')
+    .mockReturnValueOnce(binary.promise)
+    .mockRejectedValueOnce(failure)
+  const complete = vi.fn<(outcome: unknown) => void>()
+  const prepared = prepareBlenderRuntime('mac-arm64', root, root).then(complete, complete)
+  try {
+    expect(download).toHaveBeenCalledTimes(2)
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(complete).not.toHaveBeenCalled()
+    binary.resolve(join(root, 'verified-binary.dmg'))
+    await prepared
+    expect(complete).toHaveBeenCalledWith(failure)
+    expect(await readdir(root)).toEqual([])
+  } finally {
+    binary.resolve(join(root, 'verified-binary.dmg'))
+    await prepared
+    download.mockRestore()
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 it('uses the packaged Blender, honors explicit overrides, and exposes a damaged bundle instead of falling back', async () => {
   const root = await mkdtemp(join(tmpdir(), 'rumi-runtime-resolution-'))

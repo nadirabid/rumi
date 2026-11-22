@@ -20,6 +20,7 @@ import * as THREE from 'three'
 import { createActivity } from './activity.js'
 import { createHover } from './hover.js'
 import { createHighlight } from './highlight.js'
+import { cursorMeshSnapshot } from './cursor-geometry.js'
 import { createRegionPicker, regionAnchor } from './region-marker.js'
 import { modelRegionAt, modelRegionReference } from '../model-regions.js'
 import { createEditPicker } from './edit-picking.js'
@@ -596,7 +597,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         path: designSpec.path, revision: designSpec.revision, url: designUrl, transform: designSpec.transform,
       } : null
       const savedHit = motionPreview?.savedHit(hit.object, hit.point)
-      let object = savedHit?.node ?? hit.object, objectId = null, path = []
+      const savedNode = savedHit?.node ?? hit.object
+      let object = savedNode, objectId = null, path = []
       while (object && object !== designRoot && object !== scene) {
         if (!object.userData.rumiCoordinateFrame) path.unshift(object.name || `child[${object.parent ? object.parent.children.indexOf(object) : 0}]`)
         for (const [id, entry] of objects) if (entry.mesh === object) objectId = id
@@ -605,10 +607,13 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       const point = hit.point.toArray()
       const selection = { partPath: path, surfaceId: hit.surfaceId, mode: ['patch', 'surface', 'part', 'edge'][hit.mode] }
       let modelLocalBlob = null
+      let mesh = { meshUnavailable: 'unsupported_model' }
       if (object === designRoot) {
         const center = savedHit ? savedHit.point.toArray() : designRoot.worldToLocal(hit.point.clone()).toArray()
         const radius = hit.radius / Math.abs(designRoot.getWorldScale(new THREE.Vector3()).x)
         modelLocalBlob = { center, radii: [radius, radius, radius], rotationDegrees: [0, 0, 0] }
+        try { mesh = cursorMeshSnapshot(hit, savedNode, designRoot, selection.mode) }
+        catch (error) { mesh = { meshUnavailable: 'geometry_unavailable' }; console.warn('Cursor mesh extraction failed', error) }
       }
       const size = renderer.getSize(new THREE.Vector2())
       const ratio = renderer.getPixelRatio()
@@ -629,7 +634,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         identity: { sceneRevision, design: designIdentity },
         region: { objectId, partPath: path, faceIndex: hit.faceIndex, worldPoint: point, worldRadius: hit.radius, modelLocalPoint: modelLocalBlob?.center ?? null, modelLocalBlob, selection },
         camera: { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), fov: camera.getEffectiveFOV(), aspect: camera.aspect },
-        image,
+        image, ...mesh,
       }
     },
     /** Change the cursor scope at the pinned point or the next pointer hit. */

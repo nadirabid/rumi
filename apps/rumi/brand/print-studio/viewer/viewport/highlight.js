@@ -1,5 +1,6 @@
 /** Viewer-owned Gaussian surface-to-wireframe treatment on temporary display copies. */
 import * as THREE from 'three'
+import { CURSOR_FALLOFF } from './cursor-geometry.js'
 import { createSurfaceIndex, partPath } from './surfaces.js'
 
 /**
@@ -115,7 +116,7 @@ export function createHighlight(root, highlight, hover = null, activity = null, 
             float cursorAmount = 0.0;
             if (rumiHover.w > 0.0) {
               vec3 q = (rumiWorldPoint - rumiHover.xyz) / rumiHover.w;
-              cursorAmount = smoothstep(0.08, 0.42, exp(-1.5 * dot(q, q)));
+              cursorAmount = smoothstep(${CURSOR_FALLOFF.threshold}, 0.42, exp(-${CURSOR_FALLOFF.exponent} * dot(q, q)));
             }
             vec3 edges = smoothstep(vec3(0.0), fwidth(rumiBary) * 1.25, rumiBary);
             float edge = 1.0 - min(min(edges.x, edges.y), edges.z);

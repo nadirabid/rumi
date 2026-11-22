@@ -24,7 +24,7 @@ import { createViewerDiagnostics } from './diagnostics.js'
 import { createHighlightReceipts } from './receipts.js'
 import { createLoadReceipts } from './load-receipts.js'
 import { createViewerEvents } from './events.js'
-import { createCursorRequests, cursorIdentity } from './cursor.js'
+import { createCursorRequests, cursorIdentity, MAX_CURSOR_BODY_CHARS, saveCursorMesh } from './cursor.js'
 import { createModelFocus } from './model-focus.js'
 import { createValidation } from './validation.js'
 import { registerValidationTools } from './validation-tools.js'
@@ -562,7 +562,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       const record = sessions.get(sessionId)
       if (!record) return json({ error: 'preview_not_found' }, 404)
       const body = await request.text()
-      if (body.length > 3_100_000) return json({ error: 'snapshot_too_large' }, 413)
+      if (body.length > MAX_CURSOR_BODY_CHARS) return json({ error: 'snapshot_too_large' }, 413)
       let value
       try { value = JSON.parse(body) } catch (_error) { return json({ error: 'invalid_snapshot' }, 400) }
       if (typeof value?.requestId !== 'string') return json({ error: 'invalid_snapshot' }, 400)
@@ -625,20 +625,29 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         if (!record) return JSON.stringify({ status: 'viewer_unavailable', reason: 'viewer_not_open' })
         const identity = await serialize(record, async () => { await record.source?.poll(); return displayIdentity(record) })
         if (displaySource(record)?.state().error) return JSON.stringify({ status: 'stale_view' })
-        const snapshot = await cursors.request(sessionId, identity, signal)
+        const capture = await cursors.request(sessionId, identity, signal)
         signal.throwIfAborted()
-        if (snapshot.status !== 'captured') return JSON.stringify(snapshot)
+        if (capture.status !== 'captured') return JSON.stringify(capture)
+        const { image: imageData, meshBytes, ...snapshot } = capture
+        let image
         try {
-          const image = await ctx.attachments.saveImage({
-            data: Buffer.from(snapshot.image.slice('data:image/png;base64,'.length), 'base64'),
+          image = await ctx.attachments.saveImage({
+            data: Buffer.from(imageData.slice('data:image/png;base64,'.length), 'base64'),
             mediaType: 'image/png', name: 'Cursor region.png',
           })
-          signal.throwIfAborted()
-          return JSON.stringify({ ...snapshot, image })
-        } catch (error) {
+        } catch (_error) {
           signal.throwIfAborted()
           return JSON.stringify({ status: 'capture_failed', message: 'The cursor image could not be stored. Retry the snapshot before interpreting the region.' })
         }
+        signal.throwIfAborted()
+        if (meshBytes) {
+          try { snapshot.mesh = await saveCursorMesh(record.cwd, meshBytes, signal) }
+          catch (_error) {
+            signal.throwIfAborted()
+            snapshot.meshUnavailable = 'storage_failed'
+          }
+        }
+        return JSON.stringify({ ...snapshot, image })
     })()
     captureJobs.add(capture)
     try { return await capture }
@@ -647,7 +656,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_cursor_snapshot',
-    description: 'Read the pinned blue region or fresh hover hit, with a PNG and model identity. For each new pointing request, call this tool before choosing a region unless that request includes its own cursor-at-start-of-spoken-request capture. Use region.modelLocalPoint (saved model XYZ millimetres), partPath, faceIndex and selection scope to build the overlay. During Movement, the image and worldPoint describe the posed preview; modelLocalPoint maps the hit back to the saved source for viewer_highlight and editing. Verify the capture identity matches the current revision. If capture fails, ask for a fresh pin or resolve the reported viewer issue before choosing a region. Never reuse a capture from another request or guess where the person pointed.',
+    description: 'Capture the pinned blue region or fresh hover hit with a PNG and model identity. On editable models, mesh.path is a project-relative STL of the selected source triangles in model-local millimetres, Z up, before placement. To highlight that selection, pass mesh.path as viewer_highlight.meshPath with the matching model identity. For each new pointing request use its own voice capture or call this tool. If capture or mesh export fails, resolve the reported issue or ask for a fresh pin. See clarify-mesh-changes.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => {
       const { image, ...snapshot } = JSON.parse(value)

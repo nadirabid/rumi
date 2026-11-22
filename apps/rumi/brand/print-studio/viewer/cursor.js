@@ -1,8 +1,63 @@
 /** Session-scoped, on-demand cursor captures; requests never reuse earlier pointer state. */
 import { randomUUID } from 'node:crypto'
+import { mkdir, open, realpath, unlink } from 'node:fs/promises'
+import { join } from 'node:path'
 import { normalizeSelection } from './highlight.js'
+import { parseStl, STL_LIMITS } from './stl.js'
 
 const rendererUnavailableReasons = new Set(['viewer_not_open', 'viewer_closed', 'viewer_hidden', 'temporary_edit', 'movement_preview', 'print_layout'])
+const meshUnavailableReasons = new Set(['unsupported_model', 'empty_selection', 'geometry_unavailable'])
+const maxMeshBase64 = 4 * Math.ceil((84 + 50 * STL_LIMITS.maxTriangles) / 3)
+
+/** Limit a cursor request to the existing image budget and one maximum-size binary STL. */
+export const MAX_CURSOR_BODY_CHARS = 3_100_000 + maxMeshBase64
+
+function readMesh(value, selection, modelLocalPoint) {
+  if (value.meshStl === undefined) {
+    if (value.meshUnavailable === undefined) return {}
+    if (!meshUnavailableReasons.has(value.meshUnavailable)) throw new Error('Invalid cursor mesh status')
+    return { meshUnavailable: value.meshUnavailable }
+  }
+  const encoded = value.meshStl
+  if (!value.identity.design || !selection || !modelLocalPoint || value.meshUnavailable !== undefined
+    || typeof encoded !== 'string' || encoded.length > maxMeshBase64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+    throw new Error('Invalid cursor mesh')
+  }
+  const meshBytes = Buffer.from(encoded, 'base64')
+  if (meshBytes.length < 84 || 84 + 50 * meshBytes.readUInt32LE(80) !== meshBytes.length) throw new Error('Invalid cursor mesh')
+  parseStl(meshBytes)
+  return { meshBytes }
+}
+
+/**
+ * Save validated cursor triangles in the project so an agent can read or highlight them.
+ * @param {string} cwd Local project directory.
+ * @param {Buffer} bytes Validated binary STL in model-local millimetres, Z up.
+ * @param {AbortSignal} signal Snapshot cancellation.
+ * @returns {Promise<{path: string, triangleCount: number}>} Project-relative path of the completed file.
+ */
+export async function saveCursorMesh(cwd, bytes, signal) {
+  let directory = await realpath(cwd)
+  for (const name of ['.rumi', 'cursor-selections']) {
+    directory = join(directory, name)
+    try { await mkdir(directory, { mode: 0o700 }) }
+    catch (error) { if (error.code !== 'EEXIST') throw error }
+    if (await realpath(directory) !== directory) throw new Error('Cursor geometry directory must stay inside the project')
+  }
+  signal.throwIfAborted()
+  const filename = `${randomUUID()}.stl`
+  const absolutePath = join(directory, filename)
+  const file = await open(absolutePath, 'wx', 0o600)
+  try {
+    try { await file.writeFile(bytes, { signal }) }
+    finally { await file.close() }
+    signal.throwIfAborted()
+  } catch (error) {
+    await unlink(absolutePath)
+    throw error
+  }
+  return { path: `.rumi/cursor-selections/${filename}`, triangleCount: bytes.readUInt32LE(80) }
+}
 
 /**
  * Identify the geometry and placement a cursor region refers to.
@@ -38,6 +93,7 @@ export function validateCursorSnapshot(value) {
   const modelLocalPoint = region.modelLocalPoint === undefined ? blob?.center ?? null : region.modelLocalPoint
   if (modelLocalPoint !== null && !vector(modelLocalPoint)) throw new Error('Invalid saved model point')
   const selection = region.selection === undefined ? undefined : normalizeSelection(region.selection)
+  const mesh = readMesh(value, selection, modelLocalPoint)
   const camera = value.camera
   if (!camera || !vector(camera.position) || !vector(camera.target) || !vector(camera.up)
     || !Number.isFinite(camera.fov) || camera.fov <= 0 || camera.fov >= 180
@@ -46,6 +102,7 @@ export function validateCursorSnapshot(value) {
     || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value.image)) throw new Error('Invalid cursor image')
   return {
     status: 'captured', capturedAt: value.capturedAt, identity: value.identity,
+    ...mesh,
     region: { ...(selection ? { selection } : {}), objectId: region.objectId, partPath: region.partPath, faceIndex: region.faceIndex,
       worldPoint: region.worldPoint, worldRadius: region.worldRadius, modelLocalPoint, modelLocalBlob: blob === null ? null : { center: blob.center, radii: blob.radii, rotationDegrees: blob.rotationDegrees } },
     camera: { position: camera.position, target: camera.target, up: camera.up, fov: camera.fov, aspect: camera.aspect },

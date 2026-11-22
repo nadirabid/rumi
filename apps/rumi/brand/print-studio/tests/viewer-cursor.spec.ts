@@ -1,6 +1,7 @@
 /** Cursor requests are session-local and complete only from a matching fresh response. */
 import { afterEach, expect, it, vi } from 'vitest'
 import { createCursorRequests, validateCursorSnapshot } from '../viewer/cursor.js'
+import { encodeStl } from '../viewer/stl.js'
 
 afterEach(() => vi.useRealTimers())
 
@@ -66,4 +67,19 @@ it('rejects malformed region/image data and strips fields from non-captures', ()
   expect(() => validateCursorSnapshot({ ...snapshot(), region: { ...snapshot().region, worldRadius: NaN } })).toThrow('region')
   expect(() => validateCursorSnapshot({ ...snapshot(), region: { ...snapshot().region, modelLocalBlob: { center: [0, 0, 0], radii: [-1, 1, 1], rotationDegrees: [0, 0, 0] } } })).toThrow('model-local')
   expect(() => validateCursorSnapshot({ ...snapshot(), camera: { ...snapshot().camera, fov: 180 } })).toThrow('camera')
+})
+
+it('accepts bounded binary STL only for an editable model selection', () => {
+  const meshBytes = Buffer.from(encodeStl([0, 0, 0, 1, 0, 0, 0, 1, 0]))
+  const meshStl = meshBytes.toString('base64')
+  const editable = {
+    ...snapshot(),
+    identity: { ...identity, design: { path: 'model.usda', revision: 1, url: '/model.usda' } },
+    region: { ...snapshot().region, modelLocalPoint: [0, 0, 0], selection: { partPath: ['box'], surfaceId: 1, mode: 'surface' } },
+    meshStl,
+  }
+  expect(validateCursorSnapshot(editable)).toMatchObject({ meshBytes })
+  expect(() => validateCursorSnapshot({ ...snapshot(), meshStl })).toThrow('cursor mesh')
+  expect(() => validateCursorSnapshot({ ...editable, meshStl: meshBytes.subarray(0, -1).toString('base64') })).toThrow('cursor mesh')
+  expect(() => validateCursorSnapshot({ ...editable, meshUnavailable: 'empty_selection' })).toThrow('cursor mesh')
 })

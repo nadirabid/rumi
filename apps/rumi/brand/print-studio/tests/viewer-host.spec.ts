@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { applyViewer } from '../viewer/host.js'
-import { parseStl } from '../viewer/stl.js'
+import { encodeStl, parseStl } from '../viewer/stl.js'
 import { legacyControls } from '../viewer/analog/control-spec.js'
 
 function box(x = 12, y = 12, z = 2) {
@@ -94,7 +94,7 @@ function fixture(source: Uint8Array = stl(box()), cwd = '/workspace', loadTimeou
     tools: { register: (tool: any) => { tools.set(tool.name, tool); return () => {} } },
     workingDirectory: { ensure: async () => cwd },
     sessionQuery: { observeSession: async () => ({ header: { cwd }, [Symbol.dispose]() {} }) },
-    fs: { resolve: async (path: string) => ({ path, displayPath: path }), readBytes: async () => source },
+    fs: { resolve: async (path: string) => ({ path, displayPath: path }), readBytes: async (_file: { path: string }) => source },
   }
   const diagnosticsDirectory = mkdtempSync(join(tmpdir(), 'rumi-viewer-diagnostics-'))
   diagnosticRoots.push(diagnosticsDirectory)
@@ -454,6 +454,59 @@ it('returns a durable cursor image with its region through the tool output', asy
   expect(blocks[0].type).toBe('text')
   expect(blocks[1]).toEqual({ type: 'image', attachment: result.image })
   expect(await f.run('viewer_cursor_snapshot', {}, 'other-session')).toEqual({ status: 'viewer_unavailable', reason: 'viewer_not_open' })
+})
+
+it('highlights the exact triangles saved by an editable cursor capture', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-cursor-mesh-'))
+  const f = fixture(undefined, root)
+  try {
+    await mkdir(join(root, 'models/cube'), { recursive: true })
+    await writeFile(join(root, 'models/cube/model.usda'), '#usda 1.0\n')
+    f.ctx.fs.readBytes = file => readFile(file.path)
+    await f.state()
+    const base = '/api/print-studio/viewer'
+    const post = (route: string, value: object) => f.routes.get(`${base}/${route}`)!(new Request(
+      `http://rumi${base}/${route}?sessionId=session-a`,
+      { method: 'POST', body: JSON.stringify(value) },
+    ))
+    const pending = f.run('viewer_cursor_snapshot')
+    const request = await vi.waitFor(async () => {
+      const state = await (await f.request(`${base}/state?sessionId=session-a`)).json()
+      expect(state.cursorRequest).toEqual({ id: expect.any(String) })
+      return state
+    })
+    const { path, revision, url, transform } = request.scene.design
+    const positions = box().slice(0, 18)
+    const meshStl = Buffer.from(encodeStl(positions)).toString('base64')
+    const point = [5, 5, 0]
+    const selection = { partPath: ['Cube'], surfaceId: 1, mode: 'surface' }
+    const snapshot = {
+      status: 'captured', capturedAt: '2026-11-03T20:00:00.000Z',
+      identity: { sceneRevision: request.scene.revision, design: { path, revision, url, transform } },
+      region: { objectId: null, partPath: selection.partPath, faceIndex: 0, worldPoint: point, worldRadius: 2,
+        modelLocalPoint: point, modelLocalBlob: { center: point, radii: [2, 2, 2], rotationDegrees: [0, 0, 0] }, selection },
+      camera: { position: [0, 0, 20], target: [0, 0, 0], up: [0, 1, 0], fov: 40, aspect: 1 },
+      image: 'data:image/png;base64,cG5n', meshStl,
+    }
+    expect((await post('cursor', { requestId: request.cursorRequest.id, snapshot })).status).toBe(200)
+    const result = await pending
+    expect(result).toMatchObject({ status: 'captured', mesh: { path: expect.stringMatching(/^\.rumi\/cursor-selections\/[^/]+\.stl$/u), triangleCount: 2 } })
+    const output = f.raw('viewer_cursor_snapshot').output.render({}, JSON.stringify(result))
+    expect(JSON.parse(output[0].text).mesh).toEqual(result.mesh)
+    expect(output[0].text).not.toContain(meshStl)
+    expect(parseStl(await readFile(join(root, result.mesh.path)))).toEqual(positions)
+
+    const highlighting = f.run('viewer_highlight', { path, revision, url, label: 'Pinned surface', meshPath: result.mesh.path })
+    const id = await vi.waitFor(async () => {
+      const id = (await f.state()).design.highlight?.id
+      expect(id).toBeTruthy()
+      return id
+    })
+    const overlay = await f.request(`${base}/highlight-mesh?sessionId=session-a&id=${id}`)
+    expect(parseStl(await overlay.arrayBuffer())).toEqual(positions)
+    expect((await post('feedback', { revision, url, transform, highlightId: id })).status).toBe(200)
+    expect(await highlighting).toMatchObject({ status: 'rendered', highlight: { meshPath: result.mesh.path, triangleCount: 2 } })
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
 it('unloads while a cursor request is waiting without retaining a tool or timer', async () => {

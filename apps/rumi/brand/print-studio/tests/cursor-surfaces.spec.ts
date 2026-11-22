@@ -4,6 +4,8 @@ import { expect, it, vi } from 'vitest'
 import { createHighlight } from '../viewer/viewport/highlight.js'
 import { createSurfaceIndex } from '../viewer/viewport/surfaces.js'
 import { normalizeSelection } from '../viewer/highlight.js'
+import { cursorMeshSnapshot } from '../viewer/viewport/cursor-geometry.js'
+import { parseStl } from '../viewer/stl.js'
 
 it('joins coplanar triangles, stops at creases, and preserves triangle identity when picking', () => {
   const geometry = new THREE.BoxGeometry(2, 2, 2).toNonIndexed()
@@ -70,6 +72,61 @@ it('retains a captured selection in a cursor snapshot and rejects malformed refe
   const selection = { partPath: ['helmet', 'faceplate'], surfaceId: 5, mode: 'surface' }
   expect(normalizeSelection(selection)).toEqual(selection)
   expect(() => normalizeSelection({ ...selection, surfaceId: -1 })).toThrow()
+})
+
+it('exports the exact connected surface and the whole part in their saved coordinates', () => {
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    0, 0, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0,
+    0, 0, 1, 4, 0, 1, 4, 4, 1,
+  ], 3))
+  geometry.setIndex([0, 1, 2, 0, 2, 3, 4, 5, 6])
+  const material = new THREE.MeshBasicMaterial()
+  const saved = new THREE.Mesh(geometry, material)
+  saved.position.set(4, 5, 6)
+  saved.scale.x = -1
+  const placement = new THREE.Group()
+  placement.position.set(10, 20, 30)
+  placement.rotation.set(-0.3, 1.21, 0.048)
+  placement.scale.setScalar(2)
+  placement.add(saved)
+  const posed = new THREE.Mesh(geometry.toNonIndexed(), material)
+  posed.position.set(50, 60, 70)
+  posed.updateMatrixWorld(true)
+  try {
+    const spatial = createSurfaceIndex(posed.geometry)
+    posed.geometry.userData.rumiSurfaceIndex = spatial
+    const hit = { object: posed, faceIndex: 0, surfaceId: spatial.surface(0), point: new THREE.Vector3(52, 61, 70), radius: 0.1 }
+    const surface = cursorMeshSnapshot(hit, saved, placement, 'surface')
+    expect(surface).toHaveProperty('meshStl')
+    const selected = parseStl(Buffer.from(surface.meshStl!, 'base64'))
+    expect([...selected]).toEqual([
+      4, 5, 6, 0, 9, 6, 0, 5, 6,
+      4, 5, 6, 4, 9, 6, 0, 9, 6,
+    ])
+    const part = cursorMeshSnapshot(hit, saved, placement, 'part')
+    expect([...parseStl(Buffer.from(part.meshStl!, 'base64'))]).toEqual([
+      ...selected, 4, 5, 7, 0, 9, 7, 0, 5, 7,
+    ])
+  } finally { geometry.dispose(); posed.geometry.dispose(); material.dispose() }
+})
+
+it('exports patch faces across shared edges and restricts edge mode to nearby boundaries', () => {
+  const geometry = new THREE.PlaneGeometry(4, 4)
+  const material = new THREE.MeshBasicMaterial()
+  const mesh = new THREE.Mesh(geometry, material)
+  const placement = new THREE.Group()
+  placement.add(mesh)
+  try {
+    const spatial = createSurfaceIndex(geometry)
+    const hit = { object: mesh, faceIndex: 0, surfaceId: spatial.surface(0), point: new THREE.Vector3(), radius: 0.2 }
+    const patch = cursorMeshSnapshot(hit, mesh, placement, 'patch')
+    expect(parseStl(Buffer.from(patch.meshStl!, 'base64'))).toHaveLength(18)
+    expect(cursorMeshSnapshot(hit, mesh, placement, 'edge')).toEqual({ meshUnavailable: 'empty_selection' })
+    hit.point.set(-1.9, 0, 0)
+    const edge = cursorMeshSnapshot(hit, mesh, placement, 'edge')
+    expect(parseStl(Buffer.from(edge.meshStl!, 'base64'))).toHaveLength(9)
+  } finally { geometry.dispose(); material.dispose() }
 })
 
 it.each(['curved', 'flat', 'shuffled'])('matches native picking across a subdivided %s mesh', (kind) => {

@@ -25,6 +25,7 @@ window.__ModuleLoader__.load({
     function Wordmark({ size = 26, className }) {
       return h('span', {
         className,
+        'data-rumi-wordmark': '',
         role: 'img',
         'aria-label': 'Rumi',
         style: {
@@ -55,6 +56,7 @@ window.__ModuleLoader__.load({
       '[data-conversation-tabs] { display: none !important; }',
       'header div:has(> [data-conversation-tabs]) { display: none !important; }',
       'header:has([data-conversation-tabs]) { min-height: 0 !important; padding-bottom: 10px !important; }',
+      'span:has(> [data-slot="conversation.hero.brand.mark"] [data-rumi-wordmark]) + span { display: none; }',
       // The add-files menu opens a listbox of commands and file pickers. Rumi
       // takes files by drag and by asking, so the control only offers a
       // developer's menu. `aria-haspopup` survives class hashing and locale.

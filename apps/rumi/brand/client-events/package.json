@@ -12,14 +12,16 @@
   "files": [
     "index.js",
     "lib/client.js",
+    "lib/plugin-events.js",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
     "README.i18n.yaml"
   ],
   "dependencies": {
-    "@deepseek-ai/dsh-client-hmr": "0.2.1-rc.3",
-    "@deepseek-ai/schemastery": "3.18.5"
+    "@deepseek-ai/dsh-client-hmr": "0.2.3-alpha.1",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.3-alpha.1",
+    "@deepseek-ai/schemastery": "3.19.0"
   },
   "dsh": {
     "bundle": {
@@ -27,16 +29,21 @@
     },
     "client": {
       "platform": "web",
+      "external": [
+        "@deepseek-ai/dsh-api-gateway/client"
+      ],
       "inject": [
+        "@deepseek-ai/dsh-api-gateway",
+        "@deepseek-ai/dsh-api-remote-access",
         "@deepseek-ai/dsh-client-modules"
       ],
       "immediately": true
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.0.5"
+    "@deepseek-ai/cordis": "4.1.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.5"
+    "@deepseek-ai/cordis": "4.1.0"
   }
 }

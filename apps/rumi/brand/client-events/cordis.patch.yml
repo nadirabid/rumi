@@ -1,5 +1,9 @@
 - id: client-hmr
   disabled: true
+- id: typert-loader
+  config:
+    packages:
+      - '@deepseek-ai/dsh-client-hmr'
 - insert:
     - id: rumi-client-events
       name: '@rumi/client-events'

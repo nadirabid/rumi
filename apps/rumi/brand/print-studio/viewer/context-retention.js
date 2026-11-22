@@ -9,10 +9,10 @@ const KEY = 'rumiRuntimeSnapshots'
  * admits fresh context through its ordinary providers, including after retries.
  * @param {object} ctx Plugin context with session projections and agent events.
  * @param {Function} createDeveloperMessage Harness message factory supplied by the entrypoint.
- * @returns {void}
+ * @returns {Promise<void>} Resolves when the request listener can read a ready projection.
  */
-export function applyContextRetention(ctx, createDeveloperMessage) {
-  ctx.effect(() => ctx.sessionProjections.register({
+export async function applyContextRetention(ctx, createDeveloperMessage) {
+  const projection = await ctx.sessionProjections.register({
     key: KEY,
     stateVersion: 1,
     stateSchema: z.array(z.number().int().nonnegative()),
@@ -25,11 +25,11 @@ export function applyContextRetention(ctx, createDeveloperMessage) {
       }
       return retained
     },
-  }), 'print viewer: runtime snapshot projection')
+  })
   ctx.on('agent/request', async ({ agent, turn, step, signal }, next) => {
     const config = await next()
     signal.throwIfAborted()
-    const snapshots = ctx.sessionProjections.stateOf(agent.session, KEY)
+    const snapshots = projection.stateOf(agent.session)
     for (const seq of snapshots) {
       agent.session.append('developer/message', {
         turn, step,

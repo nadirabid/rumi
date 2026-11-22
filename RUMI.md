@@ -1,6 +1,6 @@
 # Rumi
 
-A DeepSeek Harness app built for my kids — somewhere to play, make things, and learn alongside an agent. `apps/rumi` is a copy of `apps/desktop` rebranded as its own product; everything else is upstream, unmodified.
+A DeepSeek Harness app built for my kids to play, make things, and learn alongside an agent. `apps/rumi` owns the macOS app and composes DeepSeek Harness with Rumi's plugin bundles. The root `package.json` records the DSH version. [AGENTS.md](AGENTS.md#allowed-to-modify) lists the shared files that carry Rumi-specific changes.
 
 ## What differs from upstream
 
@@ -17,7 +17,7 @@ A DeepSeek Harness app built for my kids — somewhere to play, make things, and
 | projects | `~/.rumi/workspace` |
 | data root | `~/Library/Application Support/dsh-rumi` |
 | icon | `apps/rumi/resources/icon*.png` — the word "rumi" |
-| window title | `Rumi` (set by `DSH_CLIENT_TITLE` in `scripts/client-build-environment.ts`) |
+| window title | `Rumi`, set by the native shell |
 
 Both apps run at the same time and share nothing: separate bundle ids, single-instance locks, homes, profiles, Sessions, credentials, instructions, and plugin sets. The Electron main process points `DSH_HOME` at `~/.rumi` before the first path resolves, so the profile, Session and storage roots, credentials, `AGENTS.md`, skills, presets, provisioned runtimes, and every bundled plugin that reads the home all land under Rumi's own directory. Nothing resolves `~/.dsh`, which belongs to DeepSeek Harness.
 
@@ -70,13 +70,13 @@ Distribution builds need a Developer ID certificate and notarization credentials
 
 Keep the packaging directory outside the checkout. Its `secrets/macos-signing.env` contains `DSH_DESKTOP_MACOS_SIGNING_IDENTITY`, `DSH_DESKTOP_MACOS_TEAM_ID`, `CSC_LINK`, `CSC_KEY_PASSWORD`, and `APPLE_KEYCHAIN_PROFILE`; restrict private files to mode `0600`. `CSC_LINK` points to a local PKCS#12 certificate containing its private key and Developer ID intermediate certificate. Store notarization authentication with `xcrun notarytool store-credentials` and refer to that Keychain profile. Never put signing keys or passwords in the repository.
 
-After the builds above, package a version greater than the installed version. The build version extends the product version, for example `0.2.1-rc.3.20261102.1`; increment its final number for another release that day. The updater uses the inherited `nightly` channel for these prerelease versions, while GitHub marks the selected release as latest.
+After the builds above, package a version greater than the installed version. The build version extends the product version, for example `0.2.3-alpha.1.20261122.1`; increment its final number for another release that day. The updater uses the inherited `nightly` channel for these prerelease versions, while GitHub marks the selected release as latest.
 
 ```sh
 export DSH_PACKAGING_CONFIG_DIR="$HOME/.config/rumi-release"
 export DSH_PACKAGING_PRESET=production
 export npm_execpath="$PWD/node_modules/pnpm/bin/pnpm.mjs"
-node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64 --build-version 0.2.1-rc.3.20261102.1
+node node_modules/tsx/dist/cli.mjs apps/rumi/scripts/package-target.ts mac-arm64 --build-version 0.2.3-alpha.1.20261122.1
 node apps/rumi/scripts/publish-github.mjs
 node apps/rumi/scripts/publish-github.mjs --publish
 ```
@@ -132,9 +132,9 @@ It moves the profile, Sessions, storages, and Print Studio state, copies the cre
 
 The composer shows the stock activity statistics, including output speed in tokens per second when timing data is available. The Performance and usage setting controls compact versus detailed statistics; other composer statistics remain hidden.
 
-Rumi derives its standard, PTC, and Cordis presets from the shipped definitions with the questionnaire tool removed. Clarification stays in the conversation for text and voice. The question-card UI is disabled; the underlying question service remains available for compatibility with other consumers.
+Rumi derives its Standard, PTC, Minimal, and Cordis presets from the shipped definitions. All four apply the project's conversation scope and expose the tools permitted by its project type. Clarification stays in the conversation for text and voice.
 
-Rumi's active presets compact at 30% of the routed model's context window, subject to the harness's lower input-budget safety limit. Configure `compactionThresholdRatio` on the `rumi-presets` row; the stock `preset-standard`, `preset-ptc`, and `preset-cordis` rows are disabled and do not control resumed Rumi sessions.
+Rumi's active presets compact at 30% of the routed model's context window, subject to the harness's lower input-budget safety limit. Configure `compactionThresholdRatio` on the `rumi-presets` row. Saved conversations keep their preset identity and use the Rumi definition when resumed.
 
 `apps/rumi/brand/` holds the packages Rumi carries inside its own runtime and enables in every new profile. `@rumi/brand` draws the wordmark and owns the Live Voice key page; `@rumi/settings` exposes the stock settings dialog and Plugins page through Rumi → Settings… (⌘,) and Rumi → Plugins…. `@rumi/live-voice` adds full-duplex voice and contributes the project's instructions through `ctx.liveVoice`. Packaging installs these bundles beside `dsh` and declares them in the bundled installation manifest, so the profile resolves them without a package manager. The [client-events bundle](apps/rumi/brand/client-events/README.md) delivers plugin updates without filesystem polling in packaged builds; development retains the upstream watcher. See [native settings integration](apps/rumi/brand/settings/README.md) for the menu wiring.
 
@@ -313,7 +313,7 @@ Package groups: [packages/README.md](packages/README.md). Classification require
 ## Shared development commands
 
 ```sh
-pnpm install            # pnpm workspaces, node ^22.19 || >=24
+pnpm install            # pnpm workspaces, Node.js >=24.9.0
 pnpm run clean           # remove build outputs and safe residue from deleted packages
 pnpm run test           # unit tests
 pnpm run test:coverage  # CI coverage gate: per-file 100% on packages/*/*/src

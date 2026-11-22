@@ -3,7 +3,10 @@ import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness, provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import * as BashEnv from '@deepseek-ai/dsh-shell-env'
@@ -18,8 +21,10 @@ it.skipIf(process.platform === 'win32').each([false, true])('reports command fai
   const ctx = new Context()
   try {
     provideWorkingDirectoryFixture(ctx)
+    await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(LocalSubprocessRuntime)
     await ctx.plugin(BashEnv)
     await ctx.plugin(LocalBashExecutor, { timeoutMs: 10_000, graceMs: 200 })
@@ -27,7 +32,7 @@ it.skipIf(process.platform === 'win32').each([false, true])('reports command fai
     await ctx.plugin(ToolBash)
     const policy = ctx.plugin(Brand)
     await policy
-    const call = (command: string) => ctx.tools.execute({
+    const call = (command: string) => executeModelToolFixture(ctx, {
       signal: new AbortController().signal, callId: ToolCallId(command), name: 'bash',
       arguments: { command, description: 'Check command outcome' },
     })
@@ -103,8 +108,10 @@ it.each([
 ])('classifies $name $kind with timeout=$timedOut and signal=$signal', async ({ name, error, ...value }) => {
   const ctx = new Context()
   try {
+    await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(Brand)
     ctx.effect(() => ctx.tools.register(defineTool({
       name, description: 'Return a process outcome', parameters: {},
@@ -120,7 +127,7 @@ it.each([
       presentCall: () => ({ card: 'generic', title: 'Process' }),
       execute: async () => value,
     })))
-    const result = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('outcome'), name, arguments: {} })
+    const result = await executeModelToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId('outcome'), name, arguments: {} })
     expect(result.isError).toBe(error)
     expect(result.content).toEqual([{ type: 'text', text: 'Process output' }])
   } finally {

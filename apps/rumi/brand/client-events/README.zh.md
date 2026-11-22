@@ -23,7 +23,7 @@ Rumi 会反映插件的启用、移除和显式重建通知，无需定期检查
 
 Rumi 配置从应用自带的运行时加载 `@rumi/client-events`。其补丁禁用原有的 `client-hmr` 主机条目，并挂载 `rumi-client-events`；浏览器在 Rumi 包标识下使用原有的事件消费者。无需另行安装或设置。
 
-插件图变更和显式重建通知通过 `/plugins/events` 立即传送给已连接的客户端。打包应用不会检测对代码文件的手动修改；修改后请重启 Rumi。事件处理和无效帧报告仍由原有的浏览器消费者负责。
+插件图变更、同步配置和显式重建通知通过 `pluginEvents/follow` Remote 流传送给获授权的客户端。手动修改打包代码文件后请重启 Rumi。事件处理和无效帧报告由原有的浏览器消费者负责。
 
 <a id="configuration"></a>
 ## 配置
@@ -38,9 +38,9 @@ Rumi 主进程根据是否为打包应用设置 `RUMI_DEVELOPMENT`，随附补�
 <a id="implementation"></a>
 ## 实现
 
-主机持有事件路由、插件图和重建订阅以及已打开的事件流，并在卸载时释放三者。它发送与原有传输相同的插件图和重建帧。客户端构建直接打包上游导出的客户端实现，包括流解析器，不修改共享包。
+打包后的主机挂载上游 PluginEvents 服务，省略代码文件监视器。配置让 Typert 加载器注册上游主机描述符，浏览器在 Rumi 包标识下运行上游消费者。每条流都从按调用方 Remote 权限生成的最新插件图开始。
 
-参见 [Rumi 构建和安装说明](../../../../RUMI.md#build)。应用构建和运行时准备都会构建此客户端文件。[client-events.spec.ts](../../tests/client-events.spec.ts) 中的测试通过 Loader 挂载随附补丁，验证真实 HTTP 事件流，并检查开发监视器的释放。
+参见 [Rumi 构建和安装说明](../../../../RUMI.md#build)。应用构建和运行时准备会将上游提供者和消费者编译到此包中。[client-events.spec.ts](../../tests/client-events.spec.ts) 中的测试通过 Loader 挂载随附补丁，验证提供者的事件流，并检查开发监视器的释放。
 
 <a id="dev-note"></a>
 ## 开发说明

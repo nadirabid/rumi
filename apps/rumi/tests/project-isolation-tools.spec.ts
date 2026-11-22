@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../packages/core/agent-loop/tests/mock-adapter.ts'
 import { Service } from '@deepseek-ai/cordis'
@@ -63,7 +64,7 @@ it.skipIf(process.platform !== 'darwin')('records todo progress in the owning pr
   const todo = await import('../../../packages/todo/tool-todo/src/index.ts')
   await f.ctx.plugin(todo, { allowParallelInProgress: false })
   const todos = [{ content: 'Inspect the project model', status: 'in_progress' }]
-  const result = await f.ctx.tools.execute({ callId: ToolCallId('todo'), name: 'todo_write', arguments: { todos }, agent: f.agent, signal: new AbortController().signal })
+  const result = await executeModelToolFixture(f.ctx, { callId: ToolCallId('todo'), name: 'todo_write', arguments: { todos }, agent: f.agent, signal: new AbortController().signal })
   expect(result.isError).not.toBe(true)
   expect(result.content).toMatchSnapshot()
   expect(f.agent.session.snapshotEvents().filter(event => event.type === 'todo/write').map(event => event.data)).toEqual([{ todos }])
@@ -74,13 +75,40 @@ it.skipIf(process.platform !== 'darwin')('ignores full-access overrides and deni
   const policy = f.ctx.sandboxPolicy.resolve({ session: f.agent.session, mode: 'danger-full-access' })
   expect(policy.mode).toBe('workspace-write')
   expect(policy.workspaceRoot).toContain('11111111-1111-4111-8111-111111111111')
-  const execute = (name: string, args: object) => f.ctx.tools.execute({ callId: ToolCallId('test'), name, arguments: args, agent: f.agent, signal: new AbortController().signal })
+  const execute = (name: string, args: object) => executeModelToolFixture(f.ctx, { callId: ToolCallId('test'), name, arguments: args, agent: f.agent, signal: new AbortController().signal })
   expect(await execute('read', { path: 'own.txt' })).toMatchObject({ isError: false, content: [{ type: 'text', text: 'own project' }] })
   expect(await execute('read', { path: 'own.txt', sandbox_permissions: 'require_escalated' })).toMatchObject({ isError: true })
   f.ctx.effect(() => f.ctx.tools.register(defineTool({ name: 'web_search', description: 'Search the web.', parameters: {}, output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] }, presentCall: () => ({ card: 'generic', title: 'Search' }), execute: async () => 'searched the web' })))
   expect(await execute('web_search', {})).toMatchObject({ isError: false, content: [{ type: 'text', text: 'searched the web' }] })
   f.ctx.effect(() => f.ctx.tools.register(defineTool({ name: 'unreviewed', description: 'Unaudited plugin.', parameters: {}, output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] }, presentCall: () => ({ card: 'generic', title: 'Unreviewed' }), execute: async () => 'must not run' })))
   expect(await execute('unreviewed', {})).toMatchObject({ isError: true, content: [{ type: 'text', text: 'Error: This capability is not enabled for isolated Rumi projects.' }] })
+})
+
+it.skipIf(process.platform !== 'darwin')('applies project write authority to patch, delete, and both ends of a move', async () => {
+  const f = await fixture()
+  const own = await f.ctx.fs.resolve(join(f.root, 'own.txt'))
+  const metadata = await f.ctx.fs.resolve(join(f.root, 'project.json'))
+  const outside = await f.ctx.fs.resolve(join(f.sibling, 'private.txt'))
+  f.ctx.tools.register(defineTool({
+    name: 'edit', description: 'Check project file mutations.', parameters: {},
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+    presentCall: () => ({ card: 'generic', title: 'Edit file' }),
+    async execute(_args, { signal }) {
+      const fs = f.ctx.fs
+      const denied = { code: 'RUMI_PROJECT_ACCESS_DENIED' }
+      await expect(fs.patchText(metadata, [], undefined, signal)).rejects.toMatchObject(denied)
+      await expect(fs.deleteFile(outside, undefined, signal)).rejects.toMatchObject(denied)
+      await expect(fs.moveFile(own, metadata, {}, signal)).rejects.toMatchObject(denied)
+      await expect(fs.moveFile(outside, own, {}, signal)).rejects.toMatchObject(denied)
+      await fs.deleteFile(own, undefined, signal)
+      return 'Project write authority enforced.'
+    },
+  }))
+  const result = await executeModelToolFixture(f.ctx, { callId: ToolCallId('edit'), name: 'edit', arguments: {}, agent: f.agent, signal: new AbortController().signal })
+  expect(result).toMatchObject({ isError: false, content: [{ type: 'text', text: 'Project write authority enforced.' }] })
+  expect(await readFile(join(f.sibling, 'private.txt'), 'utf8')).toBe('other project')
+  expect(JSON.parse(await readFile(join(f.root, 'project.json'), 'utf8')).sessionIds).toEqual(['session-a'])
+  await expect(readFile(join(f.root, 'own.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
 it.skipIf(process.platform !== 'darwin')('confines actual shell and direct search-style subprocesses under the same active project', async () => {
@@ -104,7 +132,7 @@ it.skipIf(process.platform !== 'darwin')('confines actual shell and direct searc
       const outcome = await child.done
       return JSON.stringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, childExit: outcome.exitCode })
     } })))
-  const result = await f.ctx.tools.execute({ callId: ToolCallId('bash'), name: 'bash', arguments: {}, agent: f.agent, signal: new AbortController().signal })
+  const result = await executeModelToolFixture(f.ctx, { callId: ToolCallId('bash'), name: 'bash', arguments: {}, agent: f.agent, signal: new AbortController().signal })
   expect(JSON.stringify(result)).toContain('own project')
   expect(JSON.stringify(result)).not.toContain('other project')
   expect(JSON.stringify(result)).toContain('Operation not permitted')
@@ -119,7 +147,7 @@ it.skipIf(process.platform !== 'darwin')('keeps concurrent sessions bound to the
   await writeFile(join(root, 'project.json'), JSON.stringify({ id, sessionIds: ['session-b'] }))
   await writeFile(join(root, 'own.txt'), 'second project')
   const agent = await f.harness.create(SessionId('session-b'), { provider: 'mock', model: 'mock' }, { cwd: root })
-  const run = (owner: typeof agent, path: string) => f.ctx.tools.execute({ callId: ToolCallId(path), name: 'read', arguments: { path }, agent: owner, signal: new AbortController().signal })
+  const run = (owner: typeof agent, path: string) => executeModelToolFixture(f.ctx, { callId: ToolCallId(path), name: 'read', arguments: { path }, agent: owner, signal: new AbortController().signal })
   const results = await Promise.all([run(f.agent, 'own.txt'), run(agent, 'own.txt'), run(f.agent, join(root, 'own.txt')), run(agent, join(f.root, 'own.txt'))])
   expect(results[0]).toMatchObject({ isError: false, content: [{ type: 'text', text: 'own project' }] })
   expect(results[1]).toMatchObject({ isError: false, content: [{ type: 'text', text: 'second project' }] })
@@ -168,7 +196,7 @@ it.skipIf(process.platform !== 'darwin')('admits both explicit validation tools 
   }) as { dispose(): Promise<void> }
   cleanup.push(() => validation.dispose())
   registerValidationTools(f.ctx, defineTool, validation, config)
-  const run = (name: string, args: object) => f.ctx.tools.execute({ callId: ToolCallId(name), name, arguments: args,
+  const run = (name: string, args: object) => executeModelToolFixture(f.ctx, { callId: ToolCallId(name), name, arguments: args,
     agent: f.agent, signal: new AbortController().signal })
   const outcomes = []
   let fingerprint = ''

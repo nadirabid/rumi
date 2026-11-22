@@ -92,7 +92,7 @@ export const Config = z.object({
 })
 
 /** Services this host half reaches. */
-export const inject = ['connection', 'tools', 'credentials', 'fs', 'workingDirectory', 'sessionQuery', 'attachments', 'agents']
+export const inject = ['connection', 'tools', 'credentials', 'fs', 'workingDirectory', 'sessionQuery', 'attachments', 'agents', 'sessionProjections']
 
 const ROUTE = '/api/print-studio'
 const SKILL_NAME = 'print-studio-setup'
@@ -225,12 +225,13 @@ const PRINT_TYPE = {
  * Register the status tool, the card routes, and the setup skill.
  * @param {object} ctx - host plugin context.
  * @param {object} config - Resolved plugin configuration.
+ * @returns {Promise<void>} Resolves after registering request context and Print Studio capabilities.
  */
-export function apply(ctx, config) {
+export async function apply(ctx, config) {
+  await applyContextRetention(ctx, createDeveloperMessage)
   ctx.plugin(analogWorkflow)
   ctx.plugin(mechanicalWorkflow)
   applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory, config.viewerLoadTimeoutMs, config)
-  ctx.inject(['sessionProjections'], scoped => applyContextRetention(scoped, createDeveloperMessage))
   applyBlender(ctx, defineTool, config)
   applySkillReminders(ctx, config.skillReminders,
     async () => (await ctx.credentials.resolve(credentialRef(config.skillReminders.credential)))?.value,

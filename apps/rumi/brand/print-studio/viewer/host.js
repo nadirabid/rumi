@@ -238,7 +238,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   const displaySource = record => record.source
   const displayIdentity = record => cursorIdentity({ ...record, source: displaySource(record) })
   const cursors = createCursorRequests(sessionId => events.notify(sessionId))
-  const captureJobs = new Set(), evictions = new Set()
+  const loadJobs = new Set(), captureJobs = new Set(), evictions = new Set()
   ctx.inject(['systemPrompt'], scoped => {
     scoped.effect(() => scoped.systemPrompt.section({
       name: 'rumi:naming-model-regions', order: scoped.systemPrompt.getSectionOrder('TOOL_WORKFLOW'),
@@ -274,6 +274,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
     receipts.dispose()
     events.dispose()
     cursors.dispose()
+    await Promise.allSettled([...loadJobs])
     await Promise.allSettled([...captureJobs])
     await Promise.all([...sessions.values()].map(record => record.pending))
     sessions.clear()
@@ -342,7 +343,10 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   async function loadSource(record, cwd, path, volume, signal) {
     signal?.throwIfAborted()
     if (closed) throw new Error('Model preview is closed')
-    const candidate = await createSource(ctx, resolve(cwd, path), cwd)
+    const candidate = await createSource(ctx, resolve(cwd, path), cwd).catch(error => {
+      if (error.code === 'INACTIVE_EFFECT') throw new Error('Model preview is closed', { cause: error })
+      throw error
+    })
     const previous = record.source?.state(), next = candidate.state()
     const retained = previous?.path === next.path && previous.contentHash === next.contentHash
     const source = retained ? record.source : candidate
@@ -709,26 +713,26 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         : createHistory().apply({ type: 'setVolume', volume: args.buildVolume }).volume
       const sessionId = exec.agent.session.id
       const record = recordFor(sessionId)
-      let completion, requested, initialScene
-      const disposeLoad = ctx.effect(async () => {
+      const pending = (async () => {
         const cwd = await ctx.workingDirectory.ensure(exec.agent, exec.signal)
         exec.signal.throwIfAborted()
-        if (closed) throw new Error('Model preview is closed')
-        await serialize(record, async () => {
+        const { completion, requested, initialScene } = await serialize(record, async () => {
           await loadSource(record, cwd, args.path, volume, exec.signal)
           record.models = await discoverModels(cwd)
           exec.signal.throwIfAborted()
-          requested = loadIdentity(record)
-          initialScene = structuredClone(sceneReport(record))
-          completion = loads.wait(sessionId, requested, exec.signal)
+          if (closed) throw new Error('Model preview is closed')
+          const requested = loadIdentity(record)
+          const initialScene = structuredClone(sceneReport(record))
+          const completion = loads.wait(sessionId, requested, exec.signal)
           events.notify(sessionId)
+          return { completion, requested, initialScene }
         })
-        return () => {}
-      }, 'print viewer: load model')
-      await disposeLoad
-      if (closed) throw new Error('Model preview is closed')
-      const { scene = initialScene, ...outcome } = await completion
-      return JSON.stringify({ ...scene, load: { ...outcome, requested } }, undefined, 2)
+        const { scene = initialScene, ...outcome } = await completion
+        return JSON.stringify({ ...scene, load: { ...outcome, requested } }, undefined, 2)
+      })()
+      loadJobs.add(pending)
+      try { return await pending }
+      finally { loadJobs.delete(pending) }
     },
   })), 'print viewer: load source')
 

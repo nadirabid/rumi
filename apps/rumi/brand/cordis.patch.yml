@@ -10,6 +10,8 @@
   disabled: true
 - id: preset-ptc
   disabled: true
+- id: preset-minimal
+  disabled: true
 - id: preset-cordis
   disabled: true
 - insert:
@@ -18,6 +20,24 @@
       config:
         compactionThresholdRatio: 0.3
 - id: ui-user-questions
+  disabled: true
+- id: harness-dev-context
+  disabled: true
+
+# App-wide recommendations and remote pairing operate outside an isolated project.
+- id: action-cards
+  disabled: true
+- id: client-ui-action-cards
+  disabled: true
+- id: creation-recommendations
+  disabled: true
+- id: client-ui-creation-recommendations
+  disabled: true
+- id: plugin-recommendations
+  disabled: true
+- id: client-ui-plugin-recommendations
+  disabled: true
+- id: remote-connection
   disabled: true
 
 - id: llm-deepseek

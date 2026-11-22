@@ -94,6 +94,7 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
       }
       const home = join(root, 'home')
       mkdirSync(home)
+      vi.stubEnv('DSH_HOME', home)
       vi.stubEnv('DSH_RUMI_HOME', home)
       vi.stubEnv('DSH_TELEMETRY_MODE', 'DISABLED')
       const project = prepareDevelopmentProject({
@@ -112,7 +113,6 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
         // nothing it exercises compares the descriptor's platform/arch outside packaging.
         target: 'mac-x64',
       })
-      cpSync(join(repository, 'packages/skill/skill-office/assets'), join(root, 'runtime/office-skills'), { recursive: true })
       const nodeBin = join(root, 'runtime/primary-runtime/dependencies/node/bin')
       mkdirSync(nodeBin, { recursive: true })
       cpSync(process.execPath, join(nodeBin, process.platform === 'win32' ? 'node.exe' : 'node'))
@@ -127,19 +127,9 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
       const restart = async (): Promise<void> => {
         await host?.stop()
         host = new DesktopHostProcess(process.execPath, project, paths.profile)
-        const { url } = await host.start()
+        const { url, authenticationCookie } = await host.start()
         hostOrigin = new URL(url).origin
-        let cookie = ''
-        const send: typeof fetch = async (input, init) => {
-          const headers = new Headers(init?.headers)
-          if (cookie !== '') headers.set('cookie', cookie)
-          const response = await fetch(input, { ...init, headers, redirect: 'manual' })
-          if (response.status !== 303) return response
-          cookie = response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
-          await response.body?.cancel()
-          return fetch(new URL(response.headers.get('location')!, url), { headers: { cookie } })
-        }
-        backend = await connectDesktopWelcome(url, send, () => Promise.resolve(cookie))
+        backend = connectDesktopWelcome(url, authenticationCookie)
       }
       const status = async () => backend.read()
       const fingerprint = (): string => createHash('sha256')

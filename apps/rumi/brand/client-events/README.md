@@ -23,7 +23,7 @@ Rumi reflects plugin activation, removal, and explicit rebuild notifications wit
 
 The Rumi profile includes `@rumi/client-events` from the app's bundled runtime. Its patch disables the stock `client-hmr` host row and mounts `rumi-client-events`; the browser uses the stock event consumer under the Rumi package identity. No separate installation or user setting is needed.
 
-Plugin graph changes and explicit rebuild notifications reach connected clients immediately through `/plugins/events`. Packaged launches do not detect manual edits to bundle files; restart Rumi after such edits. Event delivery and malformed-frame reporting remain owned by the stock browser consumer.
+Plugin graph changes, synced configuration, and explicit rebuild notifications reach authorized clients through the `pluginEvents/follow` Remote stream. Restart Rumi after manually editing a packaged bundle. The stock browser consumer owns event delivery and malformed-frame reporting.
 
 <a id="configuration"></a>
 ## Configuration
@@ -38,9 +38,9 @@ Rumi's main process sets `RUMI_DEVELOPMENT` from its packaged state, and the bun
 <a id="implementation"></a>
 ## Implementation
 
-The host owns the event route, graph/rebuild subscriptions, and open streams, releasing all three when unloaded. It sends the same graph and rebuild frames as the stock transport. The client build bundles the upstream exported client implementation, including its stream parser, without modifying shared packages.
+The packaged host mounts the upstream PluginEvents service without its bundle watcher. The profile asks the Typert loader to register the upstream Host descriptor, and the browser runs the upstream consumer under Rumi's bundle identity. Every stream starts from a fresh graph shaped by its caller's Remote access.
 
-See [Rumi's build and installation instructions](../../../../RUMI.md#build). The app build and runtime preparation both build this client payload. Tests in [client-events.spec.ts](../../tests/client-events.spec.ts) mount the shipped patch through Loader, exercise a real HTTP event stream, and check the development watcher's disposal.
+See [Rumi's build and installation instructions](../../../../RUMI.md#build). The app build and runtime preparation compile the upstream provider and consumer into this bundle. Tests in [client-events.spec.ts](../../tests/client-events.spec.ts) mount the shipped patch through Loader, exercise the provider's stream, and check the development watcher's disposal.
 
 <a id="dev-note"></a>
 ## Dev Note

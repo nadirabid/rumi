@@ -1,6 +1,7 @@
 /** Analog edits preserve source geometry and capture the latest viewer values. */
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import * as workflow from '../viewer/analog/workflow.js'
 import { expect, it, vi } from 'vitest'
 import * as THREE from 'three'
@@ -90,6 +91,7 @@ it('rejects stale feedback and freezes a live capture newer than the last releas
 it('publishes the analog workflow in model instructions and removes it on unload', async () => {
   const owner = new Context()
   try {
+    await owner.plugin(SessionProjectionRegistry)
     await owner.plugin(SystemPrompt)
     const fork = owner.plugin(workflow)
     await fork

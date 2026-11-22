@@ -31,7 +31,7 @@ import type {
   SidebarPanelActionsOwnerProps, SidebarPanelMetadata, SidebarRootComponentProps, SidebarRootInjected, SidebarSectionHookContext,
   SidebarSectionOwnerProps,
 } from './contract/slots.ts'
-import { FIXED_PANEL_ID } from './panel-pins.ts'
+import { deploymentHiddenPanels, FIXED_PANEL_ID } from './panel-pins.ts'
 import { createScrollHandoff } from './scroll-handoff.ts'
 import css from './SidebarRoot.module.css'
 
@@ -163,7 +163,11 @@ export function SidebarRoot({
   renderSlot,
   renderFactorySlot,
 }: SidebarRootComponentProps) {
-  const panels = usePanels(snapshot => snapshot)
+  const registeredPanels = usePanels(snapshot => snapshot)
+  const hiddenPanels = deploymentHiddenPanels()
+  const panels = hiddenPanels.length === 0
+    ? registeredPanels
+    : registeredPanels.filter(({ id }) => !hiddenPanels.includes(id))
   const unpinned = useEntryPins(ids => ids)
   const activePanelId = usePanelInfo(info => info.activePanelId)
   const hasEntryActions = useEntryActions(registered => registered)

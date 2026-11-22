@@ -4,7 +4,9 @@ import LlmRuntime, { createDeveloperMessage, createUserMessage, type StreamChunk
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { expect, it } from 'vitest'
@@ -19,9 +21,10 @@ it('keeps one full context across changed and unchanged requests with durable or
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
-    applyContextRetention(ctx, createDeveloperMessage)
+    await applyContextRetention(ctx, createDeveloperMessage)
     let selection = 'helmet'
     ctx.systemPrompt.context({ name: 'rumi:mesh-state', order: 210, required: true,
       text: () => JSON.stringify({ meshState: { selection, workingModel: 'helmet' } }) })

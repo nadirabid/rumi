@@ -1,6 +1,7 @@
 /** Live Voice keeps one session per DSH session and takes context from contributors. */
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import * as Projects from '../brand/projects/index.js'
 import { describe, expect, it } from 'vitest'
 import { composeInstructions, createLiveVoiceRegistry } from '../brand/live-voice/src/registry.js'
@@ -194,6 +195,7 @@ it('supplies current scope to existing backend sessions and removes it on unload
   const owner = new Context()
   try {
     owner.provide('connection', { fetch: { register: () => () => {} } })
+    await owner.plugin(SessionProjectionRegistry)
     await owner.plugin(SystemPrompt)
     const fork = owner.plugin(Projects)
     await fork

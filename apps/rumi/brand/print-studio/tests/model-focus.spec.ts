@@ -1,12 +1,14 @@
 /** Model references follow admitted input; declared work follows agent lifetime. */
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt, { renderContextSections, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { expect, it } from 'vitest'
 import { createModelFocus } from '../viewer/model-focus.js'
 
 async function fixture() {
   const owner = new Context()
+  await owner.plugin(SessionProjectionRegistry)
   await owner.plugin(SystemPrompt)
   // Event payloads exercise the JavaScript plugin without constructing an LLM driver.
   const listeners = new Map<string, (event: any) => void>()

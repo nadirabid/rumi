@@ -1,6 +1,6 @@
-/** Session cookies minted by earlier launches of this app. */
+/** Removal of legacy Desktop Host cookies from Electron session storage. */
 
-/** Every launch mints `dsh-auth-<authority hash>`; the Host accepts only its own. */
+/** Prefix of cookies used by earlier releases. */
 const LAUNCH_COOKIE_PREFIX = 'dsh-auth-'
 
 /** The subset of Electron's cookie store this module needs. */
@@ -19,16 +19,10 @@ export interface LaunchCookieStore {
 }
 
 /**
- * Drop launch cookies left by earlier runs.
- *
- * A launch token is minted for one authority and dies with that process, but
- * its cookie outlives it. The Host rejects the welcome's authenticated fetch
- * once enough stale ones are sent alongside the fresh cookie, and nothing else
- * prunes them — so the app clears them before connecting. The current launch's
- * cookie is minted by that connect, after this runs.
+ * Remove legacy Host cookies for the loopback hostname across all ports.
  * @param cookies - Electron's session cookie store.
- * @param launchUrl - URL the Host reported ready at; its origin scopes the sweep.
- * @returns completion; a store failure leaves the launch to fail loudly at connect.
+ * @param launchUrl - Address of the owned Host.
+ * @returns Completion after every matching cookie is removed.
  */
 export async function clearLaunchCookies(cookies: LaunchCookieStore, launchUrl: string): Promise<void> {
   const origin = new URL(launchUrl).origin

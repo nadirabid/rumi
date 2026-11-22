@@ -3,12 +3,12 @@ import { useEffect, useState } from 'react'
 
 type Tier = 'auto' | 'priority' | 'ultrafast'
 interface Speed { requested: Tier; tiers: Tier[] }
-export function useSpeed(sessionId: string, model: string | null, open: boolean) {
+export function useSpeed(sessionId: string, model: string | null) {
   const key = JSON.stringify([sessionId, model])
   const [state, update] = useState<{ key: string; speed?: Speed; failed?: boolean; saving?: boolean }>()
   const [revision, reload] = useState(0)
   useEffect(() => {
-    if (!open || !model) return
+    if (model === null) return
     const controller = new AbortController()
     const query = new URLSearchParams({ sessionId, model })
     fetch('/api/rumi-chatgpt/speed?' + query, { signal: controller.signal, cache: 'no-store' })
@@ -18,7 +18,7 @@ export function useSpeed(sessionId: string, model: string | null, open: boolean)
         if (!controller.signal.aborted) update({ key, speed })
       }).catch(() => { if (!controller.signal.aborted) update({ key, failed: true }) })
     return () => controller.abort()
-  }, [open, key, revision, sessionId, model])
+  }, [key, revision, sessionId, model])
   const current = state?.key === key ? state : undefined
   async function save(tier: Tier) {
     if (!current?.speed || current.saving) return false

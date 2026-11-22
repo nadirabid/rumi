@@ -2,7 +2,7 @@
 
 ## This checkout is the Rumi fork
 
-Rumi is a **separate installable macOS app** built on DeepSeek Harness. This repo is a fork of `deepseek-ai/deepseek-harness` (tag `dsh-v0.2.1-rc.3`). Upstream is the `upstream` remote. `apps/rumi` is the only product surface we own, and the stock app in `apps/desktop` must keep building unchanged from the same tree.
+Rumi is a **separate installable macOS app** built on DeepSeek Harness. Rebase the Rumi changes onto `upstream/master` from `deepseek-ai/deepseek-harness`. `apps/rumi` is the only product surface we own, and the stock app in `apps/desktop` must keep building unchanged from the same tree.
 
 ### Why it exists
 
@@ -19,7 +19,6 @@ The table is the complete allowed-change set; everything else is shared upstream
 | `apps/rumi/**` | the app: identity, profile bootstrap, icons, welcome window |
 | `apps/rumi/brand/**` | **new** plugin packages we add — brand now, the custom UI bundles later |
 | root `package.json` (only the `*:rumi` scripts) | build entry points |
-| `scripts/client-build-environment.ts` (only `DSH_CLIENT_TITLE`) | window title |
 | `packages/client/web/src/boot-page.ts` (only the wordmark text) | boot splash — no slot for it |
 | `packages/client/ui-settings-account/` | locale copy, plus the Plugins and Automation task rows in the account menu — the single bottom More control Rumi keeps |
 | `packages/client/{ui-settings-models,ui-sidebar-documentpreview,ui-plugin-manager}/` locale copy | product name in visible text; no locale-override seam exists |

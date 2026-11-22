@@ -5,10 +5,20 @@ import { openaiProvider } from '@earendil-works/pi-ai/providers/openai'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
-import { LlmError, resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
+import { LlmError, resolveImageAttachmentAccess, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 
-/** Processing tier requested for GPT-6.2 Sol on the ChatGPT account route. */
-export const Config = z.object({ solServiceTier: z.enum(['auto', 'ultrafast']).default('auto') })
+/** Processing tier and request limits for the ChatGPT account route. */
+export const Config = z.object({
+  solServiceTier: z.enum(['auto', 'ultrafast']).default('auto'),
+  streamIdleTimeoutMs: z.int().positive().max(2_147_483_647).default(120_000),
+  maxRequestImageBytes: z.int().min(4).default(32_000_000),
+  maxRequestImages: z.int().positive().default(20),
+  requestImagePixelBudget: z.int().positive().default(2_000_000),
+  requestImageMaxBytes: z.int().positive().default(2_000_000),
+}).refine(config => config.maxRequestImageBytes >= 4 * config.maxRequestImages, {
+  message: 'The ChatGPT image byte budget must allow four base64 bytes per image.',
+  path: ['maxRequestImageBytes'],
+})
 export const inject = ['connection', 'credentials', 'llm', 'storageDomain']
 const route = 'rumi-chatgpt'
 const account = credentialKey(route, 'account')
@@ -135,9 +145,18 @@ export async function apply(ctx, config) {
     })
   }
   restoreModels(await ctx.credentials.readRecord(account))
-  const profiles = new Map([[route, { provider: route, displayName: provider.name, piProvider: provider,
-    modelErrors: new Map(), configuredMaxTokens: new Map(), streamIdleTimeoutMs: 120000,
-    maxRequestImageBytes: 32000000, requestImagePixelBudget: 2000000, requestImageMaxBytes: 2000000 }]])
+  const profiles = new Map([[route, {
+    provider: route, displayName: provider.name, piProvider: provider,
+    modelErrors: new Map(), configuredMaxTokens: new Map(),
+    streamIdleTimeoutMs: config.streamIdleTimeoutMs,
+    maxRequestImageBytes: config.maxRequestImageBytes,
+    maxRequestImages: config.maxRequestImages,
+    imageOffloadCountQuantum: 1,
+    requestImageBudgetCount: config.maxRequestImages,
+    requestImagePixelBudget: config.requestImagePixelBudget,
+    maxImageBytes: config.requestImageMaxBytes,
+    retryPolicy: resolveRetryPolicy(undefined, `${route}.retryPolicy`),
+  }]])
   class ChatGPTAdapter extends PiAiAdapter {
     /** The saved catalog can be read without rotating the inference credential. */
     async listModels(providerId) {

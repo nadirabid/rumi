@@ -35,8 +35,12 @@ it('retains shared resources and question dependencies for existing sessions', (
     expect(rows.find(row => row.id === 'user-questions')?.disabled).not.toBe(true)
     expect(rows.find(row => row.id === 'ui-user-questions')).toMatchObject({ name: '@deepseek-ai/dsh-client-ui-user-questions' })
     expect(rows.find(row => row.id === 'ui-user-questions')?.disabled).toBe(true)
-    for (const id of ['standard', 'ptc', 'cordis']) {
+    for (const id of ['standard', 'ptc', 'minimal', 'cordis']) {
       expect(rows.find(row => row.id === `preset-${id}`)?.disabled).toBe(true)
+    }
+    for (const id of ['harness-dev-context', 'action-cards', 'client-ui-action-cards', 'creation-recommendations',
+      'client-ui-creation-recommendations', 'plugin-recommendations', 'client-ui-plugin-recommendations', 'remote-connection']) {
+      expect(rows.find(row => row.id === id)?.disabled).toBe(true)
     }
     expect(rows.find(row => row.id === 'rumi-presets')).toMatchObject({
       name: '@rumi/brand/preset', config: { compactionThresholdRatio: 0.3 },
@@ -58,22 +62,29 @@ it('registers the configured compaction threshold on every active Rumi preset', 
     registered.push(preset.id)
   } } }
   for await (const _ of apply(ctx, Config.parse({ compactionThresholdRatio: 0.3 }))) { /* Registration runs while the plugin mounts. */ }
-  expect(registered).toEqual(['standard', 'ptc', 'cordis'])
+  expect(registered).toEqual(['standard', 'ptc', 'minimal', 'cordis'])
 })
 
-it('removes questionnaire tools while retaining all other preset capabilities', async () => {
+it('retains saved preset identities and confines their prompts and available tools to the project', async () => {
   const { createRequire } = await import('node:module')
   const { loadOptionalPatches } = await import('@deepseek-ai/dsh-app-boot')
   const require = createRequire(fileURLToPath(new URL('../../cli/package.json', import.meta.url)))
-  const { withoutQuestionnaire } = await import('../brand/preset.js')
-  for (const id of ['standard', 'ptc', 'cordis']) {
+  const { configurePreset } = await import('../brand/preset.js')
+  for (const id of ['standard', 'ptc', 'minimal', 'cordis']) {
     const patches = loadOptionalPatches('rumi', require.resolve(`@deepseek-ai/dsh-web-app/presets/${id}.patch.yml`))
     const rows = composeEntries([patches!])
     const original = rows[0]!.config
-    const result = withoutQuestionnaire(original)
+    const result = configurePreset(original, 0.3)
     expect(result.id).toBe(id)
-    expect(result.plugins.map((row: { name: string }) => row.name)).not.toContain('@deepseek-ai/dsh-tool-ask-user')
-    expect(result.plugins).toEqual(original.plugins.filter((row: { name: string }) => row.name !== '@deepseek-ai/dsh-tool-ask-user'))
-    expect(original.plugins.length).toBe(result.plugins.length + 1)
+    const presetRows = result.plugins.map((row: { id: string }) => row.id)
+    expect(presetRows).toContain('tool-fs')
+    for (const id of ['agent-instructions', 'tool-ask-user', 'tool-cordis', 'tool-office', 'tool-plugin-manager', 'tool-plugin-market', 'tool-executor-ptc']) {
+      expect(presetRows).not.toContain(id)
+    }
+    const persona = result.plugins.find((row: { id: string }) => row.id === 'persona').config
+    expect(persona.complete).not.toBe(true)
+    expect(persona.includeRuntimeContext).not.toBe(false)
+    expect(persona.prefix).not.toContain('customize DeepSeek Harness')
+    if (id === 'minimal') expect(original.plugins.find((row: { id: string }) => row.id === 'persona').config.complete).toBe(true)
   }
 })

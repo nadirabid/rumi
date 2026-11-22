@@ -1,5 +1,4 @@
 /** File tools enforce the same owning-project boundary on reads as on writes. */
-import { resolve } from 'node:path'
 
 /** Bind the provider to the shipped service definitions. @param {object} dependencies Service bases and schemas. @returns {Function} Cordis provider. */
 export function createProjectFileSystem({ LocalFileSystem }) {
@@ -21,7 +20,7 @@ export function createProjectFileSystem({ LocalFileSystem }) {
     }
     async stat(target, signal) { return super.stat(await this.checked(target, false), signal) }
     async lstat(path, options, signal) {
-      this.ctx.rumiProjectScope.check(resolve(options?.cwd || this.config.cwd, path), false)
+      await this.resolve(path, { ...options, signal })
       return super.lstat(path, options, signal)
     }
     async readText(target, signal) { return super.readText(await this.checked(target, false), signal) }
@@ -37,6 +36,11 @@ export function createProjectFileSystem({ LocalFileSystem }) {
     }
     async writeText(target, content, expected, signal) { return super.writeText(await this.checked(target, true), content, expected, signal) }
     async editText(target, edit, expected, signal) { return super.editText(await this.checked(target, true), edit, expected, signal) }
+    async patchText(target, hunks, expected, signal) { return super.patchText(await this.checked(target, true), hunks, expected, signal) }
+    async deleteFile(target, expected, signal) { return super.deleteFile(await this.checked(target, true), expected, signal) }
+    async moveFile(source, destination, options, signal) {
+      return super.moveFile(await this.checked(source, true), await this.checked(destination, true), options, signal)
+    }
     async watch(target, changed, signal) { return super.watch(await this.checked(target, false), changed, signal) }
     processPath(target) { this.ctx.rumiProjectScope.check(String(target.targetKey), false); return super.processPath(target) }
     processPathFromHostPath(path) { this.ctx.rumiProjectScope.check(path, false); return super.processPathFromHostPath(path) }

@@ -101,7 +101,19 @@ it.each([
     expect(adapter.requests).toHaveLength(expected.length ? 2 : 1)
     expect(reminders).toHaveLength(expected.length ? 1 : 0)
     for (const reminder of expected) expect(reminders[0]).toContain(reminder)
-    if (!expected.includes('name-model-regions')) expect(reminders[0] ?? '').not.toContain('name-model-regions')
+    if (expected.length) {
+      const userText = adapter.requests[1]?.messages.flatMap(message => message.role === 'user'
+        ? message.content.flatMap(block => block.type === 'text' ? [block.text] : []) : [])
+      expect(userText).toContain('Make a box.')
+      expect(userText).toContain(reminders[0])
+      expect(reminders[0]).toContain("Keep working toward the user's goal, including any remaining edits or checks.")
+    }
+    if (expected.includes('name-model-regions')) {
+      expect(reminders[0]).toContain('Reread name-model-regions and apply it to the saved revisions you keep. If edits or validation are still in progress, carry this reminder forward to the resulting revisions.')
+      expect(reminders[0]).toContain('[{"path":"models/box/model.usda","status":"missing"}]')
+    } else {
+      expect(reminders[0] ?? '').not.toContain('name-model-regions')
+    }
     expect(events.filter(event => event.type === 'turn/end').map(event => event.data.reason)).toEqual([{ kind: 'completed' }])
   } finally {
     await ctx.fiber.dispose()
@@ -226,13 +238,15 @@ it('coalesces completed steps and keeps one Bison request across active turns', 
   }
 })
 
-it('steers at the next step when the every-other-step review flags wording', async () => {
+it('steers at the next step when the every-other-step review flags a missing region map', async () => {
   const root = await mkdtemp(join(tmpdir(), 'rumi-review-steering-'))
   const owner = new Context()
   const reminderQueued = Promise.withResolvers<void>()
   try {
     const sessionId = SessionId('print-review-steering')
     await identifyProject(root, sessionId)
+    const directory = join(root, 'models', 'box')
+    await mkdir(directory, { recursive: true })
     await mountAgentLoopTestDependencies(owner)
     const harness = await mountAgentLoopTestHarness(owner)
     const adapter = new StepReplay(async (step) => {
@@ -241,14 +255,17 @@ it('steers at the next step when the every-other-step review flags wording', asy
     owner.effect(() => owner.llm.registerAdapter(['fixture'], adapter))
     owner.effect(() => owner.tools.register(defineContentToolFixture({
       name: 'inspect', description: 'Inspect project geometry.', parameters: {},
-      async execute() { return [{ type: 'text', text: 'Geometry inspected.' }] },
+      async execute() {
+        if (adapter.step === 1) await writeFile(join(directory, 'model.usda'), '#usda 1.0\n')
+        return [{ type: 'text', text: 'Geometry inspected.' }]
+      },
     })))
     owner.on('agent/inbox/inserted', ({ agent, message }) => {
       if (agent.session.id === sessionId && String(message.source.kind) === 'rumi-skill-reminder') {
         reminderQueued.resolve()
       }
     })
-    const fetchDecision = vi.fn<typeof fetch>(async () => decision(0.01, 0.95))
+    const fetchDecision = vi.fn<typeof fetch>(async () => decision(0.99, 0.01))
     applySkillReminders(owner, { ...config, everySteps: 2 }, async () => 'fixture-key', createUserMessage, fetchDecision)
     const agent = await harness.create(sessionId, { provider: 'fixture', model: 'fixture' }, { cwd: root })
     agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Inspect the box.' }] }))
@@ -256,10 +273,11 @@ it('steers at the next step when the every-other-step review flags wording', asy
     const states = fetchDecision.mock.calls.map(([, options]) => JSON.parse(String(options?.body)).state)
     expect(states.map(state => state.draft)).toEqual(['Progress 1.\nProgress 2.', 'Progress 3.\nProgress 4.'])
     const events = agent.session.snapshotEvents()
-    const reminders = events.filter(event => event.type === 'user/message' && String(event.data.source.kind) === 'rumi-skill-reminder')
+    const reminders = events.filter(event => event.type === 'user/message').filter(event => String(event.data.source.kind) === 'rumi-skill-reminder')
     const thirdReply = events.find(event => event.type === 'assistant/message' && event.data.step === 3)
     const finalReply = events.find(event => event.type === 'assistant/message' && event.data.step === 4)
     expect(reminders).toHaveLength(1)
+    expect(reminders[0]?.data.content).toEqual([{ type: 'text', text: expect.stringContaining('carry this reminder forward to the resulting revisions') }])
     expect(reminders[0]?.seq).toBeGreaterThan(thirdReply?.seq ?? Infinity)
     expect(reminders[0]?.seq).toBeLessThan(finalReply?.seq ?? -1)
     expect(events.filter(event => event.type === 'turn/end').map(event => event.data.reason)).toEqual([{ kind: 'completed' }])

@@ -45,7 +45,7 @@ vi.mock('three/addons/controls/OrbitControls.js', () => ({
       state.controls = this
     }
     update() {}
-    addEventListener() {}
+    addEventListener = vi.fn()
   },
 }))
 
@@ -402,6 +402,70 @@ it('captures the same displayed Gaussian in model coordinates and restores scree
     const leave = state.renderer.domElement.addEventListener.mock.calls.find(([name]) => name === 'pointerleave')[1]
     leave()
     expect(viewport.captureCursor()).toEqual({ status: 'no_hit' })
+  } finally { viewport.dispose() }
+})
+
+it('reports unresolved surface IDs for their map and still draws matching selections', async () => {
+  const viewport = createViewport(container(), vi.fn())
+  try {
+    const spec = { format: 'usd', url: await boxUrl(10, 10, 10), transform: {} }
+    const valid = { id: 'side', name: 'Side', location: { kind: 'surface', parts: [{ partPath: ['Model', 'design'], faceRanges: [[0, 2]] }] } }
+    const invalid = { ...valid, id: 'cap', location: { kind: 'surface', parts: [{ partPath: ['Model', 'design'], surfaceIds: [9000] }] } }
+    await viewport.applyDesign({ ...spec, regionMap: { key: 'one', regions: [valid, invalid] },
+      highlight: { id: 'show-side', regionId: 'side', regionMapKey: 'one' } }, null)
+    expect(viewport.regionResolution()).toEqual({ key: 'one', unresolvedIds: ['cap'] })
+    expect(viewport.renderedHighlight()).toBe('show-side')
+    await viewport.applyDesign({ ...spec, regionMap: { key: 'two', regions: [valid] } }, null)
+    expect(viewport.regionResolution()).toEqual({ key: 'two', unresolvedIds: [] })
+  } finally { viewport.dispose() }
+})
+
+it('changes a named hover on camera zoom while retaining a pinned selection', async () => {
+  const onRegionMarker = vi.fn()
+  const viewport = createViewport(container(), vi.fn(), undefined, undefined, undefined, onRegionMarker)
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+  vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  try {
+    const whole = { id: 'shell', name: 'Shell', location: { kind: 'surface', parts: [{ partPath: ['Model', 'design'] }] } }
+    const panel = { id: 'panel', name: 'Panel', parentId: 'shell',
+      location: { kind: 'surface', parts: [{ partPath: ['Model', 'design'], faceRanges: [[8, 10]] }] } }
+    const spec = {
+      format: 'usd', path: '/model.usda', revision: 1, url: await boxUrl(10, 10, 10), transform: {},
+      regionMap: { key: 'nested', regions: [whole, panel] },
+    }
+    await viewport.applyDesign(spec, null)
+    state.resize()
+    viewport.setCursorMode('named')
+    const mesh = rendered().getObjectByName('design')
+    const target = new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3()).add(new THREE.Vector3(1, 1, 0))
+    const camera = state.renderer.render.mock.calls.at(-1)[1]
+    const cameraChanged = state.controls.addEventListener.mock.calls.find(([name]) => name === 'change')[1]
+    const listener = name => state.renderer.domElement.addEventListener.mock.calls.find(([event]) => event === name)[1]
+    const pointAt = (distance: number) => {
+      camera.position.copy(target).add(new THREE.Vector3(0, 0, distance))
+      camera.up.set(0, 1, 0)
+      camera.lookAt(target)
+    }
+    const flushFrame = () => requestAnimationFrame.mock.lastCall[0]()
+    const pointer = { clientX: 200, clientY: 150, pointerType: 'mouse', button: 0, isPrimary: true, pointerId: 1 }
+    pointAt(350)
+    listener('pointermove')(pointer)
+    flushFrame()
+    expect(onRegionMarker.mock.lastCall[0].name).toBe('Shell')
+    pointAt(35)
+    cameraChanged()
+    flushFrame()
+    expect(onRegionMarker.mock.lastCall[0].name).toBe('Panel')
+    listener('pointerdown')(pointer)
+    listener('pointerup')(pointer)
+    pointAt(350)
+    cameraChanged()
+    expect(viewport.captureCursor().namedRegion.id).toBe('panel')
+    listener('pointerdown')(pointer)
+    listener('pointerup')(pointer)
+    expect(onRegionMarker.mock.lastCall[0].name).toBe('Shell')
+    await viewport.applyDesign({ ...spec, highlight: { id: 'show-panel', regionId: panel.id, regionMapKey: 'nested' } }, null)
+    expect(viewport.renderedHighlight()).toBe('show-panel')
   } finally { viewport.dispose() }
 })
 

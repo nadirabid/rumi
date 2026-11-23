@@ -58,6 +58,7 @@ it('documents creating multiple models and bringing a named entry into view', as
     blender: await readFile(new URL('../skills/blender-modeling/SKILL.md', import.meta.url), 'utf8'),
     instructions: await readFile(new URL('../AGENTS_TEMPLATE.md', import.meta.url), 'utf8'),
     load: f.raw('viewer_load').description,
+    surfaceAnalysis: f.raw('viewer_analyze_surfaces').description,
     cursor: f.raw('viewer_cursor_snapshot').description,
     highlight: f.raw('viewer_highlight').description,
     clarification: await readFile(new URL('../skills/clarify-mesh-changes/SKILL.md', import.meta.url), 'utf8'),
@@ -395,7 +396,8 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
     const placed = await f.run('viewer_transform', { scale: 2, rotate: { z: 90 } })
     expect(placed.design.transform).toMatchObject({ scale: 2, rotate: { z: 90 } })
     const camera = await f.run('viewer_camera', { azimuth: 45, elevation: 30 })
-    expect(camera.camera).toMatchObject({ azimuth: 45, elevation: 30 })
+    expect(camera).toEqual({ path: placed.design.path, revision: placed.design.revision, url: placed.design.url,
+      camera: expect.objectContaining({ azimuth: 45, elevation: 30 }) })
     const feedback = f.routes.get('/api/print-studio/viewer/feedback')!
     await feedback(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
       method: 'POST', body: JSON.stringify({ revision: 1, url: loaded.design.url, transform: placed.design.transform, error: 'Invalid geometry' }),
@@ -454,6 +456,65 @@ it('returns a durable cursor image with its region through the tool output', asy
   expect(blocks[0].type).toBe('text')
   expect(blocks[1]).toEqual({ type: 'image', attachment: result.image })
   expect(await f.run('viewer_cursor_snapshot', {}, 'other-session')).toEqual({ status: 'viewer_unavailable', reason: 'viewer_not_open' })
+})
+
+it('shows an exact named feature and settles only its matching renderer feedback', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-named-feature-'))
+  const f = fixture(undefined, root)
+  try {
+    const directory = join(root, 'models/hinge')
+    await mkdir(directory, { recursive: true })
+    const usd = '#usda 1.0\n'
+    await writeFile(join(directory, 'model.usda'), usd)
+    const sourceHash = createHash('sha256').update(usd).digest('hex')
+    const feature = {
+      id: 'pin-clearance', name: 'Pin clearance', aliases: ['pin gap'],
+      description: 'The space that lets the pin turn.',
+      location: { kind: 'volume', boxes: [[-2, -1, 0, 2, 1, 6]] },
+    }
+    await writeFile(join(directory, 'model.regions.json'), JSON.stringify({ sourceHash, regions: [feature] }))
+    const { design } = await f.state()
+    const args = { path: 'models/hinge/model.usda', revision: design.revision, url: design.url, label: 'Pin clearance' }
+    const capture = f.run('viewer_cursor_snapshot')
+    const request = await vi.waitFor(async () => {
+      const value = await (await f.request('/api/print-studio/viewer/state?sessionId=session-a')).json()
+      expect(value.cursorRequest).toEqual({ id: expect.any(String) })
+      return value
+    })
+    const { path, revision, url, transform } = design
+    const cursor = await f.routes.get('/api/print-studio/viewer/cursor')!(new Request(
+      'http://rumi/api/print-studio/viewer/cursor?sessionId=session-a', {
+        method: 'POST',
+        body: JSON.stringify({ requestId: request.cursorRequest.id, snapshot: {
+          status: 'captured', capturedAt: '2026-11-03T20:00:00.000Z',
+          identity: { sceneRevision: request.scene.revision, design: { path, revision, url, transform } },
+          namedRegion: { id: feature.id, name: feature.name, regionMapKey: design.regionMap.key },
+          region: null,
+          camera: { position: [0, 0, 10], target: [0, 0, 0], up: [0, 1, 0], fov: 40, aspect: 1 },
+          image: 'data:image/png;base64,cG5n',
+        } }),
+      },
+    ))
+    expect(cursor.status).toBe(200)
+    expect(await capture).toMatchObject({ status: 'captured', region: null, namedRegion: feature })
+    await expect(f.run('viewer_highlight', { ...args, region: 'missing' })).resolves.toMatchObject({ status: 'unknown_region' })
+    await expect(f.run('viewer_highlight', { ...args, region: 'pin gap', regionMapKey: 'stale' })).resolves.toMatchObject({ status: 'stale_region' })
+    const highlighting = f.run('viewer_highlight', { ...args, region: 'PIN GAP' })
+    const queued = await vi.waitFor(async () => {
+      const { highlight } = (await f.state()).design
+      expect(highlight).toMatchObject({ regionId: feature.id, regionName: feature.name, regionMapKey: design.regionMap.key })
+      return highlight
+    })
+    expect(queued).not.toHaveProperty('meshPath')
+    const report = { status: 'ok', dimensions: { x: 2, y: 2, z: 2 }, checks: [] }
+    const feedback = await f.routes.get('/api/print-studio/viewer/feedback')!(new Request(
+      'http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
+        method: 'POST', body: JSON.stringify({ revision: design.revision, url: design.url, transform: design.transform, report, highlightId: queued.id }),
+      },
+    ))
+    expect(feedback.status).toBe(200)
+    expect(await highlighting).toMatchObject({ status: 'rendered', namedRegion: feature })
+  } finally { await f.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
 it('highlights the exact triangles saved by an editable cursor capture', async () => {
@@ -987,10 +1048,16 @@ it('retains reviewed controls when reloading identical bytes and invalidates the
       operation: 'bulge', label: 'Profile', center: [0, 0, 0], radii: [30, 30, 30], direction: [0, 1, 0], limit: 10, parts: [],
       values: { amount: .5, spread: .5, peakX: .5, peakY: .5, falloff: .5, angle: .5 }, controls: legacyControls('bulge') })
     const before = (await f.state()).design
+    const sidecar = JSON.stringify({ sourceHash: before.contentHash, regions: [
+      { id: 'panel', name: 'Panel', location: { kind: 'surface', parts: [{ partPath: ['Missing'] }] } },
+    ] })
+    const key = createHash('sha256').update(sidecar).digest('hex')
+    await writeFile(join(root, 'model.regions.json'), sidecar)
     const reload = f.run('viewer_load', { path })
     let after: typeof before
-    await vi.waitFor(async () => { after = (await f.state()).design; expect(after.renderRequest).toBeTruthy() })
+    await vi.waitFor(async () => { after = (await f.meshState()).design; expect(after.renderRequest).toBeTruthy() })
     expect(after!.url).toBe(design.url)
+    expect(after!.regionMap.key).toBe(key)
     expect(after!.controlReview).toEqual(before.controlReview)
     await f.routes.get('/api/print-studio/viewer/feedback')!(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
       method: 'POST', body: JSON.stringify({ revision: before.revision, url: before.url, transform: before.transform, volume: null, error: 'Stale renderer failure', loadStatus: 'build_failed' }),
@@ -998,10 +1065,11 @@ it('retains reviewed controls when reloading identical bytes and invalidates the
     expect((await f.state()).design.error).toBeNull()
     const response = await f.routes.get('/api/print-studio/viewer/feedback')!(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
       method: 'POST', body: JSON.stringify({ revision: after!.revision, url: after!.url, renderRequest: after!.renderRequest,
-        transform: after!.transform, volume: null, loadStatus: 'ready', report: { status: 'ok', dimensions: { x: 1, y: 1, z: 1 }, checks: [] } }),
+        transform: after!.transform, volume: null, loadStatus: 'ready', report: { status: 'ok', dimensions: { x: 1, y: 1, z: 1 }, checks: [] },
+        regionResolution: { key, unresolvedIds: ['panel'] } }),
     }))
     expect(response.status).toBe(200)
-    expect((await reload).load.status).toBe('ready')
+    expect(await reload).toMatchObject({ load: { status: 'ready' }, design: { regionStatus: 'invalid', regionError: expect.stringContaining('panel') } })
     expect((await f.state()).design.controlReview).toMatchObject({ id, status: 'approved' })
     await writeFile(path, '#usda 1.0\n# changed geometry\n')
     await f.run('viewer_load', { path })
@@ -1065,4 +1133,75 @@ it('records retained retry instructions and reports when controls have been clea
     expect(JSON.parse(JSON.stringify(failures).replaceAll(id, '<review-id>'))).toMatchSnapshot()
     expect((await f.state()).design.controlReview).toBeNull()
   } finally { await ctx.fiber.dispose(); await f.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it('discovers a saved part’s selectable surfaces and exports the viewer triangle order without a cursor', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'rumi-surface-analysis-'))
+  const f = fixture(undefined, cwd)
+  try {
+    const path = 'hinge.usda'
+    const bytes = await readFile(new URL('./fixtures/robot.usda', import.meta.url))
+    await writeFile(join(cwd, path), bytes)
+    const inventory = await f.run('viewer_analyze_surfaces', { path })
+    const sourceHash = createHash('sha256').update(bytes).digest('hex')
+    const partPath = ['Model', 'Door']
+    expect(inventory).toMatchObject({ sourceHash, status: 'analyzed', total: 2, nextOffset: null })
+    expect(inventory.parts).toContainEqual({ partPath, triangles: 12, surfaceCount: 6, boundsMm: [15, -10, -10, 35, 10, 10] })
+    const features = await f.run('viewer_analyze_surfaces', { path, sourceHash, partPath, includeMesh: true })
+    expect(features).toMatchObject({ sourceHash, partPath, total: 6, nextOffset: null, mesh: { triangleCount: 12 } })
+    expect(features.surfaces).toContainEqual({ surfaceId: 1, triangles: 2, areaMm2: 400, centerMm: [15, 0, 0],
+      boundsMm: [15, -10, -10, 15, 10, 10], meanNormal: [-1, 0, 0] })
+    const { parseUsdModel } = await import('../viewer/viewport/usd.js')
+    const { createNamedRegionIndex, namedRegionMesh } = await import('../viewer/viewport/named-regions.js')
+    const { Group } = await import('three')
+    const { root } = await parseUsdModel(Uint8Array.from(bytes).buffer)
+    const placement = new Group().add(root)
+    const region = (id: string, selector: object) => ({ id, location: { kind: 'surface', parts: [{ partPath, ...selector }] } })
+    const regions = createNamedRegionIndex(root, placement, [region('ordered', { faceRanges: [[2, 5]] }), region('panel', { surfaceIds: [1] })])
+    const whole = parseStl(await readFile(join(cwd, features.mesh.path)))
+    const exported = (id: string) => parseStl(Buffer.from(namedRegionMesh(regions.get(id), placement).meshStl!, 'base64'))
+    expect(exported('ordered')).toEqual(whole.slice(2 * 9, 5 * 9))
+    expect(exported('panel')).toHaveLength(2 * 9)
+    expect(await f.run('viewer_analyze_surfaces', { path, sourceHash: '0'.repeat(64), partPath })).toMatchObject({ status: 'stale_model', sourceHash })
+    await expect(f.run('viewer_analyze_surfaces', { path, partPath: ['missing'] })).rejects.toThrow(/Copy the array/)
+    const outside = new URL('./fixtures/robot.usda', import.meta.url)
+    await symlink(outside, join(cwd, 'outside.usda'))
+    await expect(f.run('viewer_analyze_surfaces', { path: 'outside.usda' })).rejects.toThrow(/inside the project/)
+  } finally {
+    await f.dispose()
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+it('pages disconnected areas of one saved mesh by decreasing triangle area', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'rumi-surface-pages-'))
+  const f = fixture(undefined, cwd)
+  try {
+    const path = 'terrain.usda'
+    const faces = Array.from({ length: 29 }, (_, i) => i)
+    const points = faces.flatMap(i => [`(${i * 2}, 0, 0)`, `(${i * 2 + 1}, 0, 0)`, `(${i * 2}, ${i + 1}, 0)`])
+    const indices = faces.flatMap(i => [i * 3, i * 3 + 1, i * 3 + 2])
+    await writeFile(join(cwd, path), `#usda 1.0
+(
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Mesh "Islands"
+{
+    point3f[] points = [${points.join(', ')}]
+    int[] faceVertexCounts = [${faces.map(() => 3).join(', ')}]
+    int[] faceVertexIndices = [${indices.join(', ')}]
+}
+`)
+    const args = { path, partPath: ['Islands'] }
+    const page = await f.run('viewer_analyze_surfaces', args)
+    expect(page).toMatchObject({ total: 29, nextOffset: 24 })
+    expect(page.surfaces[0]).toMatchObject({ surfaceId: 29, triangles: 1, areaMm2: 14_500_000 })
+    const rest = await f.run('viewer_analyze_surfaces', { ...args, sourceHash: page.sourceHash, offset: page.nextOffset })
+    expect(rest).toMatchObject({ total: 29, nextOffset: null })
+    expect([...page.surfaces, ...rest.surfaces].map(row => row.surfaceId)).toEqual(faces.map(i => 29 - i))
+  } finally {
+    await f.dispose()
+    await rm(cwd, { recursive: true, force: true })
+  }
 })

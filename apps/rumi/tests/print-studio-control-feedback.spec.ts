@@ -15,8 +15,8 @@ const renderer = vi.hoisted(() => ({ fail: false }))
 vi.mock('../brand/print-studio/viewer/viewer.module.css', () => ({ default: '' }))
 vi.mock('../brand/print-studio/viewer/viewport/index.js', () => ({
   createViewport: () => ({
-    apply() {}, dispose() {}, setActivity() {}, shapeMetrics: () => ({}), modelParameters: () => ({}), motionControls: () => null,
-    applyDesign: async () => ({ status: 'ok' }),
+    apply() {}, dispose() {}, setActivity() {}, setCursorMode() {}, shapeMetrics: () => ({}), modelParameters: () => ({}), motionControls: () => null,
+    applyDesign: async () => ({ status: 'ok' }), regionResolution: () => ({ key: null, unresolvedIds: [] }),
     applyShape: (spec: { id: string } | null) => {
       if (renderer.fail && spec) throw new Error('Controls must bind declared model parameters')
       return spec?.id ?? null

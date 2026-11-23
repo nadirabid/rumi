@@ -6,6 +6,7 @@ import { createSurfaceIndex } from '../viewer/viewport/surfaces.js'
 import { normalizeSelection } from '../viewer/highlight.js'
 import { cursorMeshSnapshot } from '../viewer/viewport/cursor-geometry.js'
 import { parseStl } from '../viewer/stl.js'
+import { createNamedRegionIndex, createNamedRegionVisual, namedRegionMesh } from '../viewer/viewport/named-regions.js'
 
 it('joins coplanar triangles, stops at creases, and preserves triangle identity when picking', () => {
   const geometry = new THREE.BoxGeometry(2, 2, 2).toNonIndexed()
@@ -72,6 +73,100 @@ it('retains a captured selection in a cursor snapshot and rejects malformed refe
   const selection = { partPath: ['helmet', 'faceplate'], surfaceId: 5, mode: 'surface' }
   expect(normalizeSelection(selection)).toEqual(selection)
   expect(() => normalizeSelection({ ...selection, surfaceId: -1 })).toThrow()
+})
+
+it('picks, draws, and exports the same named faces before viewer placement', () => {
+  const geometry = new THREE.PlaneGeometry(2, 2)
+  const material = new THREE.MeshBasicMaterial()
+  const mesh = new THREE.Mesh(geometry, material)
+  const viewer = new THREE.Scene(), placement = new THREE.Group(), model = new THREE.Group()
+  viewer.add(placement); placement.add(model); model.add(mesh)
+  model.userData.rumiCoordinateFrame = true
+  mesh.name = 'Bracket'
+  mesh.position.set(2, 3, 4)
+  placement.position.set(5, 10, 15)
+  placement.scale.setScalar(2)
+  const firstFace = { id: 'mount-face', name: 'Mount face', location: { kind: 'surface', parts: [{ partPath: ['Bracket'], faceRanges: [[0, 1]] }] } }
+  try {
+    const index = createNamedRegionIndex(model, placement, [firstFace,
+      { ...firstFace, id: 'missing', location: { kind: 'surface', parts: [{ partPath: ['Bracket'], faceRanges: [[5, 6]] }] } }])
+    const entry = index.get(firstFace.id)
+    expect(index.get('missing')).toBeUndefined()
+    const hit = mesh.localToWorld(new THREE.Vector3())
+    const ray = new THREE.Ray(hit.clone().add(new THREE.Vector3(0, 0, 30)), new THREE.Vector3(0, 0, -1))
+    expect(index.pick({ point: hit, faceIndex: 0, object: mesh }, mesh, ray, 0.001)?.named).toBe(entry)
+    expect(index.pick({ point: hit, faceIndex: 1, object: mesh }, mesh, ray, 0.001)).toBeNull()
+    const preview = createNamedRegionVisual(entry, viewer, placement, 0x9ab9e1, (node: THREE.Mesh) => node, 0.5)
+    try {
+      preview.update()
+      const saved = parseStl(Buffer.from(namedRegionMesh(entry, placement).meshStl!, 'base64'))
+      expect([...saved]).toEqual([1,4,4, 1,2,4, 3,4,4])
+      const child = preview.root.children[0] as THREE.Mesh
+      expect([...child.geometry.getAttribute('position').array]).toEqual([-1,1,0, -1,-1,0, 1,1,0])
+      expect(child.matrix.equals(mesh.matrixWorld)).toBe(true)
+    } finally { preview.dispose() }
+  } finally { geometry.dispose(); material.dispose() }
+})
+
+it('picks named curves and volumes in empty space without claiming hidden geometry', () => {
+  const placement = new THREE.Group()
+  const index = createNamedRegionIndex(placement, placement, [
+    { id: 'opening', name: 'Opening', location: { kind: 'curve', points: [[0, 0, 3], [4, 0, 3]] } },
+    { id: 'clearance', name: 'Clearance', location: { kind: 'volume', boxes: [[-3, -1, 0, -1, 1, 2]] } },
+    { id: 'pivot', name: 'Pivot', location: { kind: 'point', point: [2, 2, 0] } },
+  ])
+  const ray = (x: number, y: number) => new THREE.Ray(new THREE.Vector3(x, y, 10), new THREE.Vector3(0, 0, -1))
+  expect(index.pick(null, null, ray(2, 0), 0.001)?.named.region.id).toBe('opening')
+  expect(index.pick(null, null, ray(-2, 0), 0.001)?.named.region.id).toBe('clearance')
+  expect(index.pick(null, null, ray(2, 2), 0.001)?.named.region.id).toBe('pivot')
+  expect(index.pick({ point: new THREE.Vector3(2, 0, 5) }, null, ray(2, 0), 0.001)).toBeNull()
+  expect(namedRegionMesh(index.get('opening'), placement)).toEqual({})
+})
+
+it('picks progressively narrower named surfaces as they become large enough to target', () => {
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    0,0,0, 80,0,0, 0,80,0,
+    0,0,0, 60,0,0, 0,6,0,
+    0,0,0, 50,0,0, 0,1,0,
+    50,0,0, 50,1,0, 0,1,0,
+  ], 3))
+  const material = new THREE.MeshBasicMaterial()
+  const mesh = new THREE.Mesh(geometry, material)
+  mesh.name = 'Shell'
+  const placement = new THREE.Group()
+  placement.add(mesh)
+  const surface = (id: string, start: number, end: number, parentId?: string) => ({
+    id, name: id, parentId,
+    location: { kind: 'surface', parts: [{ partPath: ['Shell'], faceRanges: [[start, end]] }] },
+  })
+  try {
+    const index = createNamedRegionIndex(placement, placement, [
+      surface('seam', 2, 4, 'rim'),
+      surface('seam-face', 3, 4, 'seam'),
+      surface('wall', 0, 4),
+      surface('rim', 1, 4, 'wall'),
+      surface('bad-detail', 0, 1, 'rim'),
+    ])
+    const pick = (distance: number, faceIndex = 2) => {
+      const point = new THREE.Vector3(faceIndex === 3 ? 49.5 : 0.5, 0.5, 0)
+      const ray = new THREE.Ray(point.clone().add(new THREE.Vector3(0, 0, distance)), new THREE.Vector3(0, 0, -1))
+      return index.pick({ point, faceIndex, object: mesh }, mesh, ray, 0.001)?.named.region.id
+    }
+    expect(index.get('bad-detail')).toBeUndefined()
+    expect(index.get('seam')?.region.id).toBe('seam')
+    expect(pick(250)).toBe('wall')
+    expect(pick(100)).toBe('rim')
+    expect(pick(20)).toBe('seam')
+    expect(pick(20, 0)).toBe('wall')
+    expect(pick(40)).toBe('rim')
+    expect([40, 25, 20, 25, 40].map(distance => pick(distance, 3))).toEqual([
+      'rim', 'seam', 'seam-face', 'seam', 'rim',
+    ])
+    mesh.scale.y = 2
+    mesh.updateWorldMatrix(true, false)
+    expect(pick(40)).toBe('seam')
+  } finally { geometry.dispose(); material.dispose() }
 })
 
 it('exports the exact connected surface and the whole part in their saved coordinates', () => {

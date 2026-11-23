@@ -1,9 +1,10 @@
 /** Session-scoped, on-demand cursor captures; requests never reuse earlier pointer state. */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, realpath, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { normalizeSelection } from './highlight.js'
-import { parseStl, STL_LIMITS } from './stl.js'
+import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { encodeStl, parseStl, STL_LIMITS } from './stl.js'
 
 const rendererUnavailableReasons = new Set(['viewer_not_open', 'viewer_closed', 'viewer_hidden', 'temporary_edit', 'movement_preview', 'print_layout'])
 const meshUnavailableReasons = new Set(['unsupported_model', 'empty_selection', 'geometry_unavailable'])
@@ -12,14 +13,14 @@ const maxMeshBase64 = 4 * Math.ceil((84 + 50 * STL_LIMITS.maxTriangles) / 3)
 /** Limit a cursor request to the existing image budget and one maximum-size binary STL. */
 export const MAX_CURSOR_BODY_CHARS = 3_100_000 + maxMeshBase64
 
-function readMesh(value, selection, modelLocalPoint) {
+function readMesh(value, hasSurfaceSelection) {
   if (value.meshStl === undefined) {
     if (value.meshUnavailable === undefined) return {}
     if (!meshUnavailableReasons.has(value.meshUnavailable)) throw new Error('Invalid cursor mesh status')
     return { meshUnavailable: value.meshUnavailable }
   }
   const encoded = value.meshStl
-  if (!value.identity.design || !selection || !modelLocalPoint || value.meshUnavailable !== undefined
+  if (!value.identity.design || !hasSurfaceSelection || value.meshUnavailable !== undefined
     || typeof encoded !== 'string' || encoded.length > maxMeshBase64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
     throw new Error('Invalid cursor mesh')
   }
@@ -37,13 +38,7 @@ function readMesh(value, selection, modelLocalPoint) {
  * @returns {Promise<{path: string, triangleCount: number}>} Project-relative path of the completed file.
  */
 export async function saveCursorMesh(cwd, bytes, signal) {
-  let directory = await realpath(cwd)
-  for (const name of ['.rumi', 'cursor-selections']) {
-    directory = join(directory, name)
-    try { await mkdir(directory, { mode: 0o700 }) }
-    catch (error) { if (error.code !== 'EEXIST') throw error }
-    if (await realpath(directory) !== directory) throw new Error('Cursor geometry directory must stay inside the project')
-  }
+  const directory = await geometryDirectory(cwd, 'cursor-selections')
   signal.throwIfAborted()
   const filename = `${randomUUID()}.stl`
   const absolutePath = join(directory, filename)
@@ -57,6 +52,33 @@ export async function saveCursorMesh(cwd, bytes, signal) {
     throw error
   }
   return { path: `.rumi/cursor-selections/${filename}`, triangleCount: bytes.readUInt32LE(80) }
+}
+
+async function geometryDirectory(cwd, subdirectory) {
+  let directory = await realpath(cwd)
+  for (const name of ['.rumi', subdirectory]) {
+    directory = join(directory, name)
+    try { await mkdir(directory, { mode: 0o700 }) }
+    catch (error) { if (error.code !== 'EEXIST') throw error }
+    if (await realpath(directory) !== directory) throw new Error('Geometry directory must stay inside the project')
+  }
+  return directory
+}
+
+/**
+ * Save a content-addressed copy of a whole part in viewer triangle order.
+ * @param {string} cwd Local project directory.
+ * @param {Float32Array} positions Saved triangle vertices in model-local millimetres.
+ * @param {AbortSignal} signal Tool cancellation.
+ * @returns {Promise<object>} Project-relative binary STL path and triangle count.
+ */
+export async function saveAnalyzedMesh(cwd, positions, signal) {
+  const directory = await geometryDirectory(cwd, 'surface-analysis')
+  const bytes = Buffer.from(encodeStl(positions))
+  const filename = `${createHash('sha256').update(bytes).digest('hex')}.stl`
+  signal.throwIfAborted()
+  await writeFileAtomic(join(directory, filename), bytes, { mode: 0o600 })
+  return { path: `.rumi/surface-analysis/${filename}`, triangleCount: positions.length / 9 }
 }
 
 /**
@@ -84,16 +106,25 @@ export function validateCursorSnapshot(value) {
   const vector = x => Array.isArray(x) && x.length === 3 && x.every(n => Number.isFinite(n) && Math.abs(n) <= 1e9)
   const region = value.region
   if (typeof value.capturedAt !== 'string' || value.capturedAt.length > 40 || !Number.isFinite(Date.parse(value.capturedAt)) || !value.identity || !Number.isInteger(value.identity.sceneRevision)
-    || !region || !(region.objectId === null || typeof region.objectId === 'string')
+    || (!region && !(region === null && value.namedRegion))) throw new Error('Invalid cursor region')
+  let namedRegion
+  if (value.namedRegion !== undefined) {
+    const feature = value.namedRegion
+    if (!value.identity.design || !feature || typeof feature.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,47}$/u.test(feature.id)
+      || typeof feature.name !== 'string' || !feature.name.trim() || feature.name.length > 64
+      || typeof feature.regionMapKey !== 'string' || !/^[a-f0-9]{64}$/u.test(feature.regionMapKey)) throw new Error('Invalid named cursor region')
+    namedRegion = { id: feature.id, name: feature.name, regionMapKey: feature.regionMapKey }
+  }
+  if (region && (!(region.objectId === null || typeof region.objectId === 'string')
     || !Array.isArray(region.partPath) || region.partPath.length > 128 || !region.partPath.every(s => typeof s === 'string' && s.length <= 1000)
     || !Number.isInteger(region.faceIndex) || region.faceIndex < 0 || !vector(region.worldPoint)
-    || !Number.isFinite(region.worldRadius) || region.worldRadius <= 0 || region.worldRadius > 1e9) throw new Error('Invalid cursor region')
-  const blob = region.modelLocalBlob
+    || !Number.isFinite(region.worldRadius) || region.worldRadius <= 0 || region.worldRadius > 1e9)) throw new Error('Invalid cursor region')
+  const blob = region ? region.modelLocalBlob : null
   if (blob !== null && (!blob || !vector(blob.center) || !vector(blob.radii) || blob.radii.some(n => n <= 0) || !vector(blob.rotationDegrees))) throw new Error('Invalid model-local region')
-  const modelLocalPoint = region.modelLocalPoint === undefined ? blob?.center ?? null : region.modelLocalPoint
+  const modelLocalPoint = region?.modelLocalPoint === undefined ? blob?.center ?? null : region.modelLocalPoint
   if (modelLocalPoint !== null && !vector(modelLocalPoint)) throw new Error('Invalid saved model point')
-  const selection = region.selection === undefined ? undefined : normalizeSelection(region.selection)
-  const mesh = readMesh(value, selection, modelLocalPoint)
+  const selection = region?.selection === undefined ? undefined : normalizeSelection(region.selection)
+  const mesh = readMesh(value, Boolean(namedRegion || (selection && modelLocalPoint)))
   const camera = value.camera
   if (!camera || !vector(camera.position) || !vector(camera.target) || !vector(camera.up)
     || !Number.isFinite(camera.fov) || camera.fov <= 0 || camera.fov >= 180
@@ -102,9 +133,9 @@ export function validateCursorSnapshot(value) {
     || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value.image)) throw new Error('Invalid cursor image')
   return {
     status: 'captured', capturedAt: value.capturedAt, identity: value.identity,
-    ...mesh,
-    region: { ...(selection ? { selection } : {}), objectId: region.objectId, partPath: region.partPath, faceIndex: region.faceIndex,
-      worldPoint: region.worldPoint, worldRadius: region.worldRadius, modelLocalPoint, modelLocalBlob: blob === null ? null : { center: blob.center, radii: blob.radii, rotationDegrees: blob.rotationDegrees } },
+    ...mesh, ...(namedRegion ? { namedRegion } : {}),
+    region: region ? { ...(selection ? { selection } : {}), objectId: region.objectId, partPath: region.partPath, faceIndex: region.faceIndex,
+      worldPoint: region.worldPoint, worldRadius: region.worldRadius, modelLocalPoint, modelLocalBlob: blob === null ? null : { center: blob.center, radii: blob.radii, rotationDegrees: blob.rotationDegrees } } : null,
     camera: { position: camera.position, target: camera.target, up: camera.up, fov: camera.fov, aspect: camera.aspect },
     image: value.image,
   }

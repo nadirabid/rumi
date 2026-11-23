@@ -9,7 +9,7 @@ const TOOLS = new Set(['bash', 'read', 'write', 'edit', 'str_replace_editor', 'g
   'web_search', 'web_fetch', 'todo_write',
   'load_workspace_dependencies', 'job_output', 'job_list', 'job_kill', 'blender_status',
   'print_studio_status', 'print_studio_progress',
-  'viewer_cursor_snapshot', 'viewer_working_model', 'viewer_load', 'viewer_transform', 'viewer_highlight',
+  'viewer_cursor_snapshot', 'viewer_analyze_surfaces', 'viewer_working_model', 'viewer_load', 'viewer_transform', 'viewer_highlight',
   'viewer_controls', 'viewer_camera', 'mesh_open', 'mesh_transform', 'mesh_remove',
   'validation_mechanics', 'validation_accept'])
 const checkout = resolve(import.meta.dirname, '../../../../..')

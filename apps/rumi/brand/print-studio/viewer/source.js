@@ -8,7 +8,7 @@ import { readMotion } from './motion.js'
 import { normalizePlacement } from './transform.js'
 import { normalizeShape, normalizeValues } from './analog/spec.js'
 import { controlValues, parameterValues } from './analog/control-spec.js'
-import { readModelRegions } from './model-regions.js'
+import { MAX_REGION_MAP_BYTES, needsSurfaceRegions, readModelRegions } from './model-regions.js'
 
 const ROUTE = '/api/print-studio/viewer'
 const MAX_FILES = 64
@@ -40,12 +40,14 @@ export function createSourcePresentation(initial) {
 }
 
 function applyHighlight(state, value) {
-  if (typeof value.label !== 'string' || value.label.length > 200 || (value.meshPath && !value.label.trim())) throw new Error('Supply a descriptive highlight label of up to 200 characters')
+  if (typeof value.label !== 'string' || value.label.length > 200 || ((value.meshPath || value.regionId) && !value.label.trim())) throw new Error('Supply a descriptive highlight label of up to 200 characters')
   const regionName = typeof value.regionName === 'string' ? value.regionName.trim() : undefined
   if (value.regionName !== undefined && (!regionName || regionName.length > 64 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(regionName))) {
     throw new Error('Supply a region name of up to 64 characters on one line')
   }
-  state.highlight = value.meshPath ? { label: value.label.trim(), meshPath: value.meshPath, triangleCount: value.triangleCount, id: randomUUID(), ...(regionName ? { regionName } : {}) } : null
+  const location = value.regionId ? { regionId: value.regionId, regionMapKey: value.regionMapKey }
+    : value.meshPath ? { meshPath: value.meshPath, triangleCount: value.triangleCount } : null
+  state.highlight = location ? { label: value.label.trim(), ...location, id: randomUUID(), ...(regionName ? { regionName } : {}) } : null
   return { status: state.highlight ? 'queued' : 'cleared', highlight: state.highlight,
     message: 'Presentation state updated; viewer display and user confirmation are not acknowledged.' }
 }
@@ -53,6 +55,16 @@ function applyHighlight(state, value) {
 function applyFeedback(state, value) {
   if (value.revision !== state.revision || value.url !== state.url || value.renderRequest !== state.renderRequest
     || JSON.stringify(value.transform) !== JSON.stringify(state.transform)) return false
+  const resolution = value.regionResolution
+  if (resolution !== undefined) {
+    if (!resolution || !Array.isArray(resolution.unresolvedIds)) throw new Error('Invalid named surface report')
+    if (resolution.key !== (state.regionMap?.key ?? null)) return false
+    const missing = resolution.unresolvedIds
+    const surfaces = new Set(state.regionMap?.regions.filter(region => region.location.kind === 'surface').map(region => region.id))
+    if (missing.length > surfaces.size || new Set(missing).size !== missing.length || missing.some(id => !surfaces.has(id))) {
+      throw new Error('Report only unresolved surface IDs in the current region map')
+    }
+  }
   if (value.report) {
     const report = value.report
     if (!['ok', 'review', 'blocked'].includes(report.status)
@@ -68,6 +80,14 @@ function applyFeedback(state, value) {
   else delete state.motion
   state.report = value.report ?? null
   if (value.report) state.parameters = parameters
+  if (resolution && state.regionMap) {
+    const ids = resolution.unresolvedIds
+    state.regionStatus = ids.length ? 'invalid' : needsSurfaceRegions(state.regionMap) ? 'needs_surface_regions' : 'ready'
+    if (ids.length) {
+      const names = ids.slice(0, 6).join(', ') + (ids.length > 6 ? ` (+${ids.length - 6} more)` : '')
+      state.regionError = `No matching mesh selection for ${names}. Use viewer_analyze_surfaces on this revision to check the part paths, surface IDs and face ranges.`
+    } else delete state.regionError
+  }
   state.error = value.error ? { kind: 'build', message: String(value.error).slice(0, 2000) } : null
   return true
 }
@@ -151,26 +171,39 @@ export async function createSource(ctx, path, workspace) {
     return { files, hash: digest.digest('hex'), parameters }
   }
 
-  let regionsFile = null, regionsStatus = 'missing'
+  let regionsFile = null
   async function updateRegions() {
     if (format !== 'usd' || closed) return
+    let regionsStatus, regionError
     try {
       const path = resolve(root, entryName.replace(/\.usd[a]?$/iu, '.regions.json'))
       if (!inside(root, await realpath(path))) throw new Error('Region map must be inside the model folder')
       const info = await stat(path, { bigint: true })
-      if (!info.isFile() || info.size > 65_536n) throw new Error('Region map exceeds 64 KiB')
+      if (!info.isFile() || info.size > MAX_REGION_MAP_BYTES) throw new Error('Supply a region map file of up to 2 MiB')
       const key = signature(info)
       if (regionsFile?.key !== key) {
         const text = await readFile(path, 'utf8')
-        if (Buffer.byteLength(text) > 65_536) throw new Error('Region map exceeds 64 KiB')
+        if (Buffer.byteLength(text) > MAX_REGION_MAP_BYTES) throw new Error('Region map exceeds 2 MiB')
         const parsed = JSON.parse(text)
         const map = readModelRegions(parsed, parsed?.sourceHash)
-        regionsFile = { key, sourceHash: parsed.sourceHash, map: { ...map, key: createHash('sha256').update(text).digest('hex') } }
+        regionsFile = { key, sourceHash: parsed.sourceHash, needsSurfaces: needsSurfaceRegions(map), map: { ...map, key: createHash('sha256').update(text).digest('hex') } }
       }
-      regionsStatus = regionsFile.sourceHash === state.contentHash ? 'ready' : 'outdated'
+      regionsStatus = regionsFile.sourceHash !== state.contentHash ? 'outdated' : regionsFile.needsSurfaces ? 'needs_surface_regions' : 'ready'
+      regionError = undefined
     } catch (error) {
       regionsFile = null
       regionsStatus = error.code === 'ENOENT' ? 'missing' : 'invalid'
+      regionError = regionsStatus === 'invalid' ? String(error.message).slice(0, 500) : undefined
+    }
+    const map = regionsFile?.sourceHash === state.contentHash ? regionsFile.map : null
+    if (!map || state.regionMap?.key !== map.key) {
+      state.regionMap = map
+      state.regionStatus = regionsStatus
+      if (regionError) state.regionError = regionError
+      else delete state.regionError
+    }
+    if (state.highlight?.regionId && state.highlight.regionMapKey !== map?.key) {
+      state.highlight = null
     }
   }
 
@@ -244,9 +277,7 @@ export async function createSource(ctx, path, workspace) {
   }, 'print viewer: source lifetime')
   await dispose
   return {
-    state: () => ({ ...state,
-      ...(format === 'usd' ? { regionStatus: regionsStatus, regionMap: regionsFile?.sourceHash === state.contentHash ? regionsFile.map : null } : {}),
-      controlReview: controlReview.state(), error: sourceError ?? buildError }),
+    state: () => ({ ...state, controlReview: controlReview.state(), error: sourceError ?? buildError }),
     controlReview,
     /** Request fresh renderer feedback without replacing geometry, edits, or review evidence. */
     requestRender() {
@@ -342,7 +373,9 @@ export async function createSource(ctx, path, workspace) {
     },
     camera(value) { state.camera = { ...value, id: randomUUID() } },
     feedback(value) {
-      if (applyFeedback(state, value)) buildError = state.error
+      if (!applyFeedback(state, value)) return false
+      buildError = state.error
+      return true
     },
     dispose,
   }

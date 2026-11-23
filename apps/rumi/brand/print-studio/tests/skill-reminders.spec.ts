@@ -48,6 +48,7 @@ it.each([
   { scenario: 'both decisions are positive', status: 'missing', score: 0.99, malformed: false, expected: ['name-model-regions', 'project reply guidance'] },
   { scenario: 'there is no changed mesh', status: null, score: 0.99, malformed: false, expected: ['project reply guidance'] },
   { scenario: 'the changed mesh has a matching map', status: 'ready', score: 0.99, malformed: false, expected: ['project reply guidance'] },
+  { scenario: 'only the map changed and it still uses legacy boxes', status: 'needs_surface_regions', score: 0.99, malformed: false, expected: ['name-model-regions', 'project reply guidance'] },
   { scenario: 'the region decision is negative', status: 'missing', score: 0.01, malformed: false, expected: ['project reply guidance'] },
   { scenario: 'the decision response is malformed', status: 'missing', score: 0.99, malformed: true, expected: [] },
 ])('reviews one closing draft when $scenario', async ({ status, score, malformed, expected }) => {
@@ -58,15 +59,18 @@ it.each([
     await identifyProject(root, sessionId)
     const directory = join(root, 'models', 'box')
     await mkdir(directory, { recursive: true })
+    const usd = '#usda 1.0\n'
+    const refresh = status === 'needs_surface_regions'
+    if (refresh) await writeFile(join(directory, 'model.usda'), usd)
+    const request = refresh ? 'Refresh the names on the box.' : 'Make a box.'
     const adapter = new ReviewReplay(async () => {
       if (status === null) return
-      const usd = '#usda 1.0\n'
-      await writeFile(join(directory, 'model.usda'), usd)
-      if (status === 'ready') {
+      if (!refresh) await writeFile(join(directory, 'model.usda'), usd)
+      if (refresh || status === 'ready') {
         await writeFile(join(directory, 'model.regions.json'), JSON.stringify({
           sourceHash: createHash('sha256').update(usd).digest('hex'),
-          remainder: 'Box',
-          regions: [{ id: 'lid', name: 'Lid', boxes: [[0, 0, 0, 1, 1, 1]] }],
+          regions: [refresh ? { id: 'lid', name: 'Lid', boxes: [[0, 0, 0, 1, 1, 1]] }
+            : { id: 'lid', name: 'Lid', location: { kind: 'surface', parts: [{ partPath: ['Lid'] }] } }],
         }))
       }
     })
@@ -79,9 +83,9 @@ it.each([
       expect(Object.keys(body.questions).sort()).toEqual(['conciseReply', 'namedRegions'])
       expect(body).toMatchObject({
         state: {
-          request: 'Make a box.',
+          request,
           draft: 'The box is ready. Here are all the details.',
-          changedModels: status ? [{ change: 'created', regionMap: status }] : [],
+          changedModels: status ? [{ change: refresh ? 'region_map_revised' : 'created', regionMap: status }] : [],
         },
         questions: { namedRegions: { type: 'noul' }, conciseReply: { type: 'noul' } },
       })
@@ -92,7 +96,7 @@ it.each([
     })
     applySkillReminders(ctx, config, async () => 'fixture-key', createUserMessage, fetchDecision)
     const agent = await harness.create(sessionId, { provider: 'fixture', model: 'fixture' }, { cwd: root })
-    agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Make a box.' }] }))
+    agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: request }] }))
     await agent.whenIdle()
     expect(fetchDecision).toHaveBeenCalledTimes(expected.length === 1 ? 2 : 1)
     const events = agent.session.snapshotEvents()
@@ -104,13 +108,13 @@ it.each([
     if (expected.length) {
       const userText = adapter.requests[1]?.messages.flatMap(message => message.role === 'user'
         ? message.content.flatMap(block => block.type === 'text' ? [block.text] : []) : [])
-      expect(userText).toContain('Make a box.')
+      expect(userText).toContain(request)
       expect(userText).toContain(reminders[0])
       expect(reminders[0]).toContain("Keep working toward the user's goal, including any remaining edits or checks.")
     }
     if (expected.includes('name-model-regions')) {
-      expect(reminders[0]).toContain('Before ending this turn, follow name-model-regions and save maps that match the final revisions you keep. Finish any edits and validation first.')
-      expect(reminders[0]).toContain('[{"path":"models/box/model.usda","status":"missing"}]')
+      expect(reminders[0]).toContain('Use viewer_analyze_surfaces to identify physical features and save their mesh selectors.')
+      expect(reminders[0]).toContain(JSON.stringify([{ path: 'models/box/model.usda', status }]))
     } else {
       expect(reminders[0] ?? '').not.toContain('name-model-regions')
     }

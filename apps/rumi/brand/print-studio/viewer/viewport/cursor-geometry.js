@@ -8,6 +8,39 @@ export const CURSOR_FALLOFF = Object.freeze({ threshold: 0.08, exponent: 1.5 })
 const radiusSquaredFactor = -Math.log(CURSOR_FALLOFF.threshold) / CURSOR_FALLOFF.exponent
 
 /**
+ * Compose saved part coordinates in model-local millimetres without viewer placement.
+ * @param {THREE.Object3D} node Part in the saved hierarchy.
+ * @param {THREE.Object3D} placement Viewer placement group.
+ * @returns {THREE.Matrix4|null} Saved transform or null for another scene.
+ */
+export function modelLocalPartMatrix(node, placement) {
+  const ancestors = []
+  for (; node !== placement; node = node.parent) {
+    if (!node) return null
+    if (node.matrixAutoUpdate) node.updateMatrix()
+    ancestors.push(node.matrix)
+  }
+  const matrix = new THREE.Matrix4()
+  for (const local of ancestors.reverse()) matrix.multiply(local)
+  return matrix
+}
+
+/**
+ * Name a part using the saved USD hierarchy visible to the agent.
+ * @param {THREE.Object3D} node Part in the saved hierarchy.
+ * @param {THREE.Object3D} placement Viewer placement group.
+ * @returns {string[]|null} Part path excluding display coordinate frames.
+ */
+export function modelPartPath(node, placement) {
+  const path = []
+  for (; node !== placement; node = node.parent) {
+    if (!node) return null
+    if (!node.userData.rumiCoordinateFrame) path.unshift(node.name || `child[${node.parent ? node.parent.children.indexOf(node) : 0}]`)
+  }
+  return path
+}
+
+/**
  * Copy original triangles in model-local millimetres, including transforms inside the model.
  * Patch mode selects faces intersecting the cursor's falloff on the selected surface.
  * Edge mode selects incident faces whose boundary edge intersects that falloff.
@@ -28,14 +61,8 @@ export function cursorMeshSnapshot(hit, savedNode, placement, mode) {
 
   hit.object.updateWorldMatrix(true, false)
   // Compose from the saved hierarchy without rounding through the viewer's placement.
-  const ancestors = []
-  for (let node = savedNode; node !== placement; node = node.parent) {
-    if (!node) return { meshUnavailable: 'geometry_unavailable' }
-    if (node.matrixAutoUpdate) node.updateMatrix()
-    ancestors.push(node.matrix)
-  }
-  const modelLocal = new THREE.Matrix4()
-  for (const matrix of ancestors.reverse()) modelLocal.multiply(matrix)
+  const modelLocal = modelLocalPartMatrix(savedNode, placement)
+  if (!modelLocal) return { meshUnavailable: 'geometry_unavailable' }
   const winding = modelLocal.determinant() < 0 ? [0, 2, 1] : [0, 1, 2]
   const worldTriangle = new THREE.Triangle(), closest = new THREE.Vector3()
   const corners = [worldTriangle.a, worldTriangle.b, worldTriangle.c]

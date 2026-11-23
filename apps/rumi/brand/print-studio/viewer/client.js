@@ -282,13 +282,17 @@ export function installViewer(ctx, React, primitives) {
     const [failed, setFailed] = React.useState(false)
     const [buildError, setBuildError] = React.useState(null)
     const working = activity !== 'idle'
-    const [cursorMode, setCursorMode] = React.useState('patch')
+    const [cursorPreference, setCursorPreference] = React.useState(null)
     const [motion, setMotion] = React.useState(null)
     const [printState, setPrintState] = React.useState(null)
     const [printBusy, setPrintBusy] = React.useState(false)
     const [printMessage, setPrintMessage] = React.useState(null)
     const highlight = view?.design?.highlight
     const region = label ?? (highlight?.regionName ? { id: highlight.id, name: highlight.regionName } : null)
+    const hasNamedRegions = Boolean(view?.design?.regionMap)
+    const canUseNamedRegions = hasNamedRegions && !view.design.analog
+    const defaultCursor = canUseNamedRegions && view.design.regionStatus !== 'invalid' ? 'named' : 'patch'
+    const cursorMode = cursorPreference === 'named' && !canUseNamedRegions ? defaultCursor : cursorPreference ?? defaultCursor
     const attached = Boolean(region && view?.regionReference?.id === region.id)
     const regionAction = useRegionAction(view?.sessionId, region?.id)
     function drawRegionLabel(element, position) {
@@ -305,9 +309,11 @@ export function installViewer(ctx, React, primitives) {
       drawRegionLabel(element, projectedRegion.current)
     }, [])
     function positionRegion(position) {
-      const previousId = projectedRegion.current?.id
+      const previous = projectedRegion.current
       projectedRegion.current = position
-      if (position?.id !== previousId) setLabel(position ? { id: position.id, name: position.name } : null)
+      if (position?.id !== previous?.id || position?.name !== previous?.name) {
+        setLabel(position ? { id: position.id, name: position.name } : null)
+      }
       drawRegionLabel(regionMarker.current, position)
     }
     const printOptions = React.useRef(null), printRequest = React.useRef(null)
@@ -379,7 +385,7 @@ export function installViewer(ctx, React, primitives) {
     // OrbitControls must disconnect from its original root before the canvas detaches.
     React.useLayoutEffect(() => {
       try {
-        viewport.current = createViewport(holder.current, () => { viewportError.current = '3D viewer rendering failed'; setFailed(true) }, setCursorMode, artifacts, receivePrintState, positionRegion)
+        viewport.current = createViewport(holder.current, () => { viewportError.current = '3D viewer rendering failed'; setFailed(true) }, undefined, artifacts, receivePrintState, positionRegion)
         viewport.current.setActivity(activity)
         liveViewports.add(viewport.current)
         setFailed(false)
@@ -395,6 +401,7 @@ export function installViewer(ctx, React, primitives) {
         viewport.current = null
       }
     }, [])
+    React.useLayoutEffect(() => { viewport.current?.setCursorMode(cursorMode) }, [cursorMode])
     React.useEffect(() => {
       const sessionId = view?.sessionId
       if (!sessionId) return
@@ -447,8 +454,10 @@ export function installViewer(ctx, React, primitives) {
         trace('feedback_started')
         const response = await fetch(`${ROUTE}/feedback?sessionId=${encodeURIComponent(view.sessionId)}`, {
           method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
-          body: JSON.stringify({ revision: view.design.revision, url: view.design.url, renderRequest: view.design.renderRequest, transform: view.design.transform, volume: view.volume, diagnostics: diagnostics(), ...value }),
+          body: JSON.stringify({ revision: view.design.revision, url: view.design.url, renderRequest: view.design.renderRequest, transform: view.design.transform, volume: view.volume, diagnostics: diagnostics(),
+            ...(value.report ? { regionResolution: viewport.current.regionResolution() } : {}), ...value }),
         })
+        if (response.status === 409) return
         if (!response.ok) { trace('feedback_failed'); throw new Error(`Build feedback unavailable (${response.status})`) }
         trace('feedback_delivered')
       }
@@ -589,9 +598,11 @@ export function installViewer(ctx, React, primitives) {
         hidden: printState?.active, disabled: failed || working || Boolean(view?.design?.analog) || view?.design?.url !== motion.id,
         onError: () => setBuildError('buildFailed') }),
       h('div', { className: 'pv-cursor-controls', role: 'group', 'aria-label': t('cursorHighlighting') },
-        ['patch', 'surface', 'part', 'edge'].map(mode => h(Button, {
+        ['patch', 'surface', 'part', 'edge', 'named'].map(mode => h(Button, {
           key: mode, variant: 'ghost', size: 'sm', 'aria-pressed': cursorMode === mode,
-          onClick: () => { setCursorMode(mode); viewport.current?.setCursorMode(mode) },
+          disabled: mode === 'named' && !canUseNamedRegions,
+          title: mode === 'named' && !canUseNamedRegions ? t(hasNamedRegions ? 'cursorNamedEditing' : 'cursorNamedUnavailable') : undefined,
+          onClick: () => setCursorPreference(mode),
         }, t(`cursor_${mode}`))))),
       view?.design?.analog ? h('fieldset', { disabled: working, inert: working, className: 'pv-analog-lock' }, h(AnalogPanel, { key: view.design.analog.id, spec: view.design.analog, t, onChange: async values => {
         const id = analogId.current, input = ++analogInput.current
@@ -612,7 +623,8 @@ export function installViewer(ctx, React, primitives) {
         onBlur: event => { if (!regionMarker.current?.contains(event.relatedTarget)) viewport.current?.setRegionFocused(false) },
       }),
       region?.name && !failed && view?.design && !view.design.error && h('div', {
-        key: region.id, className: 'rumi-region-glass pv-region-marker', ref: bindRegionMarker, 'data-region-id': region.id, hidden: true,
+        key: region.id, className: 'rumi-region-glass pv-region-marker', ref: bindRegionMarker,
+        'data-region-id': region.id, hidden: true,
         onBlur: () => viewport.current?.setRegionFocused(false),
       }, h(Button, { variant: 'ghost', size: 'sm', tabIndex: -1, 'aria-pressed': attached, 'aria-disabled': regionAction.busy,
         'aria-label': t(attached ? 'regionRemove' : 'regionUse', { name: region.name }),

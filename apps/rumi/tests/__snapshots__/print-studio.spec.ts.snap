@@ -159,7 +159,9 @@ Use ordinary language and the visible model to establish a shared reference. Use
 
 For a planar cut, use the [live cut guide](../built-in-mesh-operations/SKILL.md#planar-cuts) as the visual reference.
 
-For each new request about a mark, use the cursor capture attached to that utterance or call \`viewer_cursor_snapshot\` anew. Check \`identity.design\` against the currently displayed model. To highlight the person's selection, pass the returned \`mesh.path\` unchanged as \`viewer_highlight.meshPath\`. The STL contains the selected triangles in the saved model's coordinates, including during Movement. If capture fails, becomes stale, or returns \`meshUnavailable\`, explain the issue and ask for a fresh pin on an editable model. For an empty Edge selection, ask them to pin nearer a boundary or switch to Surface.
+For a saved feature name or alias, pass it as \`viewer_highlight.region\`. Use the feature's stored location for the edit or explanation. If the person attached or captured a named feature, use its ID and region map key. When a name is unknown or ambiguous, ask which feature the person means. Use [name-model-regions](../name-model-regions/SKILL.md) to identify and explain useful features on the model.
+
+For each new request about a mark, use the cursor capture attached to that utterance or call \`viewer_cursor_snapshot\` anew. Check \`identity.design\` against the currently displayed model. Use \`namedRegion\` when present. For other selections, pass the returned \`mesh.path\` unchanged as \`viewer_highlight.meshPath\`. The STL contains the selected triangles in the saved model's coordinates, including during Movement. If capture fails, becomes stale, or returns \`meshUnavailable\` for an ordinary selection, explain the issue and ask for a fresh pin on an editable model. For an empty Edge selection, ask them to pin nearer a boundary or switch to Surface.
 
 Read the current \`meshState\` context and inspect the selected model's source before choosing coordinates. Whenever you refer to a part such as a chin, jaw, cheek, eye, rim, or crease, first show that part with \`viewer_highlight\`, except when the continuous cut-line guide already shows the requested cut. Explain it as the teal highlighted area with a simple positional description. Do not assume the person knows anatomical or modelling terms. For several distinct parts, highlight and discuss one at a time; a combined highlight is appropriate only when the person is choosing the combined edit region. Named parts can help identify a region, but one mesh may contain many meaningful features. Describe left and right from the person's current view or use an unambiguous feature; do not silently switch between the wearer's and viewer's perspective.
 
@@ -185,7 +187,7 @@ Surface selection follows geometric boundaries such as creases and material seam
 
 For “make the eyes bigger,” highlight both eyes if both are intended. If the geometry leaves two plausible edits, ask whether to enlarge the openings or widen the surrounding material. If the requested effect is clear, proceed.
 ",
-  "cursor": "Capture the pinned blue region or fresh hover hit with a PNG and model identity. On editable models, mesh.path is a project-relative STL of the selected source triangles in model-local millimetres, Z up, before placement. To highlight that selection, pass mesh.path as viewer_highlight.meshPath with the matching model identity. For each new pointing request use its own voice capture or call this tool. If capture or mesh export fails, resolve the reported issue or ask for a fresh pin. See clarify-mesh-changes.",
+  "cursor": "Capture the pinned blue region or fresh hover hit with a PNG and model identity. Named regions include their name and saved location. For a mesh selection, mesh.path is a project-relative STL in model-local millimetres, Z up, before placement. Pass mesh.path to viewer_highlight to repeat the triangle selection. For each new pointing request use its own voice capture or call this tool. See clarify-mesh-changes.",
   "fdm": "---
 name: fdm-design
 description: "Design model geometry for FDM printing, including bed fit, support, feature size, clearances, and strength."
@@ -234,7 +236,7 @@ Then answer in this order: what must change, why each change follows from its ro
 
 If the slice drops a thin feature, measure its extrusion width and adjust the feature or explain the loss. For undersized holes, consider an enlarged or teardrop opening and a finishing pass. Address corner lift with bed adhesion, geometry, or a material change. Repair open or degenerate geometry in the source and run validation again. Check orientation before splitting a model that exceeds the bed, and preserve the requested scale unless the user asks to change it.
 ",
-  "highlight": "Draw a temporary teal triangle mesh on the editable model. Generate an ASCII or binary STL in the project (outside the watched model directory). Copy evaluated surface triangles, or clip them to the desired boundary. Include part transforms and use model-local millimetres, Z up, before viewer placement. Disconnected patches are supported. Triangles are drawn directly and depth-tested. Use the current displayedDesign identity. Empty meshPath clears. Supply regionName when the highlighted geometry identifies a feature the person could refer to, such as Tail tip or Neck seam. Wait for rendered before describing the overlay as visible. See clarify-mesh-changes.",
+  "highlight": "Show a saved named region or a project STL in teal on the editable model. Use the saved region for a request about its name or alias. Use the current displayedDesign identity and wait for rendered before describing the highlight as visible. See clarify-mesh-changes.",
   "instructions": "### Project type
 
 This project is for designing and creating 3d prints.
@@ -475,16 +477,36 @@ Checking status does not authorize heating, motion, filament loading, calibratio
 ",
   "regionNaming": "---
 name: name-model-regions
-description: "Create or refresh persistent hover labels for an editable USD mesh revision."
+description: "Name model features from rendered images, model source and mesh measurements."
 ---
 
 # Name model regions
 
-Before ending the modeling turn, inspect the final saved USD geometry and its source. Create or update \`model.regions.json\` beside \`model.usda\`, using the final file's SHA-256 as \`sourceHash\`. You can defer this work while iterating on draft revisions.
+Read the construction source when available. Use background Blender from \`blender_status\` to render the saved USD from two useful angles into project scratch storage. Open both PNGs with \`read_image\`. Render and open a close-up when details are hard to distinguish.
 
-Set \`remainder\` to the name of the main surface left after distinguishing the meaningful features. Set \`regions\` to an ordered array of objects with lowercase hyphenated \`id\`, short \`name\`, and \`boxes\`. Each box is \`[minX, minY, minZ, maxX, maxY, maxZ]\` in saved model-local millimetres before viewer placement. Use up to 96 regions and up to 16 boxes per region. The first region whose box contains the visible surface point supplies the label. Place small details before their larger features and use several boxes when a feature curves or changes direction. Verify that neighboring features receive their own names from multiple views.
+Name the recognizable parts first. On creation or refresh, inspect each broad region for smaller features someone could point to or change independently. Repeat inside those features wherever the geometry supports another distinction. A handle might contain a grip with a thumb rest. A lip, recess or transition can be distinct even on one smooth surface. Keep uniform areas whole unless a landmark, a functional direction such as a vehicle's front, or the person's explicit request distinguishes specific sections. Use short names in the person's language and add familiar aliases.
 
-Hover shows the saved feature name immediately. Clicking the surface pins its name, and activating the pinned label attaches it to the next request. Names should be familiar enough to reuse, with specific terms such as “tail base” and “inner bend” where the geometry supports them.
+Call \`viewer_analyze_surfaces\` with the saved USD \`path\` for its \`sourceHash\` and part paths. Pass an exact \`partPath\` array and \`sourceHash\` to list a part's connected surfaces. Follow \`nextOffset\` as needed. Match the images and source to the reported positions, bounds, and normals, then bind physical features to those triangles.
+
+Save \`model.regions.json\` beside the final \`model.usda\` with that \`sourceHash\` and an ordered \`regions\` array. Give each region a stable lowercase hyphenated \`id\`, a \`name\` and a \`location\`. Keep accurate existing names and replace legacy boxes around physical features with triangle selectors. For overlapping regions without a parent-child relationship, put the more specific region first. Leave unclassified areas unnamed.
+
+For a \`surface\`, copy the part path and surface IDs from the tool.
+
+\`\`\`json
+{"id":"foot","name":"Foot","location":{"kind":"surface","parts":[{"partPath":["Cup","Body"],"surfaceIds":[6,9]}]}}
+\`\`\`
+
+Use multiple \`parts\` for a feature that spans meshes. For a patch within one smooth surface, request \`includeMesh: true\` and use the viewer-ordered STL at \`mesh.path\` to choose zero-based \`faceRanges\` of \`[start, endExclusive]\`. Omit both selectors for a whole part. Use a captured selection when the person supplied one.
+
+Set each surface detail's \`parentId\` to its nearest named parent. Select a strict subset of that parent's triangles so zoom reveals a smaller highlight at each level.
+
+For spatial features, use saved model-local millimetres with Z up.
+
+- \`curve\` takes \`points\` along a path and \`closed: true\` for a loop.
+- \`point\` takes a single XYZ \`point\`, such as a pivot.
+- \`volume\` takes \`boxes\` of \`[minX, minY, minZ, maxX, maxY, maxZ]\` for space such as hinge clearance.
+
+Load the saved map with \`viewer_load\` and repair any reported region errors. Use \`viewer_highlight\` with a name and the current model identity to check the selection against neighboring features. Leave uncertain selections unresolved.
 ",
   "setup": "---
 name: print-studio-setup
@@ -580,6 +602,7 @@ Open controls before applying the requested cut. To restore material below an al
 \`meshState\` contains the last released values. Cursor snapshots and measurements during an edit do not describe a trustworthy deformed selection. Close the edit before changing its region; open a fresh session for a new direction, operation, or region. Follow \`mesh-edit-controls\` to preserve wanted adjustments or discard a rejected preview. Close restores the saved original and clears the region highlight.
 ",
   "stateToolAvailable": false,
+  "surfaceAnalysis": "Inspect a saved USD to name physical features. Lists exact part paths, then connected Surface cursor IDs by area, with bounds, centres, normals and triangle counts. See name-model-regions.",
   "working": "Declare which existing model you are actively inspecting or editing. Shows a green dot without changing the user selection. Use a path from meshState.models; call before work and when changing targets. Omit path to clear before clarification or unrelated work. The host also clears it when your agent stops or is disposed. This declaration does not authorize edits or resolve ambiguous references.",
 }
 `;
@@ -710,7 +733,7 @@ exports[`keeps admitted references while browsing changes, with separate agent w
 exports[`keeps admitted references while browsing changes, with separate agent work and recorded context 2`] = `
 "You are an AI agent powered by DeepSeek Harness.
 
-Resolve model references before editing. Explicit model names and captured pointing references take precedence over the selected model. For a request referring to an attached named region, use that message’s regionAtAdmission. It contains the model path, revision, viewer URL and either a regionId in design.regionMap or temporary overlay meshPath. Verify that revision before editing. For an otherwise unqualified request, use the selection captured when that request entered the inbox, not a later selection. Voice references include the selection at speech capture; prefer that over inbox-time selection. Continued work stays on its established model. If a new selection conflicts with ongoing work and intent is ambiguous, ask which model the person means. Browsing alone never retargets work. Call viewer_working_model with the discovered model entry before inspecting or editing that model; change it when your work changes targets. Clear it before asking a clarification or when no model is being worked on. The green dot reports your declared work, not a lock, proof of an edit, or the user selection. If the model does not exist yet, create its entry first. Use viewer_load only when you intend to change what the person sees."
+Resolve model references before editing. Explicit model names and captured pointing references take precedence over the selected model. Use an attached named region from that message’s regionAtAdmission. A typed feature name can match a saved region or alias in the current design.regionMap. namedRegionsMentioned lists exact name matches detected at admission, even in questions or corrections. Interpret the action and intended model from the message and verify the saved revision. For an otherwise unqualified request, use the selection captured when that request entered the inbox, not a later selection. Voice references include the selection at speech capture; prefer that over inbox-time selection. Continued work stays on its established model. If a new selection conflicts with ongoing work and intent is ambiguous, ask which model the person means. Browsing alone never retargets work. Call viewer_working_model with the discovered model entry before inspecting or editing that model; change it when your work changes targets. Clear it before asking a clarification or when no model is being worked on. The green dot reports your declared work, not a lock, proof of an edit, or the user selection. If the model does not exist yet, create its entry first. Use viewer_load only when you intend to change what the person sees."
 `;
 
 exports[`keeps one full context across changed and unchanged requests with durable original snapshots 1`] = `

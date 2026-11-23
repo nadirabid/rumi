@@ -20,7 +20,7 @@ To change what the modeling agent knows, start with the [print project instructi
 
 Baseten Bison independently reviews completed steps while the primary agent continues working. It can remind the agent to update the region map for the revision it will leave saved at the end of the turn, or to shorten a reply. The primary agent owns the edit and the response to the user. Print Studio runs one review at a time across active turns and combines queued steps. It delivers each kind of reminder at most once per turn. At turn end it waits briefly, then discards any unfinished review.
 
-Reviews use the configured Baseten credential with any primary model. Bison receives bounded excerpts of the request and visible reply, the task plan, recent tool actions and outcomes, and the region-map status of changed models. Shell commands, raw tool output, attachments and model files stay local. The [reviewer](skill-reminders.js) owns the questions and delivery rules. The [plugin configuration](index.js) defines the credential, cadence, threshold, timeout and limits under `skillReminders`.
+Reviews use the configured Baseten credential with any primary model. Bison receives bounded excerpts of the request and visible reply, the task plan, recent tool actions and outcomes, and the region-map status when a model or its map changes. Shell commands, raw tool output, attachments and model files stay local. The [reviewer](skill-reminders.js) owns the questions and delivery rules. The [plugin configuration](index.js) defines the credential, cadence, threshold, timeout and limits under `skillReminders`.
 
 ## Build and test
 

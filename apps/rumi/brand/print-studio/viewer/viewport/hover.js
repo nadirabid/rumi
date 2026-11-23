@@ -14,9 +14,10 @@ const CLICK_SLOP = 4
  * @param {Function} [pickPreview] Picks edited geometry. Returns null for a miss or undefined to use the CPU surface index.
  * @param {Function} [onPoint] Receives the current visible hit, ray and whether the hit is pinned.
  * @param {Function} [onClick] Called for a completed primary click, including a click on empty canvas.
+ * @param {Function} [pickNamed] Resolves a named feature from the visible model and cursor ray.
  * @returns {object} Shared sphere uniform, invalidation, clearing and disposal controls.
  */
-export function createHover(canvas, camera, roots, render, onMode = () => {}, pickPreview, onPoint = () => {}, onClick = () => {}) {
+export function createHover(canvas, camera, roots, render, onMode = () => {}, pickPreview, onPoint = () => {}, onClick = () => {}, pickNamed) {
   const sphere = { value: new THREE.Vector4(0, 0, 0, 0) }
   const pointer = new THREE.Vector2()
   const local = new THREE.Vector3()
@@ -28,7 +29,7 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}, pi
   let clientX = 0, clientY = 0, pinned = null, press = null
 
   function show(hit) {
-    if (hit) {
+    if (hit && !hit.named) {
       sphere.value.set(hit.point.x, hit.point.y, hit.point.z, hit.radius)
       mesh.value = hit.object.id
       surface.value = hit.surfaceId
@@ -74,12 +75,13 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}, pi
       camera.updateWorldMatrix(true, false)
       raycaster.setFromCamera(pointer, camera)
       const previewHit = pickPreview?.(pointer, raycaster.ray)
-      const hit = previewHit === undefined ? pickSavedSurface() : previewHit
+      let hit = previewHit === undefined ? pickSavedSurface() : previewHit
+      const pixelScale = 2 * Math.tan(THREE.MathUtils.degToRad(camera.getEffectiveFOV()) / 2) / rect.height
+      if (mode.value === 4) hit = pickNamed?.(hit, raycaster.ray, pixelScale)
       if (hit) {
         const depth = -local.copy(hit.point).applyMatrix4(camera.matrixWorldInverse).z
         // A 60 CSS-pixel nominal radius remains usable across model scales and zoom levels.
-        const radius = 120 * depth * Math.tan(THREE.MathUtils.degToRad(camera.getEffectiveFOV()) / 2) / rect.height
-        target = { object: hit.object, faceIndex: hit.faceIndex, surfaceId: hit.surfaceId, point: hit.point, radius, mode: mode.value }
+        target = { ...hit, radius: 60 * depth * pixelScale, mode: mode.value }
       }
     }
     if (pin) pinned = target
@@ -148,11 +150,18 @@ export function createHover(canvas, camera, roots, render, onMode = () => {}, pi
   return {
     sphere, mesh, surface, mode, invalidate, clear,
     setMode(command) {
-      const modes = { patch: 0, surface: 1, part: 2, edge: 3 }
+      const modes = { patch: 0, surface: 1, part: 2, edge: 3, named: 4 }
       if (!Object.hasOwn(modes, command)) return
+      const changedNamedMode = mode.value !== modes[command] && (mode.value === 4 || command === 'named')
       mode.value = modes[command]
       onMode(command)
-      if (pinned) { pinned = { ...pinned, mode: mode.value }; show(pinned); render() }
+      if (changedNamedMode) {
+        pinned = null
+        cancelUpdate()
+        show(null)
+        onPoint(null)
+        if (!invalidate()) render()
+      } else if (pinned) { pinned = { ...pinned, mode: mode.value }; show(pinned); render() }
       else invalidate()
     },
     /** Move an existing pin with its surface and discard the old live hover. */

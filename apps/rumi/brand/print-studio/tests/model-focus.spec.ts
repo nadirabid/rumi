@@ -5,15 +5,16 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { expect, it } from 'vitest'
 import { createModelFocus } from '../viewer/model-focus.js'
+import { readModelRegions } from '../viewer/model-regions.js'
 
-async function fixture() {
+async function fixture(regionMap?: NonNullable<ReturnType<typeof readModelRegions>> & { key: string }) {
   const owner = new Context()
   await owner.plugin(SessionProjectionRegistry)
   await owner.plugin(SystemPrompt)
   // Event payloads exercise the JavaScript plugin without constructing an LLM driver.
   const listeners = new Map<string, (event: any) => void>()
   const record = { selectedModel: 'models/cup/model.glb', models: [{ name: 'cup', path: 'models/cup/model.glb' }],
-    source: { state: () => ({ revision: 2 }) } }
+    source: { state: () => ({ revision: 2, path: 'models/cup/model.glb', url: '/cup', regionMap }) } }
   const notices: string[] = []
   let region: { name: string; path: string; revision: number } | null = null
   const focus = createModelFocus({ effect: owner.effect.bind(owner), inject: owner.inject.bind(owner),
@@ -21,7 +22,7 @@ async function fixture() {
   }, { read: (id: string) => id === 'one' ? record : undefined, notify: (id: string) => notices.push(id),
     readRegion: (id: string) => id === 'one' ? region : null })
   const agent = { session: { id: 'one' }, status: 'running' } as Agent
-  const message = (id: string) => ({ id, source: { kind: 'user' } })
+  const message = (id: string, text = '') => ({ id, source: { kind: 'user' }, content: [{ type: 'text', text }] })
   return { owner, record, focus, agent, notices, message,
     setRegion: (next: typeof region) => { region = next },
     emit: (name: string, payload: object) => listeners.get(name)!({ agent, ...payload }),
@@ -50,6 +51,24 @@ it('keeps admitted references while browsing changes, with separate agent work a
     expect(data.workingModel).toBe('models/cup/model.glb')
     f.focus.set(f.agent, null)
     expect(f.focus.paths('one')).toEqual([])
+  } finally { await f.owner.fiber.dispose() }
+})
+
+it('keeps named features mentioned in a typed request bound to the admitted model', async () => {
+  const sourceHash = '1'.repeat(64), key = '2'.repeat(64)
+  const regionMap = readModelRegions({ sourceHash, regions: [
+    { id: 'pouring-lip', name: 'Pouring lip', aliases: ['Spout'], location: { kind: 'point', point: [0, 2, 4] } },
+  ] }, sourceHash)!
+  const f = await fixture({ ...regionMap, key })
+  try {
+    const message = f.message('request-one', 'Highlight the spout so I can see it.')
+    f.emit('agent/inbox/inserted', { message })
+    f.record.selectedModel = 'models/dragon/model.glb'
+    f.emit('agent/inbox/claimed', { message, turn: 1 })
+    const context = JSON.parse((await f.context())[0]!.text).modelFocus
+    expect(context.requests[0].namedRegionsMentioned).toEqual([
+      { regionId: 'pouring-lip', name: 'Pouring lip', path: 'models/cup/model.glb', revision: 2, url: '/cup', regionMapKey: key },
+    ])
   } finally { await f.owner.fiber.dispose() }
 })
 

@@ -1,5 +1,7 @@
 /** Request-time model references and agent-declared work, independent of viewer selection. */
-export const MODEL_FOCUS_GUIDANCE = 'Resolve model references before editing. Explicit model names and captured pointing references take precedence over the selected model. For a request referring to an attached named region, use that message’s regionAtAdmission. It contains the model path, revision, viewer URL and either a regionId in design.regionMap or temporary overlay meshPath. Verify that revision before editing. For an otherwise unqualified request, use the selection captured when that request entered the inbox, not a later selection. Voice references include the selection at speech capture; prefer that over inbox-time selection. Continued work stays on its established model. If a new selection conflicts with ongoing work and intent is ambiguous, ask which model the person means. Browsing alone never retargets work. Call viewer_working_model with the discovered model entry before inspecting or editing that model; change it when your work changes targets. Clear it before asking a clarification or when no model is being worked on. The green dot reports your declared work, not a lock, proof of an edit, or the user selection. If the model does not exist yet, create its entry first. Use viewer_load only when you intend to change what the person sees.'
+import { mentionedModelRegions } from './model-regions.js'
+
+export const MODEL_FOCUS_GUIDANCE = 'Resolve model references before editing. Explicit model names and captured pointing references take precedence over the selected model. Use an attached named region from that message’s regionAtAdmission. A typed feature name can match a saved region or alias in the current design.regionMap. namedRegionsMentioned lists exact name matches detected at admission, even in questions or corrections. Interpret the action and intended model from the message and verify the saved revision. For an otherwise unqualified request, use the selection captured when that request entered the inbox, not a later selection. Voice references include the selection at speech capture; prefer that over inbox-time selection. Continued work stays on its established model. If a new selection conflicts with ongoing work and intent is ambiguous, ask which model the person means. Browsing alone never retargets work. Call viewer_working_model with the discovered model entry before inspecting or editing that model; change it when your work changes targets. Clear it before asking a clarification or when no model is being worked on. The green dot reports your declared work, not a lock, proof of an edit, or the user selection. If the model does not exist yet, create its entry first. Use viewer_load only when you intend to change what the person sees.'
 
 /**
  * Bind transient focus to each agent and capture selection when human input enters its inbox.
@@ -29,7 +31,16 @@ export function createModelFocus(ctx, { read, notify, readRegion = () => null })
   ctx.on('agent/inbox/inserted', ({ agent, message }) => {
     if (message.source.kind !== 'user') return
     const sessionId = agent.session.id, region = readRegion(sessionId)
-    state(agent).pending.set(message.id, { selectionAtAdmission: selection(sessionId), ...(region ? { regionAtAdmission: region } : {}) })
+    const design = read(sessionId)?.source?.state()
+    const text = message.content?.filter(block => block.type === 'text').map(block => block.text).join('\n') ?? ''
+    const mentions = mentionedModelRegions(design?.regionMap, text)
+    const namedRegionsMentioned = mentions.map(({ id, name }) => ({
+      regionId: id, name, path: design.path, revision: design.revision, url: design.url, regionMapKey: design.regionMap.key,
+    }))
+    state(agent).pending.set(message.id, {
+      selectionAtAdmission: selection(sessionId), ...(region ? { regionAtAdmission: region } : {}),
+      ...(namedRegionsMentioned.length ? { namedRegionsMentioned } : {}),
+    })
   })
   ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
     if (message.source.kind !== 'user') return

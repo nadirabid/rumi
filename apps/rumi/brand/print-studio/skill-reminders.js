@@ -5,7 +5,7 @@ import { open, lstat, realpath } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { discoverModels } from './viewer/catalog.js'
-import { readModelRegions } from './viewer/model-regions.js'
+import { MAX_REGION_MAP_BYTES, needsSurfaceRegions, readModelRegions } from './viewer/model-regions.js'
 import { USD_MAX_BYTES } from './viewer/usd.js'
 
 const endpoint = 'https://inference.baseten.co/v1/systemone'
@@ -13,7 +13,7 @@ const model = 'decision-models/baseten-bison-latest'
 const questions = {
   namedRegions: {
     type: 'noul',
-    instructions: 'Does the agent need a reminder to finish the region map before ending this turn? Each model created or revised this turn needs a valid region map for its final saved revision, even if the user did not ask for labels. Answer yes when the agent is wrapping up and that revision has a missing, invalid, or outdated map. Keep observing while the agent is still editing, validating, or writing the map.',
+    instructions: 'Does the agent need a reminder to finish naming features on the final saved mesh? Review models and maps created or revised this turn. When the agent is wrapping up, remind it about missing, invalid, or outdated maps. For needs_surface_regions, remind it to identify physical features on the mesh when creating or refreshing names. A request specifically about empty space can use a volume alone. Keep observing while the agent is still working.',
   },
   conciseReply: {
     type: 'noul',
@@ -111,24 +111,30 @@ async function modelSignatures(cwd) {
   const models = new Map()
   for (const { path } of await discoverModels(cwd)) {
     if (!/\.usda?$/iu.test(path)) continue
-    const signature = await fileSignature(join(cwd, path))
-    if (signature) models.set(path, signature)
+    const absolute = join(cwd, path)
+    const [signature, regions] = await Promise.all([fileSignature(absolute), fileSignature(regionPath(absolute))])
+    if (signature) models.set(path, { signature, regions })
   }
   return models
+}
+
+function regionPath(modelPath) {
+  return modelPath.replace(/\.usda?$/iu, '.regions.json')
 }
 
 async function regionStatus(cwd, path, hash) {
   if (!hash) return 'unverified'
   let raw
   try {
-    raw = await readBounded(join(cwd, path.replace(/\.usda?$/iu, '.regions.json')), 65_536)
+    raw = await readBounded(regionPath(join(cwd, path)), MAX_REGION_MAP_BYTES)
   } catch (error) {
     return error.code === 'ENOENT' ? 'missing' : 'invalid'
   }
   try {
     const value = JSON.parse(raw.toString('utf8'))
-    readModelRegions(value, value?.sourceHash)
-    return value.sourceHash === hash ? 'ready' : 'outdated'
+    const map = readModelRegions(value, value?.sourceHash)
+    if (value.sourceHash !== hash) return 'outdated'
+    return needsSurfaceRegions(map) ? 'needs_surface_regions' : 'ready'
   } catch (_error) {
     return 'invalid'
   }
@@ -154,14 +160,15 @@ async function review(transport, key, state, signal, threshold) {
   }))
 }
 
-const needsMap = status => ['missing', 'invalid', 'outdated'].includes(status)
+const needsMap = status => ['missing', 'invalid', 'outdated', 'needs_surface_regions'].includes(status)
 
 async function changedModels(state, maxModels, signal) {
   const changes = []
   const digests = new Map()
-  for (const [path, signature] of await modelSignatures(state.cwd)) {
+  for (const [path, { signature, regions }] of await modelSignatures(state.cwd)) {
     signal.throwIfAborted()
-    if (signature === state.baseline.get(path)) continue
+    const before = state.baseline.get(path)
+    if (before && signature === before.signature && regions === before.regions) continue
     const absolute = join(state.cwd, path)
     const cached = state.digests.get(path)
     let hash = cached?.signature === signature ? cached.hash : null
@@ -174,7 +181,8 @@ async function changedModels(state, maxModels, signal) {
       }
     }
     if (hash) digests.set(path, { signature, hash })
-    changes.push({ path, signature, hash, status: await regionStatus(state.cwd, path, hash) })
+    const change = !before ? 'created' : signature === before.signature ? 'region_map_revised' : 'revised'
+    changes.push({ path, signature, hash, change, status: await regionStatus(state.cwd, path, hash) })
     if (changes.length === maxModels) break
   }
   state.digests = digests
@@ -209,9 +217,7 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
       if (state.request !== request) return
       const flags = await review(transport, state.key, {
         request: request.text, draft, completedStep: step, recentActions: actions, plan,
-        changedModels: changes.map(({ path, status }) => ({
-          change: state.baseline.has(path) ? 'revised' : 'created', regionMap: status,
-        })),
+        changedModels: changes.map(({ change, status }) => ({ change, regionMap: status })),
       }, signal, config.threshold)
       const unresolved = []
       if (flags.namedRegions && !state.sent.has('namedRegions')) {
@@ -219,7 +225,7 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
           signal.throwIfAborted()
           if (!needsMap(status) || await fileSignature(join(state.cwd, path)) !== signature) continue
           const current = await regionStatus(state.cwd, path, hash)
-          if (needsMap(current) && await fileSignature(join(state.cwd, path)) === signature) {
+          if (current === status && await fileSignature(join(state.cwd, path)) === signature) {
             unresolved.push({ path, status: current })
           }
         }
@@ -229,7 +235,7 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
       const reminders = []
       if (unresolved.length) {
         state.sent.add('namedRegions')
-        reminders.push(`Before ending this turn, follow name-model-regions and save maps that match the final revisions you keep. Finish any edits and validation first.\nCurrent region map findings\n${JSON.stringify(unresolved)}`)
+        reminders.push(`Before ending this turn, follow name-model-regions and save maps that match the final revisions you keep. Use viewer_analyze_surfaces to identify physical features and save their mesh selectors. Finish any edits and validation first.\nCurrent region map findings\n${JSON.stringify(unresolved)}`)
       }
       if (flags.conciseReply && draft && textStep === state.textStep && !state.sent.has('conciseReply')) {
         state.sent.add('conciseReply')

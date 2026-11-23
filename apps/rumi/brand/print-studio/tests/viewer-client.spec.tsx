@@ -16,7 +16,7 @@ type JointProjection = { x: number; y: number } | null
 const observeMotionAnchors = vi.hoisted(() => vi.fn(
   (_id: string, draw: (points: JointProjection[], width: number) => void, _onCanvasClick?: () => void) => draw([{ x: 40, y: 48 }, null], 750),
 ))
-const viewport = vi.hoisted(() => ({ setActivity: vi.fn(), closePrintLayout: vi.fn(), motionControls: vi.fn(), updateMotion: vi.fn(), modelParameters: vi.fn(() => ({ width: 12 })), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setCursorMode: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
+const viewport = vi.hoisted(() => ({ setActivity: vi.fn(), closePrintLayout: vi.fn(), motionControls: vi.fn(), updateMotion: vi.fn(), modelParameters: vi.fn(() => ({ width: 12 })), regionResolution: vi.fn(), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setCursorMode: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
 vi.mock('../viewer/viewport/index.js', () => ({
   createViewport: (...args: unknown[]) => {
     viewport.create(...args)
@@ -25,7 +25,7 @@ vi.mock('../viewer/viewport/index.js', () => ({
       motionControls: viewport.motionControls, updateMotion: viewport.updateMotion,
       observeMotionAnchors,
       motionUnit: () => 'degree',
-      modelParameters: viewport.modelParameters, renderedHighlight: viewport.renderedHighlight,
+      modelParameters: viewport.modelParameters, regionResolution: viewport.regionResolution, renderedHighlight: viewport.renderedHighlight,
       captureCursor: viewport.captureCursor, setCursorMode: viewport.setCursorMode, setHighlightVisible: viewport.setHighlightVisible,
       thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose,
     }
@@ -45,6 +45,7 @@ beforeEach(() => {
   observeMotionAnchors.mockClear()
   viewport.updateMotion.mockReset().mockReturnValue(true)
   viewport.applyDesign.mockReset().mockResolvedValue(null)
+  viewport.regionResolution.mockReset().mockReturnValue({ key: null, unresolvedIds: [] })
   viewport.captureCursor.mockReset().mockReturnValue({ status: 'no_hit' })
   viewport.setCursorMode.mockClear()
   viewport.renderedHighlight.mockReset().mockReturnValue(null)
@@ -138,7 +139,7 @@ async function settle(ms = 0) {
   await act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 }
 
-type RegionMarkerPosition = { id: string; name: string; x: number; y: number; interactive: boolean }
+type RegionMarkerPosition = { id: string; name: string; description?: string; x: number; y: number; interactive: boolean }
 
 it('shows the projected name and lets the chat chip reopen or remove its reference', async () => {
   const design = { url: '/source/model.js', revision: 1, error: null, highlight: { id: 'tail', regionName: 'Tail tip', meshPath: 'tail.stl' } }
@@ -169,18 +170,83 @@ it('shows the projected name and lets the chat chip reopen or remove its referen
   expect(screen.queryByRole('button', { name: 'Show Tail tip in the preview' })).toBeNull()
 })
 
-it('updates the hover name between mapped regions without an agent highlight', async () => {
+it('updates the label with only the feature name as the pointer moves in Named regions', async () => {
   const view = fixture({ scene: { ...scene([]), design: { url: '/source/model.usda', revision: 1, regionMap: { key: 'map' } } } })
   render(view.view('sidebar.right.pane.tab'))
   await settle()
+  const mode = screen.getByRole('button', { name: 'Named regions' })
+  expect(viewport.setCursorMode).toHaveBeenLastCalledWith('named')
+  expect(mode.getAttribute('aria-pressed')).toBe('true')
   const position = viewport.create.mock.calls[0]![5] as (input: RegionMarkerPosition | null) => void
-  act(() => position({ id: 'ear', name: 'Right ear', x: 68, y: 25, interactive: false }))
-  expect(screen.getByRole('button', { name: 'Use Right ear in chat' })).toBeTruthy()
+  act(() => position({ id: 'ear', name: 'Right ear', description: 'The small point above the cheek.', x: 68, y: 25, interactive: false }))
+  const ear = screen.getByRole('button', { name: 'Use Right ear in chat' })
+  expect(ear.textContent).toBe('Right ear')
+  expect(ear.hasAttribute('aria-describedby')).toBe(false)
+  expect(screen.queryByText('The small point above the cheek.')).toBeNull()
   act(() => position({ id: 'cheek', name: 'Right cheek', x: 70, y: 45, interactive: false }))
   expect(screen.queryByRole('button', { name: 'Use Right ear in chat' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Use Right cheek in chat' })).toBeTruthy()
   act(() => position(null))
   expect(screen.queryByRole('button', { name: 'Use Right cheek in chat' })).toBeNull()
+})
+
+it('uses Local patch until named regions arrive and keeps an explicit mode through later map changes', async () => {
+  const design = { url: '/source/model.usda', revision: 1 }
+  const base = { ...scene([]), design }
+  const view = fixture({ scene: base })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  const named = screen.getByRole<HTMLButtonElement>('button', { name: en.cursor_named })
+  const patch = screen.getByRole('button', { name: en.cursor_patch })
+  const surface = screen.getByRole('button', { name: en.cursor_surface })
+  expect(named.disabled).toBe(true)
+  expect(patch.getAttribute('aria-pressed')).toBe('true')
+  expect(viewport.setCursorMode).toHaveBeenLastCalledWith('patch')
+  view.setScene({ ...base, design: { ...design, regionMap: { key: 'map' } } })
+  await settle(2000)
+  expect(named.disabled).toBe(false)
+  expect(named.getAttribute('aria-pressed')).toBe('true')
+  expect(viewport.setCursorMode).toHaveBeenLastCalledWith('named')
+  view.setScene({ ...base, design: { ...design, regionMap: { key: 'map' }, regionStatus: 'invalid' } })
+  await settle(2000)
+  expect(patch.getAttribute('aria-pressed')).toBe('true')
+  expect(viewport.setCursorMode).toHaveBeenLastCalledWith('patch')
+  fireEvent.click(surface)
+  expect(viewport.setCursorMode).toHaveBeenLastCalledWith('surface')
+  view.setScene({ ...base, design: { ...design, revision: 2, regionMap: { key: 'another-map' } } })
+  await settle(2000)
+  expect(surface.getAttribute('aria-pressed')).toBe('true')
+  expect(viewport.setCursorMode).toHaveBeenLastCalledWith('surface')
+  view.setScene(base)
+  await settle(2000)
+  expect(named.disabled).toBe(true)
+  expect(surface.getAttribute('aria-pressed')).toBe('true')
+})
+
+it('restores Named regions after a temporary edit', async () => {
+  const design = { url: '/source/model.usda', revision: 1, regionMap: { key: 'map' } }
+  const base = { ...scene([]), design }
+  const view = fixture({ scene: base })
+  render(view.view('sidebar.right.pane.tab'))
+  await settle()
+  const named = screen.getByRole<HTMLButtonElement>('button', { name: en.cursor_named })
+  const patch = screen.getByRole('button', { name: en.cursor_patch })
+  expect(named.getAttribute('aria-pressed')).toBe('true')
+  fireEvent.click(named)
+  view.setScene({ ...base, design: { ...design, analog: {
+    id: 'height-edit', operation: 'fields', label: 'Height', values: { height: 0 },
+    controls: [{ kind: 'slider', label: 'Height', axes: [{ key: 'height', min: -1, max: 1, step: .01, reset: 0 }] }],
+  } } })
+  await settle(2000)
+  expect(named.disabled).toBe(true)
+  expect(named.title).toBe(en.cursorNamedEditing)
+  expect(patch.getAttribute('aria-pressed')).toBe('true')
+  expect(viewport.setCursorMode).toHaveBeenLastCalledWith('patch')
+  view.setScene(base)
+  await settle(2000)
+  expect(named.disabled).toBe(false)
+  expect(named.getAttribute('aria-pressed')).toBe('true')
+  expect(viewport.setCursorMode).toHaveBeenLastCalledWith('named')
 })
 
 it('discovers new model controls without a geometry revision and selects the requested entry', async () => {
@@ -699,9 +765,11 @@ it('acknowledges an explicit reload without a new source URL', async () => {
   render(view.view('sidebar.right.pane.tab'))
   await settle()
   const applications = viewport.applyDesign.mock.calls.length
-  view.setScene({ ...scene([]), design: { ...design, renderRequest: 'reload-request' } })
+  const regionResolution = { key: 'map', unresolvedIds: ['hinge'] }
+  viewport.regionResolution.mockReturnValue(regionResolution)
+  view.setScene({ ...scene([]), design: { ...design, renderRequest: 'reload-request', regionMap: { key: 'map' } } })
   await settle(2000)
   expect(viewport.applyDesign.mock.calls.length).toBeGreaterThan(applications)
   const feedback = view.fetch.mock.calls.filter(([url]) => String(url).includes('/feedback?')).map(([, init]) => JSON.parse(String(init?.body)))
-  expect(feedback.at(-1)).toMatchObject({ url: design.url, revision: 1, renderRequest: 'reload-request', loadStatus: 'ready' })
+  expect(feedback.at(-1)).toMatchObject({ url: design.url, revision: 1, renderRequest: 'reload-request', loadStatus: 'ready', regionResolution })
 })

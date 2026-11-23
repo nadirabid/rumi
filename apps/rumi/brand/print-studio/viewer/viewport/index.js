@@ -21,8 +21,9 @@ import { createActivity } from './activity.js'
 import { createHover } from './hover.js'
 import { createHighlight } from './highlight.js'
 import { cursorMeshSnapshot } from './cursor-geometry.js'
+import { createNamedRegionIndex, createNamedRegionVisual, namedRegionMesh } from './named-regions.js'
 import { createRegionPicker, regionAnchor } from './region-marker.js'
-import { modelRegionAt, modelRegionReference } from '../model-regions.js'
+import { modelRegionReference } from '../model-regions.js'
 import { createEditPicker } from './edit-picking.js'
 import { disposeModel } from './model.js'
 import { placeMesh } from '../transform.js'
@@ -140,6 +141,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   let renderer, controls, observer, volumeNodes = [], volumeKey = 'none', framed = false, closed = false
   const lost = (event) => { event.preventDefault(); activity.dispose(); onFailure() }
   let marker = null, mappedHit = null, regionFocused = false, regionPresented = false
+  let namedIndex = null, namedMap = null, namedDesign = null, namedCursor = null, namedAgent = null
   const projected = new THREE.Vector3()
   const motionViewportSize = new THREE.Vector2()
   const jointPoint = new THREE.Vector3()
@@ -167,25 +169,61 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     motionOverlay.draw(motionProjection.points, renderer.getSize(motionViewportSize).x)
   }
   const pinRay = new THREE.Ray(), pinDirection = new THREE.Vector3()
-  function hoveredRegion(hit, pinned) {
-    if (!hit || !designSpec?.regionMap || designUrl !== designSpec.url || shapeDeformer || printPreview) return null
-    const saved = motionPreview?.savedHit(hit.object, hit.point)
-    let parent = saved?.node ?? hit.object
-    while (parent && parent !== designRoot) parent = parent.parent
-    if (!parent) return null
-    const point = saved?.point ?? designRoot.worldToLocal(hit.point.clone())
-    const region = modelRegionAt(designSpec.regionMap, point.toArray())
-    return { id: modelRegionReference(designSpec, region.id), name: region.name, mesh: hit.object,
-      point: hit.object.worldToLocal(hit.point.clone()), interactive: Boolean(pinned) }
+  const savedOrigin = new THREE.Vector3()
+  let markerRadius = 0.15
+  function namedVisual(entry, color) {
+    return createNamedRegionVisual(entry, scene, designRoot, color, node => motionPreview?.posedHit(node, savedOrigin)?.object ?? node, markerRadius)
+  }
+  function updateNamedHit(hit, pinned) {
+    const entry = hit?.named
+    if (namedCursor && namedCursor.entry !== entry) { namedCursor.dispose(); namedCursor = null }
+    mappedHit = null
+    if (!entry) return
+    if (!namedCursor) namedCursor = namedVisual(entry, 0x9ab9e1)
+    const { region } = entry
+    const mesh = hit.object ?? designRoot
+    mappedHit = { id: modelRegionReference(designSpec, region.id), name: region.name, mesh,
+      point: mesh.worldToLocal(hit.point.clone()), interactive: Boolean(pinned) }
+  }
+  function updateNamedIndex() {
+    const map = designUrl === designSpec?.url ? designSpec?.regionMap ?? null : null
+    if (namedMap?.key === map?.key && namedDesign === design) return
+    if (namedCursor) updateNamedHit(null)
+    namedAgent?.dispose(); namedAgent = null
+    if (designSpec?.highlight?.regionId) highlightId = null
+    namedMap = map; namedDesign = design
+    namedIndex = map && design ? createNamedRegionIndex(design.root, designRoot, map.regions) : null
+    if (namedIndex) {
+      const bounds = new THREE.Box3()
+      for (let i = 0; i < design.positions.length; i += 3) bounds.expandByPoint(projected.fromArray(design.positions, i))
+      markerRadius = Math.max(bounds.getSize(projected).length() * 0.007, 0.15)
+    }
+  }
+  function updateNamedVisuals() {
+    const ready = !printPreview && !shapeDeformer && designUrl === designSpec?.url
+    if (namedAgent) {
+      namedAgent.root.visible = ready && highlightVisible
+      namedAgent.update()
+    }
+    if (namedCursor) {
+      namedCursor.root.visible = ready && !(namedAgent?.root.visible && namedAgent.entry === namedCursor.entry)
+      namedCursor.update()
+    }
   }
   const render = () => {
     if (closed) return
     if (motionFrame !== null) { cancelAnimationFrame(motionFrame); motionFrame = null }
+    updateNamedVisuals()
     renderer.render(scene, camera)
     drawMotionOverlay()
     const highlight = marker && surfaceOverlay.visible ? marker.hit ?? (regionFocused ? marker.anchor : null) : null
-    const anchor = highlight ? { ...highlight, id: marker.id, name: marker.name, interactive: marker.pinned || regionFocused }
-      : !printPreview && !shapeDeformer ? mappedHit : null
+    const named = namedAgent?.entry.region
+    const namedFocus = namedAgent?.root.visible && regionFocused ? {
+      ...namedAgent.anchor, id: modelRegionReference(designSpec, named.id),
+      name: named.name, interactive: true,
+    } : null
+    const anchor = !printPreview && !shapeDeformer && mappedHit ? mappedHit : namedFocus
+      ?? (highlight ? { ...highlight, id: marker.id, name: marker.name, interactive: marker.pinned || regionFocused } : null)
     if (!anchor) {
       if (regionPresented) onRegionMarker(null)
       regionPresented = false
@@ -194,7 +232,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     projected.copy(anchor.point).applyMatrix4(anchor.mesh.matrixWorld).project(camera)
     const visible = Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1 && Math.abs(projected.z) <= 1
     regionPresented = visible
-    onRegionMarker(visible ? { id: anchor.id, name: anchor.name, x: (projected.x + 1) * 50, y: (1 - projected.y) * 50, interactive: anchor.interactive } : null)
+    onRegionMarker(visible ? { id: anchor.id, name: anchor.name,
+      x: (projected.x + 1) * 50, y: (1 - projected.y) * 50, interactive: anchor.interactive } : null)
   }
 
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true })
@@ -227,12 +266,16 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     () => printPreview ? [] : [...objects.values()].map(entry => entry.mesh).concat(design ? [designRoot] : []), render, onCursorMode,
     (pointer, ray) => shapeDeformer ? editPicker.pick(pointer, ray, surfaceOverlay ? [...volumeNodes, surfaceOverlay] : volumeNodes) : undefined,
     (hit, ray, pinned) => {
-      mappedHit = hoveredRegion(hit, pinned)
+      updateNamedHit(hit, pinned)
       if (!marker) return
       marker.hit = marker.pick(hit, ray)
       marker.pinned = Boolean(marker.hit && pinned)
     }, () => {
       if (motionOverlay?.id === designUrl) motionOverlay.onCanvasClick?.()
+    }, (hit, ray, pixelScale) => {
+      if (!namedIndex || designUrl !== designSpec?.url || printPreview || shapeDeformer) return null
+      const saved = hit && motionPreview?.savedHit(hit.object, hit.point)
+      return namedIndex.pick(hit, saved?.node ?? hit?.object, ray, pixelScale)
     })
   const cameraChanged = () => { if (!hover.invalidate()) render() }
 
@@ -308,10 +351,12 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   function showOverlay(visible) {
     highlightOverlay?.setVisible(visible)
     if (surfaceOverlay) surfaceOverlay.visible = visible && !printPreview
+    if (namedAgent) namedAgent.root.visible = visible && !printPreview && !shapeDeformer
   }
 
   function clearHighlight() {
     clearSurfaceOverlay()
+    namedAgent?.dispose(); namedAgent = null
     if (highlightOverlay) { highlightOverlay.dispose() }
     highlightOverlay = null
     highlightId = null
@@ -323,6 +368,11 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     if (highlightOverlay && highlightId === (highlight?.id ?? null)) return
     if (!design) { clearHighlight(); return }
     clearSurfaceOverlay()
+    namedAgent?.dispose(); namedAgent = null
+    if (highlight?.regionId && highlight.regionMapKey === namedMap?.key) {
+      const entry = namedIndex?.get(highlight.regionId)
+      if (entry) namedAgent = namedVisual(entry, 0x29b59d)
+    }
     if (highlight?.positions) {
       surfaceMaterial = new THREE.MeshBasicMaterial({ color: 0x29b59d, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, depthWrite: false })
       const parts = motionPreview?.overlayParts(highlight.positions)
@@ -361,11 +411,12 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     if (highlightOverlay) highlightOverlay.update(highlight?.blobs ? highlight : { blobs: [] })
     else highlightOverlay = createHighlight(motionPreview?.root ?? design.root, highlight?.blobs ? highlight : { blobs: [] }, hover, activity.uniform, editPicker.active)
     showOverlay(highlightVisible)
-    highlightId = highlight?.id ?? null
+    highlightId = highlight?.regionId && !namedAgent ? null : highlight?.id ?? null
   }
 
   function placeDesign() {
     if (!design || !designSpec) return null
+    updateNamedIndex()
     const key = JSON.stringify([designSpec.transform, designVolume])
     if (measurement?.design !== design || measurement.key !== key) {
       const placed = placeMesh(design.positions, designSpec.transform)
@@ -520,7 +571,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       if (activity.mode !== 'idle' || id !== designUrl || !motion || shapeDeformer || printPreview) return false
       const next = controlValues(motion, values), previous = motion.values
       const pin = hover.snapshot({ pinnedOnly: true })
-      const saved = pin && (motionPreview?.savedHit(pin.object, pin.point)
+      const saved = pin?.object && (motionPreview?.savedHit(pin.object, pin.point)
         ?? { node: pin.object, point: designRoot.worldToLocal(pin.point.clone()) })
       motion.values = next
       try { showMotion() } catch (error) { motion.values = previous; throw error }
@@ -529,7 +580,9 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       const relocated = saved && (motionPreview
         ? motionPreview.posedHit(saved.node, saved.point)
         : { object: saved.node, point: designRoot.localToWorld(saved.point) })
-      hover.replacePin(relocated ? { ...pin, ...relocated } : null)
+      const nextPin = relocated ? { ...pin, ...relocated } : pin?.named && !pin.object ? pin : null
+      hover.replacePin(nextPin)
+      if (nextPin?.named) updateNamedHit(nextPin, true)
       syncHighlight()
       if (!deferDraw) render()
       else if (motionFrame === null) motionFrame = requestAnimationFrame(() => { motionFrame = null; render() })
@@ -580,10 +633,16 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     shapeMetrics: () => ({ ...shapeMetrics }),
     /** The highlight drawn by the visible viewport, or null when it cannot be acknowledged. */
     renderedHighlight() {
-      return !closed && !printPreview && !document.hidden && highlightVisible && designUrl === designSpec?.url ? highlightId : null
+      return !closed && !printPreview && !document.hidden && highlightVisible && designUrl === designSpec?.url
+        && (!namedAgent || namedAgent.root.visible) ? highlightId : null
     },
     /** Report a deliberate overlay suppression so the host can settle the request. */
-    highlightBlockedBy() { return printPreview ? 'print_layout' : !highlightVisible ? 'highlight_hidden' : null },
+    highlightBlockedBy() {
+      if (printPreview) return 'print_layout'
+      if (!highlightVisible) return 'highlight_hidden'
+      if (designSpec?.highlight?.regionId && (!namedAgent || shapeDeformer)) return 'region_unavailable'
+      return null
+    },
     /** Capture a pin from the mounted preview, or sample hover in a visible viewer. */
     captureCursor() {
       if (closed) return { status: 'viewer_unavailable', reason: 'viewer_closed' }
@@ -596,24 +655,34 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       const designIdentity = design ? {
         path: designSpec.path, revision: designSpec.revision, url: designUrl, transform: designSpec.transform,
       } : null
-      const savedHit = motionPreview?.savedHit(hit.object, hit.point)
-      const savedNode = savedHit?.node ?? hit.object
-      let object = savedNode, objectId = null, path = []
-      while (object && object !== designRoot && object !== scene) {
-        if (!object.userData.rumiCoordinateFrame) path.unshift(object.name || `child[${object.parent ? object.parent.children.indexOf(object) : 0}]`)
-        for (const [id, entry] of objects) if (entry.mesh === object) objectId = id
-        object = object.parent
+      let mesh = hit.named ? {} : { meshUnavailable: 'unsupported_model' }
+      let region = null
+      if (hit.object) {
+        const savedHit = motionPreview?.savedHit(hit.object, hit.point)
+        const savedNode = savedHit?.node ?? hit.object
+        let object = savedNode, objectId = null, path = []
+        while (object && object !== designRoot && object !== scene) {
+          if (!object.userData.rumiCoordinateFrame) path.unshift(object.name || `child[${object.parent ? object.parent.children.indexOf(object) : 0}]`)
+          for (const [id, entry] of objects) if (entry.mesh === object) objectId = id
+          object = object.parent
+        }
+        const selection = hit.named ? undefined : { partPath: path, surfaceId: hit.surfaceId, mode: ['patch', 'surface', 'part', 'edge'][hit.mode] }
+        let modelLocalBlob = null
+        if (object === designRoot) {
+          const center = savedHit ? savedHit.point.toArray() : designRoot.worldToLocal(hit.point.clone()).toArray()
+          const radius = hit.radius / Math.abs(designRoot.getWorldScale(new THREE.Vector3()).x)
+          modelLocalBlob = { center, radii: [radius, radius, radius], rotationDegrees: [0, 0, 0] }
+          if (selection) {
+            try { mesh = cursorMeshSnapshot(hit, savedNode, designRoot, selection.mode) }
+            catch (error) { mesh = { meshUnavailable: 'geometry_unavailable' }; console.warn('Cursor mesh extraction failed', error) }
+          }
+        }
+        region = { objectId, partPath: path, faceIndex: hit.faceIndex, worldPoint: hit.point.toArray(), worldRadius: hit.radius,
+          modelLocalPoint: modelLocalBlob?.center ?? null, modelLocalBlob, ...(selection ? { selection } : {}) }
       }
-      const point = hit.point.toArray()
-      const selection = { partPath: path, surfaceId: hit.surfaceId, mode: ['patch', 'surface', 'part', 'edge'][hit.mode] }
-      let modelLocalBlob = null
-      let mesh = { meshUnavailable: 'unsupported_model' }
-      if (object === designRoot) {
-        const center = savedHit ? savedHit.point.toArray() : designRoot.worldToLocal(hit.point.clone()).toArray()
-        const radius = hit.radius / Math.abs(designRoot.getWorldScale(new THREE.Vector3()).x)
-        modelLocalBlob = { center, radii: [radius, radius, radius], rotationDegrees: [0, 0, 0] }
-        try { mesh = cursorMeshSnapshot(hit, savedNode, designRoot, selection.mode) }
-        catch (error) { mesh = { meshUnavailable: 'geometry_unavailable' }; console.warn('Cursor mesh extraction failed', error) }
+      if (hit.named) {
+        try { mesh = namedRegionMesh(hit.named, designRoot) }
+        catch (error) { mesh = { meshUnavailable: 'geometry_unavailable' }; console.warn('Named surface mesh extraction failed', error) }
       }
       const size = renderer.getSize(new THREE.Vector2())
       const ratio = renderer.getPixelRatio()
@@ -632,13 +701,17 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       return {
         status: 'captured', capturedAt: new Date().toISOString(),
         identity: { sceneRevision, design: designIdentity },
-        region: { objectId, partPath: path, faceIndex: hit.faceIndex, worldPoint: point, worldRadius: hit.radius, modelLocalPoint: modelLocalBlob?.center ?? null, modelLocalBlob, selection },
+        region, ...(hit.named ? { namedRegion: { id: hit.named.region.id, name: hit.named.region.name, regionMapKey: namedMap.key } } : {}),
         camera: { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), fov: camera.getEffectiveFOV(), aspect: camera.aspect },
         image, ...mesh,
       }
     },
     /** Change the cursor scope at the pinned point or the next pointer hit. */
     setCursorMode(mode) { hover.setMode(mode) },
+    /** Report surface selectors that could not be drawn for the loaded map. */
+    regionResolution() {
+      return { key: namedMap?.key ?? null, unresolvedIds: namedMap?.regions.filter(region => region.location.kind === 'surface' && !namedIndex?.get(region.id)).map(region => region.id) ?? [] }
+    },
     /** Reveal a named region for keyboard focus and retain its existing mouse or touch state. */
     setRegionFocused(focused) { regionFocused = focused; render() },
     /** Set local presentation visibility without confirming the proposed region. */
@@ -669,11 +742,13 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       const overlayVisible = highlightVisible
       const activityMode = activity.uniform.value.x
       const hoverRadius = hover.sphere.value.w
+      const cursorVisible = namedCursor?.root.visible
       const visibility = volumeNodes.map(node => node.visible)
       try {
         hover.sphere.value.w = 0
         activity.uniform.value.x = 0
         showOverlay(false)
+        if (namedCursor) namedCursor.root.visible = false
         for (const node of volumeNodes) node.visible = false
         renderer.setPixelRatio(1)
         renderer.setSize(480, 320, false)
@@ -683,6 +758,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         activity.uniform.value.x = activityMode
         hover.sphere.value.w = hoverRadius
         showOverlay(overlayVisible)
+        if (namedCursor) namedCursor.root.visible = cursorVisible
         volumeNodes.forEach((node, index) => { node.visible = visibility[index] })
         renderer.setPixelRatio(ratio)
         renderer.setSize(size.x, size.y, false)
@@ -698,16 +774,13 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       if (printLayout && (!spec || spec.url !== designUrl || printLayout.identity !== printLayoutIdentity(spec, volume ?? printLayout.volume))) clearPrint(true)
       designSpec = spec
       designVolume = volume
-      if (mapChanged) {
-        const pin = hover.snapshot({ pinnedOnly: true })
-        mappedHit = hoveredRegion(pin, true)
-        hover.invalidate()
-      }
+      if (mapChanged && hover.mode.value === 4) hover.clear()
       if (!spec) {
         generation++
         clearShape(); clearMotion(); clearHighlight()
         if (design) { designRoot.remove(design.root); clearShape(); disposeDesign(design) }
         measurement = null; design = null; motion = null; designUrl = null; requestedUrl = null; requestedRenderRequest = null
+        updateNamedIndex()
         render()
         return null
       }
@@ -823,6 +896,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       for (const [name, listener] of printListeners) renderer.domElement.removeEventListener(name, listener, true)
       hover.dispose()
       editPicker.dispose()
+      updateNamedHit(null)
+      namedIndex = null; namedMap = null; namedDesign = null
       clearHighlight()
       if (design) { clearShape(); disposeDesign(design) }
       design = null

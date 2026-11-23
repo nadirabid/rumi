@@ -82,6 +82,23 @@ export async function saveAnalyzedMesh(cwd, positions, signal) {
 }
 
 /**
+ * Save an uncovered surface's exact part-local ranges when too large to return inline.
+ * @param {string} cwd Local project directory.
+ * @param {number[][]} faceRanges Half-open triangle index ranges.
+ * @param {AbortSignal} signal Tool cancellation.
+ * @returns {Promise<string>} Project-relative JSON file containing the range array.
+ */
+export async function saveAnalyzedRanges(cwd, faceRanges, signal) {
+  const directory = await geometryDirectory(cwd, 'surface-analysis')
+  const bytes = JSON.stringify(faceRanges)
+  const filename = `${createHash('sha256').update(bytes).digest('hex')}.json`
+  signal.throwIfAborted()
+  await writeFileAtomic(join(directory, filename), bytes, { mode: 0o600 })
+  signal.throwIfAborted()
+  return `.rumi/surface-analysis/${filename}`
+}
+
+/**
  * Identify the geometry and placement a cursor region refers to.
  * @param {object} record - Viewer session record.
  * @returns {object} JSON identity shared with the rendered viewport.

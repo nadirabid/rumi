@@ -11,7 +11,7 @@ Name the recognizable parts first. On creation or refresh, inspect each broad re
 
 Call `viewer_analyze_surfaces` with the saved USD `path` for its `sourceHash` and part paths. Pass an exact `partPath` array and `sourceHash` to list a part's connected surfaces. Follow `nextOffset` as needed. Match the images and source to the reported positions, bounds, and normals, then bind physical features to those triangles.
 
-Save `model.regions.json` beside the final `model.usda` with that `sourceHash` and an ordered `regions` array. Give each region a stable lowercase hyphenated `id`, a `name` and a `location`. Keep accurate existing names and replace legacy boxes around physical features with triangle selectors. For overlapping regions without a parent-child relationship, put the more specific region first. Leave unclassified areas unnamed.
+Save `model.regions.json` beside the final `model.usda` with that `sourceHash` and an ordered `regions` array. Give each region a stable lowercase hyphenated `id`, a `name` and a `location`. Keep accurate existing names and replace legacy boxes around physical features with triangle selectors. For overlapping regions without a parent-child relationship, put the more specific region first.
 
 For a `surface`, copy the part path and surface IDs from the tool.
 
@@ -29,4 +29,10 @@ For spatial features, use saved model-local millimetres with Z up.
 - `point` takes a single XYZ `point`, such as a pivot.
 - `volume` takes `boxes` of `[minX, minY, minZ, maxX, maxY, maxZ]` for space such as hinge clearance.
 
-Load the saved map with `viewer_load` and repair any reported region errors. Use `viewer_highlight` with a name and the current model identity to check the selection against neighboring features. Leave uncertain selections unresolved.
+## Verify the saved map
+
+After saving, call `viewer_analyze_surfaces` with the model `path` and `coverage: true`. Read the uncovered triangle and area totals. Inspect gaps by passing `partPath` and follow `nextOffset` with the returned `sourceHash` and `regionMapKey`. Copy `surfaceIds` or `faceRanges` from the returned selection. When given `faceRangesPath`, read the ranges from that file. A connected surface can contain already named triangles.
+
+Extend an existing name when it belongs on the omitted geometry, or add a name for a distinct feature. Leave uncertain patches unnamed and tell the person about significant gaps that remain. Rerun the audit after changing the map and use the final results when describing coverage.
+
+Load the saved map with `viewer_load` and repair any reported region errors. Use `viewer_highlight` with a name and the current model identity to check the selection against neighboring features.

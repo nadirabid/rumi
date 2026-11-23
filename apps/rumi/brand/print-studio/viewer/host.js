@@ -255,7 +255,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   ctx.inject(['systemPrompt'], scoped => {
     scoped.effect(() => scoped.systemPrompt.section({
       name: 'rumi:naming-model-regions', order: scoped.systemPrompt.getSectionOrder('TOOL_WORKFLOW'),
-      text: 'When creating or refreshing named regions, follow name-model-regions and use viewer_analyze_surfaces on the saved USD. Bind physical features to measured triangles, including features previously labeled with boxes. Save and verify the map for each final model revision you keep.',
+      text: 'When creating or refreshing named regions, follow name-model-regions to bind physical features to measured triangles, including features previously labeled with boxes. Save and audit the map for unnamed geometry on each final model revision you keep.',
     }), 'print viewer: name model features')
     scoped.effect(() => scoped.systemPrompt.context({
       name: 'rumi:mesh-state', order: scoped.systemPrompt.getContextOrder('WEB_SURFACE'), interpolate: false, required: true,

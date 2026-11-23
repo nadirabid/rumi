@@ -113,7 +113,7 @@ it.each([
       expect(reminders[0]).toContain("Keep working toward the user's goal, including any remaining edits or checks.")
     }
     if (expected.includes('name-model-regions')) {
-      expect(reminders[0]).toContain('Use viewer_analyze_surfaces to identify physical features and save their mesh selectors.')
+      expect(reminders[0]).toContain('Use viewer_analyze_surfaces to identify physical features and audit each saved map for unnamed triangles.')
       expect(reminders[0]).toContain(JSON.stringify([{ path: 'models/box/model.usda', status }]))
     } else {
       expect(reminders[0] ?? '').not.toContain('name-model-regions')

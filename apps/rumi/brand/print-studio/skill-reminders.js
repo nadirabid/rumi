@@ -235,7 +235,7 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
       const reminders = []
       if (unresolved.length) {
         state.sent.add('namedRegions')
-        reminders.push(`Before ending this turn, follow name-model-regions and save maps that match the final revisions you keep. Use viewer_analyze_surfaces to identify physical features and save their mesh selectors. Finish any edits and validation first.\nCurrent region map findings\n${JSON.stringify(unresolved)}`)
+        reminders.push(`Before ending this turn, follow name-model-regions and save maps that match the final revisions you keep. Use viewer_analyze_surfaces to identify physical features and audit each saved map for unnamed triangles. Finish any edits and validation first.\nCurrent region map findings\n${JSON.stringify(unresolved)}`)
       }
       if (flags.conciseReply && draft && textStep === state.textStep && !state.sent.has('conciseReply')) {
         state.sent.add('conciseReply')

@@ -1200,6 +1200,91 @@ def Mesh "Islands"
     const rest = await f.run('viewer_analyze_surfaces', { ...args, sourceHash: page.sourceHash, offset: page.nextOffset })
     expect(rest).toMatchObject({ total: 29, nextOffset: null })
     expect([...page.surfaces, ...rest.surfaces].map(row => row.surfaceId)).toEqual(faces.map(i => 29 - i))
+
+    await writeFile(join(cwd, 'terrain.regions.json'), JSON.stringify({ sourceHash: page.sourceHash,
+      regions: [{ id: 'origin', name: 'Origin', location: { kind: 'point', point: [0, 0, 0] } }] }))
+    const auditArgs = { ...args, coverage: true }
+    const auditPage = await f.run('viewer_analyze_surfaces', auditArgs)
+    expect(auditPage).toMatchObject({ total: 29, nextOffset: 24, coverage: { uncoveredTriangles: 29 } })
+    expect(auditPage.surfaces[0]).toMatchObject({ surfaceId: 29, surfaceIds: [29] })
+    await expect(f.run('viewer_analyze_surfaces', { ...auditArgs, offset: 24 })).rejects.toThrow(/sourceHash and regionMapKey/)
+    const auditRest = await f.run('viewer_analyze_surfaces', {
+      ...auditArgs, sourceHash: auditPage.sourceHash, regionMapKey: auditPage.regionMapKey, offset: auditPage.nextOffset,
+    })
+    expect(auditRest).toMatchObject({ total: 29, nextOffset: null })
+    expect(auditRest.surfaces.map(row => row.surfaceId)).toEqual([5, 4, 3, 2, 1])
+  } finally {
+    await f.dispose()
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+it('audits the uncovered faces of a saved map without opening the viewer', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'rumi-region-coverage-'))
+  const f = fixture(undefined, cwd)
+  try {
+    const path = 'panel.usda'
+    const partPath = ['Panel']
+    const mapPath = join(cwd, 'panel.regions.json')
+    const segments = 20
+    const points = Array.from({ length: segments + 1 }, (_, i) => [`(${i}, 0, 0)`, `(${i}, 1, 0)`]).flat()
+    const indices = Array.from({ length: segments }, (_, i) => {
+      const a = i * 2
+      return [a, a + 2, a + 3, a, a + 3, a + 1]
+    }).flat()
+    const usd = `#usda 1.0
+(
+    metersPerUnit = 0.001
+    upAxis = "Z"
+)
+def Mesh "Panel"
+{
+    point3f[] points = [${points.join(', ')}]
+    int[] faceVertexCounts = [${Array(segments * 2).fill(3).join(', ')}]
+    int[] faceVertexIndices = [${indices.join(', ')}]
+}
+`
+    await writeFile(join(cwd, path), usd)
+    const sourceHash = createHash('sha256').update(usd).digest('hex')
+    const args = { path, coverage: true }
+    const region = (id: string, faceRanges: number[][]) => ({
+      id, name: id, location: { kind: 'surface', parts: [{ partPath, faceRanges }] },
+    })
+    const saveMap = (regions: object[], hash = sourceHash) => writeFile(mapPath, JSON.stringify({ sourceHash: hash, regions }))
+    expect(await f.run('viewer_analyze_surfaces', args)).toMatchObject({ status: 'missing_region_map' })
+    const partial = region('panel-part', [[0, 1], [3, 4]])
+    const other = region('corner', [[0, 1]])
+    await saveMap([partial], '0'.repeat(64))
+    expect(await f.run('viewer_analyze_surfaces', args)).toMatchObject({ status: 'outdated_region_map' })
+    await saveMap([partial, other, { ...other, id: 'corner-detail', parentId: 'panel-part' },
+      { id: 'clearance', name: 'Clearance', location: { kind: 'volume', boxes: [[-1, -1, -1, 100, 100, 100]] } }])
+    const audit = await f.run('viewer_analyze_surfaces', args)
+    expect(audit).toMatchObject({
+      status: 'analyzed', sourceHash,
+      coverage: { triangles: 40, uncoveredTriangles: 38, areaMm2: 20, uncoveredAreaMm2: 19 },
+      total: 1, parts: [{ partPath, uncoveredSurfaceCount: 1, uncoveredTriangles: 38 }], nextOffset: null,
+    })
+    const detailArgs = { ...args, partPath, sourceHash, regionMapKey: audit.regionMapKey }
+    const details = await f.run('viewer_analyze_surfaces', detailArgs)
+    expect(details.surfaces).toEqual([{
+      surfaceId: 39, triangles: 38, surfaceTriangles: 40, areaMm2: 19,
+      boundsMm: [0, 0, 0, 20, 1, 0], faceRanges: [[1, 3], [4, 40]],
+    }])
+
+    const striped = region('stripes', Array.from({ length: segments }, (_, i) => [i * 2, i * 2 + 1]))
+    await saveMap([striped])
+    expect(await f.run('viewer_analyze_surfaces', detailArgs)).toMatchObject({ status: 'stale_region_map' })
+    const stripes = await f.run('viewer_analyze_surfaces', { ...args, partPath })
+    expect(stripes.surfaces[0]).toMatchObject({ triangles: 20, faceRangesPath: expect.any(String) })
+    expect(JSON.parse(await readFile(join(cwd, stripes.surfaces[0].faceRangesPath), 'utf8')))
+      .toEqual(Array.from({ length: segments }, (_, i) => [i * 2 + 1, i * 2 + 2]))
+
+    await saveMap([region('overshoots', [[0, 41]])])
+    expect(await f.run('viewer_analyze_surfaces', args)).toMatchObject({ status: 'invalid_region_map', unresolvedIds: ['overshoots'] })
+    await saveMap([region('panel', [[0, 40]])])
+    expect(await f.run('viewer_analyze_surfaces', args)).toMatchObject({
+      status: 'analyzed', coverage: { triangles: 40, uncoveredTriangles: 0, uncoveredAreaMm2: 0 }, parts: [], total: 0,
+    })
   } finally {
     await f.dispose()
     await rm(cwd, { recursive: true, force: true })

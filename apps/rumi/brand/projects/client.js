@@ -87,6 +87,9 @@ window.__ModuleLoader__.load({
 body:has(.rumi-projects-leading) header:has([data-conversation-tabs]){border-bottom-color:transparent}
 /* The full-width project header reserves the same band above sidebar tabs. */
 body:has(.rumi-projects-leading) [data-sidebar-right-panel]{top:var(--dsh-frame-top-clearance,48px)}
+[data-rumi-project-navigation][data-animating]:has(> [data-shell-overlay]),
+[data-rumi-project-navigation][data-animating]>[data-side="rightbar"],
+[data-rumi-project-navigation] [data-sidebar-right-panel][data-sidebar-right-open] :is([data-dockkit-host="dock"],[data-dockkit-empty],[data-dockkit-divider]){transition:none}
 .rumi-projects-leading button{-webkit-app-region:no-drag;flex-shrink:0}
 .rumi-header-title{font-size:14px;font-weight:500;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--dsw-alias-label-primary)}
 .rumi-header-actions{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
@@ -280,6 +283,23 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
         h('path', { d: 'M19 13h1.5a2.5 2.5 0 0 0 0-5H19V5a2 2 0 0 0-2-2h-3v1.5a2.5 2.5 0 0 1-5 0V3H5a2 2 0 0 0-2 2v4h1.5a2.5 2.5 0 0 1 0 5H3v5a2 2 0 0 0 2 2h4v-1.5a2.5 2.5 0 0 1 5 0V21h3a2 2 0 0 0 2-2Z' }));
     }
 
+    /**
+     * Apply the new page's geometry in one layout pass before allowing sidebar transitions again.
+     * @param {() => void} commit - Synchronously commit the destination panel and its sidebar.
+     */
+    function commitProjectNavigation(commit) {
+      const frame = document.querySelector('[data-shell-overlay]')?.parentElement;
+      frame?.setAttribute('data-rumi-project-navigation', '');
+      try {
+        commit();
+      } finally {
+        if (frame) {
+          frame.getBoundingClientRect();
+          frame.removeAttribute('data-rumi-project-navigation');
+        }
+      }
+    }
+
     /** One project list shared by the gallery and the window-chrome control. */
     function createProjectList(ctx) {
       let snapshot = { phase: 'loading', projects: [], error: '', activeId: null };
@@ -325,13 +345,19 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
         async open(project) {
           try {
             const sessionId = await this.sessionFor(project);
-            // The sidebar adopts the session tab store during the conversation render.
-            flushSync(() => {
-              ctx.uiWorkspace.openSession(sessionId);
-              ctx.layout.selectPanel(null);
+            commitProjectNavigation(() => {
+              // The conversation render adopts the session's sidebar tabs.
+              flushSync(() => {
+                ctx.uiWorkspace.openSession(sessionId);
+                ctx.layout.selectPanel(null);
+                publish({ activeId: project.id, error: '' });
+              });
+              const sidebar = ctx.sidebarRight;
+              const dockTabId = sidebar.commandTarget(null)?.tabId;
+              const previewVisible = sidebar.isExpanded() && sidebar.tabsIn(sessionId).some(tab =>
+                tab.id === dockTabId && tab.kind === 'print-studio');
+              if (!previewVisible) flushSync(() => sidebar.openTabIn(sessionId, 'print-studio'));
             });
-            ctx.sidebarRight.openTabIn(sessionId, 'print-studio');
-            publish({ activeId: project.id, error: '' });
           } catch (error) {
             console.error('Rumi project opening failed', error);
             publish({ error: 'open' });
@@ -354,7 +380,7 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
           }
         },
         close() {
-          ctx.layout.selectPanel(PANEL_ID);
+          commitProjectNavigation(() => flushSync(() => ctx.layout.selectPanel(PANEL_ID)));
         },
         /**
          * The session that represents the project. DSH conversations belong to

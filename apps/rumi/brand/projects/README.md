@@ -24,6 +24,7 @@ The id is immutable and is the directory name; the name is user-facing and lives
 - `shell.leading` — the window-chrome control: **New** while browsing, the project name and **Close** while one is open. The frame only mounts this seat when the navigation column is fully hidden, which is why the plugin collapses that column at boot.
 - Creating or opening a project opens its **3D preview** tab alongside the conversation, even before a model exists.
 - Close returns to the gallery with `ctx.layout.selectPanel('projects')`. It never ends the session: a running turn or an unsent draft survives.
+- The gallery and conversation switch at their destination widths. An already visible 3D preview keeps its tab selection without flashing.
 
 ## Routes
 

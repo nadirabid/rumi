@@ -2,6 +2,7 @@
 import argparse
 import copy
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -30,6 +31,15 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(set(result['coverage']['connections']), {c['id'] for c in value['assembly']['connections']})
         self.assertEqual(result['policy'],value['settings'])
         return result
+
+    def assert_collision(self, finding, parts, penetration_limit):
+        details = finding['details']
+        self.assertGreater(details['maxPenetrationMm'], penetration_limit)
+        self.assertEqual(details['collision']['parts'], parts)
+        position = details['collision']['positionMm']
+        self.assertEqual(len(position), 3)
+        self.assertTrue(all(math.isfinite(coordinate) for coordinate in position), position)
+        return position
 
     def test_single_solid_static_part(self):
         self.assert_verified(assembly([box('part',[0,0,0],[2,2,2])],'part',[]))
@@ -80,10 +90,33 @@ class NativeTests(unittest.TestCase):
     def test_retains_and_moves_prismatic_slider(self):
         self.assert_verified(slider())
 
-    def test_detects_interfering_slider(self):
-        code,result=run(slider(True))
+    def test_rest_collision_reports_parts_and_world_position(self):
+        value = slider(True)
+        shift = [100, 200, 300]
+        value['bodies'].reverse()
+        for body in value['bodies']:
+            body['vertices'] = [[coordinate + offset for coordinate, offset in zip(vertex, shift)]
+                                for vertex in body['vertices']]
+        value['assembly']['connections'][0]['pivot'] = shift
+        code, result = run(value)
         self.assertEqual(code,0,result)
         self.assertEqual(result['status'],'needs_repair',result)
+        finding = result['checks'][0]
+        self.assertEqual(finding['code'], 'initial_interference')
+        position = self.assert_collision(finding, ['frame', 'moving'], value['settings']['maxPenetrationMm'])
+        for coordinate, offset in zip(position, shift):
+            self.assertLessEqual(abs(coordinate - offset), 3, position)
+
+    def test_retention_collision_reports_parts(self):
+        value = wheel()
+        value['settings']['maxPenetrationMm'] = .005
+        code, result = run(value)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'needs_repair', result)
+        finding = result['checks'][0]
+        self.assertEqual(finding['code'], 'excessive_penetration')
+        self.assertEqual(finding['details']['kind'], 'retention')
+        self.assert_collision(finding, ['axle', 'wheel'], value['settings']['maxPenetrationMm'])
 
     def test_captive_wheel_moves_through_both_half_turns(self):
         result=self.assert_verified(wheel())
@@ -143,7 +176,13 @@ class NativeTests(unittest.TestCase):
         value=slider();value['assembly']['manufacturing']=dict(mode='separate',steps=[dict(part='moving',path=[[0,0,0],[0,20,0]])])
         code,result=run(value)
         self.assertEqual(code,0,result);self.assertEqual(result['status'],'needs_repair',result)
-        self.assertIn('assembly_path_interference',[c['code'] for c in result['checks']])
+        finding = result['checks'][0]
+        self.assertEqual(finding['code'], 'assembly_path_interference')
+        self.assert_collision(finding, ['frame', 'moving'], value['settings']['maxPenetrationMm'])
+        offset = finding['details']['offsetMm']
+        self.assertEqual(len(offset), 3)
+        for coordinate, expected in zip(offset, [0, .2, 0]):
+            self.assertAlmostEqual(coordinate, expected)
         self.assertFalse(result['coverage']['complete'])
 
     def test_excessive_sequence_work_is_unverified_without_partial_pass(self):

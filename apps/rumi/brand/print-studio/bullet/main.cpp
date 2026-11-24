@@ -200,6 +200,21 @@ struct Connection {
     double low=0,high=0;
 };
 struct State { std::vector<btTransform> transforms; std::vector<btVector3> linear,angular; std::vector<double> angles; };
+struct Penetration {
+    double depth=0;
+    std::array<int,2> bodies{};
+    btVector3 position{0,0,0};
+
+    Json diagnostic(const std::vector<Body>& definitions) const {
+        const auto& first=definitions[bodies[0]].id;
+        const auto& second=definitions[bodies[1]].id;
+        const auto [a,b]=std::minmax(first,second);
+        if(!std::isfinite(position.x()) || !std::isfinite(position.y()) || !std::isfinite(position.z())) {
+            throw std::runtime_error("Bullet returned a nonfinite contact position");
+        }
+        return {{"parts",{a,b}},{"positionMm",coordinates(position,1000)}};
+    }
+};
 struct World {
     btDefaultCollisionConfiguration configuration;
     btCollisionDispatcher dispatcher{&configuration};
@@ -221,6 +236,7 @@ struct World {
                 fixed ? 0 : part.mass, nullptr, part.shape.get(), fixed ? btVector3(0, 0, 0) : part.moments);
             info.m_friction=s.friction; info.m_restitution=0; info.m_linearDamping=0; info.m_angularDamping=0;
             auto object=std::make_unique<btRigidBody>(info);
+            object->setUserIndex(int(i));
             object->setCenterOfMassTransform(initial?initial->transforms[i]:btTransform(part.basis,part.com));
             if(initial && !fixed) {object->setLinearVelocity(initial->linear[i]);object->setAngularVelocity(initial->angular[i]);}
             object->setActivationState(DISABLE_DEACTIVATION); object->setSleepingThresholds(0,0);
@@ -228,13 +244,28 @@ struct World {
         }
     }
     ~World() {for(std::size_t i=0;i<bodies.size();++i)if(!removed.count(i))world.removeRigidBody(bodies[i].get());}
-    double penetration() {
-        double depth=0;
+    Penetration penetration(double limit) {
+        Penetration result;
+        const btPersistentManifold* deepest=nullptr;
+        const btManifoldPoint* contact=nullptr;
         for(int i=0;i<dispatcher.getNumManifolds();++i) {
-            auto* m=dispatcher.getManifoldByIndexInternal(i);
-            for(int j=0;j<m->getNumContacts();++j)depth=std::max(depth,-double(m->getContactPoint(j).getDistance()));
+            const auto* manifold=dispatcher.getManifoldByIndexInternal(i);
+            for(int j=0;j<manifold->getNumContacts();++j) {
+                const auto& point=manifold->getContactPoint(j);
+                const double depth=-point.getDistance();
+                if(depth>result.depth) {
+                    result.depth=depth;
+                    deepest=manifold;
+                    contact=&point;
+                }
+            }
         }
-        return depth;
+        if(!std::isfinite(result.depth))throw std::runtime_error("Bullet returned nonfinite contact depth");
+        if(contact && result.depth>limit) {
+            result.bodies={deepest->getBody0()->getUserIndex(),deepest->getBody1()->getUserIndex()};
+            result.position=(contact->getPositionWorldOnA()+contact->getPositionWorldOnB())*.5;
+        }
+        return result;
     }
     State snapshot(const std::vector<double>& angles) {
         State state;state.angles=angles;
@@ -273,7 +304,9 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
     std::map<std::size_t,double> integratedErrors;
     std::vector<double> driftMark(connections.size(),0),tiltMark(connections.size(),0),driftEnd(connections.size(),0),tiltEnd(connections.size(),0);
     const int markStep=int(std::floor(steps*(1-arrestWindow)));
-    w.world.performDiscreteCollisionDetection();maxDepth=w.penetration();
+    w.world.performDiscreteCollisionDetection();
+    auto contact=w.penetration(s.penetration);
+    maxDepth=contact.depth;
     if(maxDepth>s.penetration)failure="initial_interference";
     int completed=0;
     for(int step=0;step<steps && failure.empty();++step) {
@@ -311,9 +344,9 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
             }
         }
         w.world.stepSimulation(s.dt,0,s.dt);completed=step+1;
-        maxDepth=std::max(maxDepth,w.penetration());
-        if(!std::isfinite(maxDepth))throw std::runtime_error("Bullet returned nonfinite contact depth");
-        if(maxDepth>s.penetration)failure="excessive_penetration";
+        contact=w.penetration(s.penetration);
+        maxDepth=std::max(maxDepth,contact.depth);
+        if(contact.depth>s.penetration)failure="excessive_penetration";
         for(std::size_t i=0;i<connections.size();++i) {
             const auto& c=connections[i];auto m=measure(w,c,angles[i]);angles[i]=m.angle;
             maxDrift=std::max(maxDrift,m.drift);maxOffAxis=std::max(maxOffAxis,m.offAxis);
@@ -338,6 +371,7 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
     Json result{{"kind",kind},{"status",failure.empty()?"passed":"needs_repair"},{"code",failure.empty()?"probe_passed":failure},
       {"durationSeconds",completed*s.dt},{"actual",actual},{"maxPivotDriftMm",maxDrift*1000},{"maxOffAxisDegrees",maxOffAxis*180/pi},
       {"maxPenetrationMm",maxDepth*1000},{"retentionTravelMm",s.retentionTravel*1000},{"maxForceN",maxForce},{"maxTorqueNm",maxTorque}};
+    if(contact.depth>s.penetration)result["collision"]=contact.diagnostic(definitions);
     if(!failedConnection.empty())result["connection"]=failedConnection;
     return {result,w.snapshot(angles)};
 }
@@ -359,9 +393,14 @@ RouteResult assemblyRoute(std::vector<Body>& definitions,std::size_t fixture,con
             if(samples>s.maxTotalSteps-budget)return {"review","probe_budget_exhausted",complete,{{"part",id},{"phase","assembly_route"}}};
             budget+=samples;
             for(int n=0;n<=samples;++n) {
-                auto pose=rest;pose.setOrigin(rest.getOrigin()+previous+(target-previous)*double(n)/samples);moving->setCenterOfMassTransform(pose);world.world.updateSingleAabb(moving);
-                world.world.performDiscreteCollisionDetection();double depth=world.penetration();
-                if(depth>s.penetration)return {"needs_repair","assembly_path_interference",complete,{{"part",id},{"segment",i-1},{"maxPenetrationMm",depth*1000}}};
+                const auto travel=(target-previous)*double(n)/samples;
+                auto pose=rest;pose.setOrigin(rest.getOrigin()+previous+travel);moving->setCenterOfMassTransform(pose);world.world.updateSingleAabb(moving);
+                world.world.performDiscreteCollisionDetection();
+                const auto contact=world.penetration(s.penetration);
+                if(contact.depth>s.penetration) {
+                    return {"needs_repair","assembly_path_interference",complete,{{"part",id},{"segment",i-1},
+                        {"offsetMm",coordinates(previous+travel,1000)},{"maxPenetrationMm",contact.depth*1000},{"collision",contact.diagnostic(definitions)}}};
+                }
             }
             previous=target;
         }

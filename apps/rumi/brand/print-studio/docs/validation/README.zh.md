@@ -28,6 +28,8 @@ USD 检查使用不可变源快照，在转换为毫米前应用完整父级变�
 
 Blender 未发现阻断性几何错误后，主机通过协议 2 将求值后的物理网格及装配描述传给内置 Bullet 程序。双精度 GImpact 接触保留凹几何。仅固定声明的根部件；包括保持件在内的所有其他部件均保持动态。固定、旋转和滑动连接仅描述预期相对行为，不创建理想关节。通用探测挑战禁止运动，并通过力驱动允许运动到采样姿态，同时监测每个连接及碰撞对。
 
+接触失败（`initial_interference`、`excessive_penetration`、`assembly_path_interference`）会报告首个失败采样中最深重叠处的两个装配部件 ID、穿透深度和接触位置。接触位置是放置后装配坐标系中两个接触点的中点。拆卸路径失败还会报告运动部件相对于其保存姿态的采样平移量。深度、位置和平移量均以毫米为单位。
+
 保持检查测试的是脱离而非紧度：部件可在其间隙内移动，只要连接几何将其限制在 `mechanics.retentionTravelMm`（默认 2，范围 0.1–10）的枢轴位移和 `mechanics.retentionTiltDegrees`（默认 15，范围 1–45）的倾斜之内即通过。部件位移或倾斜超出任一界限，或保持探测结束时仍在向外移动，则报告 `unstable_at_rest` 和 `unretained_part`。`linearToleranceMm` 和 `angularToleranceDegrees` 仅决定被驱动关节是否到达目标（`movement_blocked`）以及 `movement_below_tolerance`。
 
 报告记录部件、连接和序列覆盖，以及解析后的仿真策略。错误返回调用工具；不支持的物理行为及不完整覆盖保持未验证状态。程序缺失、超时或报告格式错误均不能通过。`mechanics.maxTotalSteps` 默认为 2,000,000（可配置为 1,000 至 10,000,000），超出后装配保持未验证；即使跳过完整运动，初始连接检查仍会报告缺陷。

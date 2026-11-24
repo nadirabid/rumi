@@ -23,7 +23,8 @@ const path = 'models/car/model.usda'
 const intent = { assembly: { connections: [] }, motionKeys: ['door'], motionRanges: [{ key: 'door', range: [0, 90] }] }
 const report = { version: 1, status: 'passed', checks: [], intent, printReady: false }
 const mechanicalReport = { ...report, mechanics: { status: 'needs_repair', connections: [] } }
-const mechanics = { version: 2, status: 'passed', assemblyVerified: true, coverage: { complete: true }, checks: [], connections: [], printReady: false }
+const mechanics = { version: 2, status: 'passed', assemblyVerified: true, coverage: { complete: true },
+  checks: Array<object>(), connections: Array<object>(), printReady: false }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'rumi-validation-test-'))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
@@ -271,6 +272,47 @@ it('records explicit validation tools and their results within one agent turn', 
   expect(prompt).toMatchSnapshot('explicit validation instructions')
   expect(events.filter(event => event.type === 'user/message' && String(event.data.source.kind) === 'print-validation')).toHaveLength(0)
 })
+
+it('returns the colliding parts and contact location to the model', async () => {
+  const f = await fixture(), ctx = new Context()
+  cleanup.push(() => ctx.fiber.dispose())
+  await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
+  const harness = await mountAgentLoopTestHarness(ctx)
+  const details = { code: 'excessive_penetration', status: 'needs_repair', kind: 'movement', maxPenetrationMm: 0.23,
+    collision: { parts: ['door', 'fender'], positionMm: [12, -4, 8] } }
+  const finding = { code: details.code, connection: 'hinge', severity: 'error', count: 1, details }
+  f.bullet.mockResolvedValue({ ...mechanics, status: 'needs_repair', assemblyVerified: false, coverage: { complete: false },
+    checks: [finding], connections: [{ id: 'hinge', parent: 'body', child: 'door', kind: 'revolute',
+      probes: [{ status: 'passed', kind: 'rest' }, details] }] })
+  registerValidationTools(ctx, defineTool, f.validation, f.config)
+  const adapter = new MockAdapter([toolCallResponse('mechanics', 'validation_mechanics', { path }), textResponse('The door hit the fender.')])
+  ctx.effect(() => ctx.llm.registerAdapter(['mock'], adapter))
+  const agent = await harness.create(SessionId('collision-validation'), { provider: 'mock', model: 'mock' }, { cwd: f.root })
+  agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Check the car.' }] }))
+  await agent.whenIdle()
+
+  const result = adapter.requests[1]?.messages.find(message => message.role === 'tool')?.content[0]
+  expect(result?.type).toBe('text')
+  const payload = JSON.parse(result?.type === 'text' ? result.text : '')
+  expect(payload).toMatchObject({ status: 'needs_repair', report: { checks: [finding],
+    connections: [{ probes: [details], probeCounts: { passed: 1, needs_repair: 1, review: 0 } }] } })
+  const validation = summarizeValidationState(f.validation.read(agent.session.id))
+  expect(validation.models[0].report.mechanics.checks).toEqual(payload.report.checks)
+  expect(payload.report.checks[0].details.collision).toMatchInlineSnapshot(`
+    {
+      "parts": [
+        "door",
+        "fender",
+      ],
+      "positionMm": [
+        12,
+        -4,
+        8,
+      ],
+    }
+  `)
+})
+
 it('preserves canonical control limits and connection travel across saved poses and restart', async () => {
   const f = await fixture()
   const state = validationState(join(f.root, 'required'), f.root, 'models/car/model.js')

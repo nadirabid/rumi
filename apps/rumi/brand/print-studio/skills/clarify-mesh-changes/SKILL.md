@@ -1,6 +1,6 @@
 ---
 name: clarify-mesh-changes
-description: "Identify a feature from pointing or chat, highlight it, and resolve ambiguity about the requested mesh edit."
+description: "Identify and highlight a feature from pointing or chat. Use the selected geometry to edit a feature or fit another part to it."
 ---
 
 # Clarify mesh changes
@@ -13,7 +13,15 @@ For a planar cut, use the [live cut guide](../built-in-mesh-operations/SKILL.md#
 
 For a saved feature name or alias, pass it as `viewer_highlight.region`. Use the feature's stored location for the edit or explanation. If the person attached or captured a named feature, use its ID and region map key. When a name is unknown or ambiguous, ask which feature the person means. Use [name-model-regions](../name-model-regions/SKILL.md) to identify and explain useful features on the model.
 
-For each new request about a mark, use the cursor capture attached to that utterance or call `viewer_cursor_snapshot` anew. Check `identity.design` against the currently displayed model. Use `namedRegion` when present. For other selections, pass the returned `mesh.path` unchanged as `viewer_highlight.meshPath`. The STL contains the selected triangles in the saved model's coordinates, including during Movement. If capture fails, becomes stale, or returns `meshUnavailable` for an ordinary selection, explain the issue and ask for a fresh pin on an editable model. For an empty Edge selection, ask them to pin nearer a boundary or switch to Surface.
+For a new mark, use the cursor capture attached to that utterance or call `viewer_cursor_snapshot`. Check `identity.design` against the currently displayed model. To highlight a named selection, use `namedRegion`. For other selections, pass the returned `mesh.path` unchanged as `viewer_highlight.meshPath`. The STL contains the selected triangles in the saved model's coordinates, including during Movement. If capture fails, becomes stale, or returns `meshUnavailable` for an ordinary selection, explain the issue and ask for a fresh pin on an editable model. For an empty Edge selection, ask them to pin nearer a boundary or switch to Surface.
+
+## Use the selection for the edit
+
+Whenever the requested edit depends on a selected region, identify its geometry before the first Blender call. Read the STL at the captured or highlighted mesh path and use its triangles to drive the edit. If the reference is a saved surface name, resolve its triangles on the current model. Carry the same selection through follow-ups while it remains the intended target. Resolve it again if the model revision changes. The hit point identifies where the person clicked. The full selection determines the region’s extent.
+
+When another part must fit the selection, derive its mating geometry from the selected surface or the 3D edge it shares with adjacent faces. Check clearance and overlap across the full interface, including edges and corners, before reporting the fit.
+
+## Show the region
 
 Read the current `meshState` context and inspect the selected model's source before choosing coordinates. Whenever you refer to a part such as a chin, jaw, cheek, eye, rim, or crease, first show that part with `viewer_highlight`, except when the continuous cut-line guide already shows the requested cut. Explain it as the teal highlighted area with a simple positional description. Do not assume the person knows anatomical or modelling terms. For several distinct parts, highlight and discuss one at a time; a combined highlight is appropriate only when the person is choosing the combined edit region. Named parts can help identify a region, but one mesh may contain many meaningful features. Describe left and right from the person's current view or use an unambiguous feature; do not silently switch between the wearer's and viewer's perspective.
 

@@ -15,12 +15,6 @@ const en = {
   movementChecked: 'Movement checked',
   'barrel-hinge': 'Barrel hinge', 'living-hinge': 'Living hinge', 'wheel-and-axle': 'Wheel and axle',
   'dovetail-slide': 'Dovetail slide', 'gear-pair': 'Gear pair', 'rack-and-pinion': 'Rack and pinion',
-  'barrel-hinge.hint': 'Join two pieces so they swing around a pin.',
-  'living-hinge.hint': 'Make one piece fold along a thin, flexible strip.',
-  'wheel-and-axle.hint': 'Mount a wheel so it can turn on an axle.',
-  'dovetail-slide.hint': 'Guide a sliding piece along a flared track.',
-  'gear-pair.hint': 'Mesh two gears so one turns the other.',
-  'rack-and-pinion.hint': 'Use a gear and a toothed rail to turn rotation into sliding.',
 }
 const zh = {
   title: '徽章', empty: '在项目中设计机械结构，即可获得相应的徽章。',
@@ -31,12 +25,6 @@ const zh = {
   movementChecked: '已检查活动情况',
   'barrel-hinge': '圆筒铰链', 'living-hinge': '柔性铰链', 'wheel-and-axle': '车轮与轮轴',
   'dovetail-slide': '燕尾导轨', 'gear-pair': '齿轮组', 'rack-and-pinion': '齿轮齿条',
-  'barrel-hinge.hint': '用销轴连接两个部件，让它们绕轴转动。',
-  'living-hinge.hint': '让一体成形的部件沿着柔韧的薄片折叠。',
-  'wheel-and-axle.hint': '安装一个可以在轮轴上转动的轮子。',
-  'dovetail-slide.hint': '让滑块沿着燕尾形轨道移动。',
-  'gear-pair.hint': '让两个齿轮相互啮合，一个带动另一个。',
-  'rack-and-pinion.hint': '用齿轮和齿条把旋转变成直线运动。',
 }
 
 // Each medallion depicts the feature named on its card.
@@ -83,9 +71,8 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
     const earned = awards.length > 0
     return h('article', { className: 'rumi-badge-card rumi-lq', 'data-earned': earned || undefined },
       h('div', { className: 'rumi-badge-face' },
-        h('div', { className: 'rumi-badge-medallion' }, h(Glyph, { kind, size: 32 })),
-        h('h2', null, t(kind)),
-        h('p', { className: 'rumi-badge-description' }, t(kind + '.hint'))),
+        h('div', { className: 'rumi-badge-medallion' }, h(Glyph, { kind, size: 54 })),
+        h('h2', null, t(kind))),
       earned && h('details', { className: 'rumi-badge-projects' },
         h('summary', null, t(awards.length === 1 ? 'oneProject' : 'projects', { count: awards.length }),
           h(IconChevronRightOutlineRegular, { size: 12, 'aria-hidden': true })),
@@ -157,16 +144,24 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
       }
     }
 
-    const awarded = new Set(data?.awards.map(award => award.kind))
+    const cards = kinds.map(kind => {
+      const awards = data?.awards.filter(award => award.kind === kind) ?? []
+      const firstEarnedAt = awards.reduce((first, award) => {
+        const earnedAt = Date.parse(award.earnedAt)
+        return Number.isFinite(earnedAt) ? Math.min(first, earnedAt) : first
+      }, Number.MAX_SAFE_INTEGER)
+      return { kind, awards, earned: awards.length > 0, firstEarnedAt }
+    }).sort((left, right) => Number(right.earned) - Number(left.earned) || left.firstEarnedAt - right.firstEarnedAt)
+    const earnedCount = cards.filter(card => card.earned).length
     const notice = error || (data?.failed ? 'failed' : null)
     return h('section', { className: 'rumi-badges', 'aria-label': t('title') },
       h('header', { className: 'rumi-badges-heading' }, h('h1', null, t('title')),
-        data && h('p', null, awarded.size ? t('progress', { count: awarded.size, total: kinds.length }) : t('empty'))),
+        data && h('p', null, earnedCount ? t('progress', { count: earnedCount, total: kinds.length }) : t('empty'))),
       notice && h('div', { className: 'rumi-badges-notice', role: 'alert' }, t(notice),
         h(Button, { variant: 'outline', size: 'sm', disabled: retrying, onClick: retry }, t('retry'))),
       data?.pending > 0 && h('p', { className: 'rumi-badges-pending', role: 'status' }, t('pending')),
-      data ? h('div', { className: 'rumi-badges-grid' }, kinds.map(kind => h(Card, {
-        key: kind, kind, awards: data.awards.filter(award => award.kind === kind), t,
+      data ? h('div', { className: 'rumi-badges-grid' }, cards.map(({ kind, awards }) => h(Card, {
+        key: kind, kind, awards, t,
       }))) : !error && h('div', { className: 'rumi-badges-grid', 'aria-busy': true },
         kinds.map(kind => h('div', { key: kind, className: 'rumi-badges-skeleton' }))))
   }

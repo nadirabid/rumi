@@ -18,7 +18,7 @@ To change what the modeling agent knows, start with the [print project instructi
 
 ## Mechanical badges
 
-Open **Badges** beside **Plugins** to see the six mechanical badges. Expand an earned badge to see the projects that earned it and the design feature the reviewer recognized. Each project earns a given badge once. A later passing movement check for the same mechanism can add movement evidence.
+Open **Badges** beside **Plugins** to see the six mechanical badges. Earned badges appear first, ordered by the first time you earned each one across all projects. Open a badge’s project count to see which projects earned it and what the reviewer recognized. Each project earns a given badge once. A later passing movement check for the same mechanism can add movement evidence.
 
 After a completed project turn changes a saved model, Print Studio reviews its final revision in the background. Chats in a project share one badge review queue. Different projects can run badge reviews concurrently. The reviewer uses the configured DeepSeek API connection independently of the project conversation. It receives part and joint descriptions, construction evidence, relevant project excerpts, and available movement checks. It can request local cross-sections to inspect custom mechanisms. The badge describes a feature in the design. Physical print performance requires its own test.
 

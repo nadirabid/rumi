@@ -42,7 +42,8 @@ function fixture() {
   }
 }
 const empty = { awards: [], pending: 0, failed: 0 }
-const award = { id: 'one', kind: 'wheel-and-axle', projectName: 'Cart', evidence: 'A wheel rotates around the front axle.' }
+const award = { id: 'one', kind: 'wheel-and-axle', earnedAt: '2026-11-22T12:00:00.000Z',
+  projectName: 'Cart', evidence: 'A wheel rotates around the front axle.' }
 
 it('opens the badge page from the medal and communicates the current selection', () => {
   const view = fixture()
@@ -62,15 +63,40 @@ it('updates the empty collection with earned badges and shows all contributing p
   render(page)
   await act(async () => {})
   expect(screen.getByText('Build a mechanism in a project to earn its badge.')).toBeTruthy()
-  expect(screen.getAllByRole('article')).toHaveLength(6)
+  const cards = screen.getAllByRole('article')
+  expect(cards).toHaveLength(6)
+  expect(within(cards[0]!).getByRole('heading', { name: 'Barrel hinge' })).toBeTruthy()
+  for (const card of cards) {
+    expect(card.textContent).toBe(within(card).getByRole('heading').textContent)
+    expect(card.querySelector('.rumi-badge-medallion svg')?.getAttribute('width')).toBe('54')
+  }
   await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
   expect(screen.getByText('1 of 6 mechanical badges earned')).toBeTruthy()
   const card = screen.getByRole('heading', { name: 'Wheel and axle' }).closest('article')!
+  expect(screen.getAllByRole('article')[0]).toBe(card)
   fireEvent.click(within(card).getByText('2 projects'))
   expect(card.querySelector('details')?.open).toBe(true)
   expect(within(card).getByRole('heading', { name: 'Cart' })).toBeTruthy()
   expect(within(card).getByRole('heading', { name: 'Trolley' })).toBeTruthy()
   expect(within(card).getAllByText(award.evidence)).toHaveLength(2)
+})
+
+it('lists earned badges by their first award across projects before the unearned catalog', async () => {
+  const { page, service } = fixture()
+  service.mockResolvedValueOnce(Response.json({
+    ...empty,
+    awards: [
+      { ...award, id: 'four', earnedAt: '2026-11-24T12:00:00.000Z', projectName: 'Second cart' },
+      { ...award, id: 'three', kind: 'barrel-hinge', earnedAt: '2026-11-23T12:00:00.000Z' },
+      { ...award, id: 'two', kind: 'dovetail-slide', earnedAt: '2026-11-23T12:00:00.000Z' },
+      award,
+    ],
+  }))
+  render(page)
+  await act(async () => {})
+  expect(screen.getAllByRole('heading', { level: 2 }).map(heading => heading.textContent)).toEqual([
+    'Wheel and axle', 'Barrel hinge', 'Dovetail slide', 'Living hinge', 'Gear pair', 'Rack and pinion',
+  ])
 })
 
 it('keeps awards during a failed refresh and retries the correct operation', async () => {

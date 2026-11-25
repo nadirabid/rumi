@@ -15,7 +15,7 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react');
     const { flushSync } = require('react-dom');
-    const { IconChevronLeftOutlineRegular, IconFolderOpenOutlineRegular, IconPlusOutlineRegular, IconPanelLeftOutlineRegular, IconTrashOutlineRegular, Tooltip } = require('@deepseek-ai/dsh-client-ui-primitives');
+    const { IconChevronLeftOutlineRegular, IconDownloadOutlineRegular, IconFolderOpenOutlineRegular, IconPlusOutlineRegular, IconPanelLeftOutlineRegular, IconTrashOutlineRegular, Tooltip } = require('@deepseek-ai/dsh-client-ui-primitives');
     const h = React.createElement;
 
     const PANEL_ID = 'projects';
@@ -42,6 +42,10 @@ window.__ModuleLoader__.load({
       deleteTitle: 'Delete "{name}"?',
       deleteMessage: "You can't get it back after this.",
       cancel: 'Cancel',
+      updateDownloading: 'Downloading update',
+      updateVerifying: 'Verifying',
+      updateRestart: 'Restart',
+      updateRestartLabel: 'Restart to update',
     };
     const zh = {
       title: '项目',
@@ -63,6 +67,10 @@ window.__ModuleLoader__.load({
       deleteTitle: '删除“{name}”？',
       deleteMessage: '删除后无法恢复',
       cancel: '取消',
+      updateDownloading: '正在下载更新',
+      updateVerifying: '正在校验',
+      updateRestart: '重启',
+      updateRestartLabel: '重启以更新',
     };
 
     const STYLES = `
@@ -101,12 +109,16 @@ body:has(.rumi-projects-leading) [data-dockkit-split-button],
 body:has(.rumi-projects-leading) [data-dockkit-strip-chrome],
 body:has(.rumi-projects-leading) [data-sidebar-right-expand]{display:none}
 html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
-/* Liquid Glass: a translucent capsule over the window material. The specular
-   inset and drop shade are material constants, not theme colors. */
-.rumi-glass{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border-radius:50%;corner-shape:round;cursor:default;color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 55%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 75%,transparent);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 1px 2px rgba(0,0,0,.10);transition:background-color 120ms ease}
+/* Header controls share the same translucent fill and rim in both themes. */
+.rumi-glass{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border-radius:50%;corner-shape:round;cursor:default;color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 45%,transparent);border:1px solid var(--dsw-alias-border-l2);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);box-shadow:inset 0 1px 1px rgba(255,255,255,.52),inset 0 -1px 1px rgba(255,255,255,.28),0 1px 2px rgba(0,0,0,.06);transition:background-color 120ms ease}
 .rumi-glass:hover{background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 78%,transparent)}
 .rumi-glass:active{background:color-mix(in srgb,var(--dsw-alias-bg-layer-3) 85%,transparent)}
 .rumi-glass:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
+.rumi-update-badge{width:auto;min-width:74px;flex:none;gap:10px;padding:0 10px;border-radius:999px;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
+.rumi-update-badge[role]{width:96px;height:36px;pointer-events:none}
+.rumi-update-progress{position:relative;display:grid;place-items:center;width:16px;height:16px}
+.rumi-update-progress::before{content:"";position:absolute;inset:0;border-radius:50%;background:conic-gradient(currentColor var(--rumi-progress),color-mix(in srgb,currentColor 16%,transparent) 0);mask:radial-gradient(closest-side,transparent calc(100% - 1.5px),black calc(100% - 1px))}
+.rumi-update-progress svg{opacity:.58}
 /* Liquid Glass surfaces for the project menu and the delete alert. The tint
    follows the theme; the specular rim, shadows and scrim are material constants. The
    lens filter (--rumi-lens) is generated per element, with a plain blur until
@@ -237,6 +249,40 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
     /** Apply `lens` to the element in `ref` for as long as it is mounted. */
     function useLens(ref, blur) {
       React.useLayoutEffect(() => (ref.current ? lens(ref.current, blur) : undefined), [ref, blur]);
+    }
+
+    function UpdateBadge({ updates, t }) {
+      const [state, setState] = React.useState(null);
+      React.useEffect(() => {
+        if (!updates) return;
+        let current = true;
+        let received = false;
+        const unsubscribe = updates.subscribe(value => {
+          received = true;
+          if (current) setState(value);
+        });
+        void updates.status().then(value => {
+          if (current && !received) setState(value);
+        }).catch(error => { console.warn('Rumi update status is unavailable', error); });
+        return () => { current = false; unsubscribe(); };
+      }, [updates]);
+      if (state?.phase !== 'downloading' && state?.phase !== 'verifying' && state?.phase !== 'ready') return null;
+      const ready = state.phase === 'ready';
+      const downloading = state.phase === 'downloading';
+      const percent = Number.isFinite(state.percent) ? state.percent : 0;
+      const label = ready ? t('updateRestartLabel') : t(downloading ? 'updateDownloading' : 'updateVerifying');
+      const common = { className: 'rumi-glass rumi-update-badge', 'aria-label': label };
+      return ready
+        ? h('button', { ...common, type: 'button', onClick: () => {
+          void updates.restart().catch(error => { console.error('Rumi could not open the update confirmation', error); });
+        } }, t('updateRestart'))
+        : h('span', { ...common, ...(downloading
+          ? { role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': percent }
+          : { role: 'status' }) },
+        downloading ? h(React.Fragment, null,
+          h('span', { className: 'rumi-update-progress', 'aria-hidden': true, style: { '--rumi-progress': `${percent}%` } },
+            h(IconDownloadOutlineRegular, { size: 9 })),
+          `${percent}%`) : t('updateVerifying'));
     }
 
     /** Copy and styles installed once per plugin instance. */
@@ -609,7 +655,7 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
           );
         }
 
-        function Leading({ usePanelInfo, useSidebar, toggleSidebar, toggleMode, selectPanel, renderSlot, t }) {
+        function Leading({ usePanelInfo, useSidebar, toggleSidebar, toggleMode, selectPanel, renderSlot, updates, t }) {
           const sidebar = useSidebar(value => value);
           const shown = sidebar !== 'closed' && sidebar !== 'none';
           const modeLabel = t(sidebar === 'full' ? 'regularPreview' : 'fullPreview');
@@ -644,6 +690,7 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
             }, h(IconChevronLeftOutlineRegular, { size: 16 })),
             h('span', { className: 'rumi-header-title', title }, title),
             h('div', { className: 'rumi-header-actions' },
+              h(UpdateBadge, { updates, t }),
               sidebar === 'none' ? null : h(React.Fragment, null,
                 h(Tooltip, { label: modeLabel, side: 'bottom', portal: true, delayMs: 500 },
                   h('button', { type: 'button', className: 'rumi-glass', 'aria-label': modeLabel,
@@ -673,6 +720,7 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
           children: { 'rumi.projects.toolbar': { kind: 'list', scope: 'root' } },
           inject: () => ({
             hooks: { sidebar: sidebarSource(ctx.sidebarRight) },
+            updates: window.dshDesktop?.updates,
             selectPanel: id => ctx.layout.selectPanel(id),
             toggleSidebar: () => ctx.sidebarRight.toggleExpanded(),
             toggleMode: () => {

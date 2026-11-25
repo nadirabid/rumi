@@ -4,6 +4,7 @@ import * as ReactDOM from 'react-dom'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
+import type { DesktopUpdatePresentation } from '../../../src/ipc.ts'
 
 type Loaded = {
   id: string
@@ -43,6 +44,8 @@ const COPY: Record<string, string> = {
   count: '{count} projects',
   open: 'Open', delete: 'Delete', deleteTitle: 'Delete "{name}"?',
   deleteMessage: "You can't get it back after this.", cancel: 'Cancel',
+  updateDownloading: 'Downloading update', updateVerifying: 'Verifying',
+  updateRestart: 'Restart', updateRestartLabel: 'Restart to update',
 }
 
 const project = (overrides: Record<string, unknown> = {}) => ({
@@ -156,7 +159,7 @@ function fixture(host: {
     workspaces: { create: handles.createWorkspace, rename: handles.renameWorkspace },
     uiWorkspace: { openSession: handles.openSession, connectWorkspace: handles.connect },
   }
-  const definition = loaded!.factory(name => name === 'react' ? React : name === 'react-dom' ? ReactDOM : { IconPlusOutlineRegular: Icon, IconFolderOpenOutlineRegular: Icon, IconTrashOutlineRegular: Icon, IconChevronLeftOutlineRegular: Icon, IconPanelLeftOutlineRegular: Icon, Tooltip: ({ children }: { children: React.ReactNode }) => children })
+  const definition = loaded!.factory(name => name === 'react' ? React : name === 'react-dom' ? ReactDOM : { IconPlusOutlineRegular: Icon, IconDownloadOutlineRegular: Icon, IconFolderOpenOutlineRegular: Icon, IconTrashOutlineRegular: Icon, IconChevronLeftOutlineRegular: Icon, IconPanelLeftOutlineRegular: Icon, Tooltip: ({ children }: { children: React.ReactNode }) => children })
   definition.apply(ctx)
   return {
     ...handles, posts, deletes, sidebar,
@@ -358,6 +361,42 @@ it('keeps sidebar controls before New and reopens the collapsed sidebar', async 
   await settle()
   expect(screen.getByRole('button', { name: 'Close sidebar' }).getAttribute('aria-expanded')).toBe('true')
   expect(view.sidebar.toggleExpanded).toHaveBeenCalledTimes(2)
+})
+
+it('shows background update progress and requests confirmation only after verification', async () => {
+  let publish: (value: DesktopUpdatePresentation) => void = () => {}
+  let initial: (value: DesktopUpdatePresentation) => void = () => {}
+  const restart = vi.fn(async () => {})
+  const dispose = vi.fn()
+  vi.stubGlobal('dshDesktop', { updates: {
+    status: () => new Promise<DesktopUpdatePresentation>(resolve => { initial = resolve }),
+    subscribe: (listener: typeof publish) => { publish = listener; return dispose },
+    restart,
+  } })
+  const view = fixture({ activePanelId: 'projects' })
+  const toolbar = render(view.view('shell.leading'))
+
+  act(() => { publish({ phase: 'downloading', percent: 64 }) })
+  await act(async () => { initial({ phase: 'idle' }) })
+  expect(screen.getByRole('progressbar', { name: 'Downloading update' }).getAttribute('aria-valuenow')).toBe('64')
+  expect(screen.queryByRole('button', { name: 'Restart to update' })).toBeNull()
+
+  act(() => { publish({ phase: 'verifying', percent: 100 }) })
+  expect(screen.getByRole('status', { name: 'Verifying' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Restart to update' })).toBeNull()
+
+  act(() => { publish({ phase: 'ready' }) })
+  const button = screen.getByRole('button', { name: 'Restart to update' })
+  expect(button.textContent).toBe('Restart')
+  expect(button.nextElementSibling).toBe(screen.getByRole('button', { name: COPY.plugins }))
+  expect(restart).not.toHaveBeenCalled()
+  fireEvent.click(button)
+  expect(restart).toHaveBeenCalledOnce()
+
+  act(() => { publish({ phase: 'installing' }) })
+  expect(screen.queryByRole('button', { name: 'Restart to update' })).toBeNull()
+  toolbar.unmount()
+  expect(dispose).toHaveBeenCalledOnce()
 })
 
 it.each(['projects', null])('opens Plugins from the glass toolbar on panel %s', (activePanelId) => {

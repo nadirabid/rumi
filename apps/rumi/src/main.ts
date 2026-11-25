@@ -380,6 +380,12 @@ async function main(): Promise<void> {
   const updateOverlays = new DesktopUpdateOverlays()
   const updateDialog = new DesktopUpdateDialog(fileURLToPath(new URL('./preload-update-dialog.cjs', import.meta.url)), () => locale, updateOverlays)
   const isMandatory = (): boolean => mandatoryPolicy?.state.blocking === true
+  const usesUpdateHeader = (): boolean => process.platform === 'darwin' && enteredWorkspace && welcomeWindow === undefined
+  const restartFromHeader = (window: BrowserWindow): Promise<void> => {
+    if (window !== mainWindow || quitting || isMandatory() || updateOverlays.input(window).blocked
+      || updateState.phase !== 'ready') return Promise.resolve()
+    return openUpdatePrompt()
+  }
   const ordinaryMessageBox = async (options: UpdateDialogOptions): Promise<Electron.MessageBoxReturnValue> => {
     const controller = new AbortController()
     ordinaryDialogs.add(controller)
@@ -427,12 +433,13 @@ async function main(): Promise<void> {
   let returnedAttempt: string | undefined
   let pendingWelcomeNotice: WelcomeNotice | undefined
   let previousAccountStatus: string | undefined
-  const assertProductSender = (event: IpcMainInvokeEvent): void => {
+  const assertProductSender = (event: IpcMainInvokeEvent): BrowserWindow => {
     assertDesktopSender(event, ['app'])
     if (mainWindow === undefined || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
       || event.senderFrame === null || event.senderFrame !== mainWindow.webContents.mainFrame) {
       throw new Error('dsh desktop: rejected IPC from an unowned renderer')
     }
+    return mainWindow
   }
   let navigation: { window: BrowserWindow; url: string; promise: Promise<void> } | undefined
   const navigateMain = (url: string): Promise<void> => {
@@ -668,6 +675,7 @@ async function main(): Promise<void> {
     updateJournal?.action('download-requested')
     const state = await updates.download(version)
     if (state.phase !== 'ready' || quitting) return state
+    if (usesUpdateHeader() && !isMandatory()) return state
     // Only a completed user-driven download opens this prompt; cancelling installation does not reopen it.
     // A confirmation on a hidden window would go unseen, so it waits for the next show; the mandatory
     // flow keeps its own taskbar and Dock attention instead.
@@ -794,6 +802,7 @@ async function main(): Promise<void> {
     assertProductSender(event)
     return presentDesktopUpdate(updates.state)
   })
+  ipcMain.handle(DESKTOP_IPC.updatesRestart, event => restartFromHeader(assertProductSender(event)))
   ipcMain.handle(DESKTOP_IPC.deviceInfo, (event) => {
     assertProductSender(event)
     return readDeviceInfo()
@@ -838,6 +847,7 @@ async function main(): Promise<void> {
       let progress: Promise<unknown> | undefined
       try {
         let state = updates.state
+        if (usesUpdateHeader() && (state.phase === 'downloading' || state.phase === 'verifying')) return
         if (manual || state.phase === 'idle' || (state.phase === 'error' && state.failedOperation === 'check')) {
           controller = new AbortController()
           ordinaryDialogs.add(controller)
@@ -851,6 +861,7 @@ async function main(): Promise<void> {
         }
         if (isMandatory()) { mandatoryUI?.focus(); return }
         if (state.phase === 'downloading' || state.phase === 'verifying') {
+          if (usesUpdateHeader()) return
           await ordinaryMessageBox({ type: 'info', title: locale.messages.updateCheckTitle,
             message: state.phase === 'verifying' ? locale.messages.updateVerifying
               : formatDesktopMessage(locale.messages.updateDownloading, { percent: String(Math.floor(state.percent ?? 0)) }),

@@ -14,7 +14,8 @@ import { encodeStl } from '../viewer/stl.js'
 vi.mock('../viewer/viewer.module.css', () => ({ default: '' }))
 type JointProjection = { x: number; y: number } | null
 const observeMotionAnchors = vi.hoisted(() => vi.fn(
-  (_id: string, draw: (points: JointProjection[], width: number) => void, _onCanvasClick?: () => void) => draw([{ x: 40, y: 48 }, null], 750),
+  (_id: string, draw: (points: JointProjection[], width: number) => void, _onCanvasClick?: () => void) =>
+    draw([{ x: 40, y: 48 }, null], 750),
 ))
 const viewport = vi.hoisted(() => ({ setActivity: vi.fn(), closePrintLayout: vi.fn(), motionControls: vi.fn(), updateMotion: vi.fn(), modelParameters: vi.fn(() => ({ width: 12 })), regionResolution: vi.fn(), renderedHighlight: vi.fn(), captureCursor: vi.fn(), setCursorMode: vi.fn(), setHighlightVisible: vi.fn(), apply: vi.fn(), dispose: vi.fn(), create: vi.fn(), applyDesign: vi.fn(), thumbnail: vi.fn(() => 'data:image/png;base64,cG5n') }))
 vi.mock('../viewer/viewport/index.js', () => ({
@@ -27,6 +28,7 @@ vi.mock('../viewer/viewport/index.js', () => ({
       motionUnit: () => 'degree',
       modelParameters: viewport.modelParameters, regionResolution: viewport.regionResolution, renderedHighlight: viewport.renderedHighlight,
       captureCursor: viewport.captureCursor, setCursorMode: viewport.setCursorMode, setHighlightVisible: viewport.setHighlightVisible,
+      setRegionFocused: vi.fn(),
       thumbnail: viewport.thumbnail, apply: viewport.apply, applyDesign: viewport.applyDesign, dispose: viewport.dispose,
     }
   },
@@ -517,7 +519,7 @@ it('shows only a discreet error dot, retaining unresolved findings until a fresh
   expect(screen.queryByText(en.validationMechanicsReview)).toBeNull()
 })
 
-it('opens a single joint control, keeps its pose across dismissal and reload, and supports joints outside the view', async () => {
+it('opens controls through visible joint pins and preserves the pose across dismissal and reload', async () => {
   const controls = [
     { kind: 'slider', label: 'Doors', axes: [{ key: 'doorAngle', min: 0, max: 100, step: 1, reset: 0 }] },
     { kind: 'slider', label: 'Wheels', axes: [{ key: 'wheelAngle', min: 0, max: 360, step: 1, reset: 0 }] },
@@ -529,12 +531,15 @@ it('opens a single joint control, keeps its pose across dismissal and reload, an
   const view = fixture({ scene: { ...scene([]), design } })
   render(view.view('sidebar.right.pane.tab'))
   await settle()
-  const movement = screen.getByRole('button', { name: en.motionControls })
-  expect(movement.getAttribute('aria-expanded')).toBe('true')
+  expect(screen.getByRole('group', { name: en.motionControls })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /^Movements?$/ })).toBeNull()
+  expect(screen.queryByRole('combobox')).toBeNull()
   expect(screen.queryByRole('slider')).toBeNull()
   expect(screen.queryByRole('button', { name: 'Wheels' })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Doors' }))
   const slider = screen.getByRole('slider', { name: 'Doors' })
+  expect(document.activeElement).toBe(slider)
+  expect(screen.getByRole('button', { name: 'Doors' }).getAttribute('aria-expanded')).toBe('true')
   expect(slider.closest('.pv-joint-popover')?.hasAttribute('data-anchored')).toBe(true)
   expect(slider.closest('.pv-joint-popover')?.hasAttribute('data-left')).toBe(true)
   fireEvent.input(slider, { target: { value: '58' } })
@@ -567,19 +572,21 @@ it('opens a single joint control, keeps its pose across dismissal and reload, an
   expect(screen.queryByRole('slider')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Doors' }))
   fireEvent.keyDown(screen.getByRole('slider', { name: 'Doors' }), { key: 'Escape' })
-  expect(document.activeElement).toBe(movement)
-  expect(movement.getAttribute('aria-expanded')).toBe('false')
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Doors' }))
+  expect(screen.getByRole('button', { name: 'Doors' }).getAttribute('aria-expanded')).toBe('false')
   expect(screen.queryByRole('slider')).toBeNull()
-  fireEvent.click(movement)
-  fireEvent.change(screen.getByRole('combobox', { name: en.motionChooseJoint }), { target: { value: '1' } })
-  expect(screen.getByRole('slider', { name: 'Wheels' }).closest('.pv-joint-popover')?.hasAttribute('data-anchored')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Doors' }))
+  observeMotionAnchors.mock.lastCall![1]([null, null], 750)
+  fireEvent.keyDown(screen.getByRole('slider', { name: 'Doors' }), { key: 'Escape' })
+  expect(document.activeElement).toBe(model)
+  expect(screen.queryByRole('slider')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Doors' }))
   expect(screen.getByRole('slider', { name: 'Doors' }).getAttribute('value')).toBe('58')
   viewport.motionControls.mockReturnValue({ ...motion, id: '/second.js', values: { doorAngle: 58, wheelAngle: 0 } })
   view.setScene({ ...scene([]), design: { ...design, url: '/second.js', revision: 2 } })
   await settle(2000)
   expect(screen.queryByRole('slider')).toBeNull()
-  expect(screen.getByRole('button', { name: en.motionControls }).getAttribute('aria-expanded')).toBe('true')
+  expect(screen.getByRole('button', { name: 'Doors' }).getAttribute('aria-expanded')).toBe('false')
   fireEvent.click(screen.getByRole('button', { name: 'Doors' }))
   expect(screen.getByRole('slider', { name: 'Doors' }).getAttribute('value')).toBe('58')
   expect(view.fetch.mock.calls.some(([url]) => String(url).includes('/shape-feedback'))).toBe(false)
@@ -588,14 +595,13 @@ it('opens a single joint control, keeps its pose across dismissal and reload, an
     controls: [{ kind: 'slider', label: 'Width', axes: [{ key: 'width', min: 10, max: 40, step: 1, reset: 20 }] }],
   } } })
   await settle(2000)
-  expect((screen.getByRole('button', { name: en.motionControls }) as HTMLButtonElement).disabled).toBe(true)
-  expect(screen.queryByRole('combobox', { name: en.motionChooseJoint })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Doors' })).toBeNull()
   expect(screen.getByRole('slider', { name: 'Width' }).closest('.pv-movement')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: en.cursor_part }))
   expect(viewport.setCursorMode).toHaveBeenCalledWith('part')
   view.setScene({ ...scene([]), design: { ...design, url: '/second.js', revision: 2 } })
   await settle(2000)
-  expect(screen.getByRole('button', { name: en.motionControls }).getAttribute('aria-expanded')).toBe('true')
+  expect(screen.getByRole('button', { name: 'Doors' }).getAttribute('aria-expanded')).toBe('false')
   viewport.motionControls.mockReturnValue(null)
   view.setScene({ ...scene([]), design: { ...design, url: '/without-movement.js', revision: 3 } })
   await settle(2000)

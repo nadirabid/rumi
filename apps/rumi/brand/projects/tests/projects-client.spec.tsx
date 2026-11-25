@@ -39,7 +39,7 @@ const COPY: Record<string, string> = {
   title: 'Projects', new: 'New', plugins: 'Plugins', back: 'All projects',
   openPreview: 'Open sidebar', closePreview: 'Close sidebar', fullPreview: 'Full view', regularPreview: 'Regular view',
   empty: 'No projects yet.', emptyHint: 'Make one, then ask Rumi to help build it.',
-  updated: 'Updated {when}', failed: 'That did not work. Try again.', untitled: 'Untitled project',
+  lastActive: 'Last active {when}', failed: 'That did not work. Try again.', untitled: 'Untitled project',
   count: '{count} projects',
   open: 'Open', delete: 'Delete', deleteTitle: 'Delete "{name}"?',
   deleteMessage: "You can't get it back after this.", cancel: 'Cancel',
@@ -56,7 +56,7 @@ const Icon = () => null
 
 /** Apply the plugin into a fake context and return its handles. */
 function fixture(host: {
-  projects?: object[]
+  projects?: ReturnType<typeof project>[]
   knownSessions?: Record<string, object>
   activePanelId?: string | null
   associationOk?: boolean
@@ -64,11 +64,12 @@ function fixture(host: {
   dockTab?: { id: string; kind: string }
   sidebarExpanded?: boolean
 } = {}) {
+  const sessionList = { byId: host.knownSessions ?? {} }
   type Injection = {
-    hooks: { sidebar: HostObservable<string> }
-    toggleSidebar: () => void
-    toggleMode: () => void
-    openPlugins: () => void
+    hooks: { sidebar?: HostObservable<string>; sessions?: HostObservable<typeof sessionList> }
+    toggleSidebar?: () => void
+    toggleMode?: () => void
+    openPlugins?: () => void
   }
   const injections = new Map<string, () => Injection>()
   const entries = new Map<string, React.ComponentType<Record<string, unknown>>>()
@@ -81,13 +82,19 @@ function fixture(host: {
       deletes.push(String(url))
       if (host.deleteOk === false) return { ok: false, status: 500, json: async () => ({}) }
       const id = new URL(String(url), 'http://rumi').searchParams.get('projectId')
-      listed = listed.filter(item => (item as { id: string }).id !== id)
+      listed = listed.filter(item => item.id !== id)
       return { ok: true, status: 204, json: async () => ({}) }
     }
     if (init?.method === 'POST') {
       const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
       posts.push({ url: String(url), body })
-      if (String(url).endsWith('/session')) return { ok: host.associationOk ?? true, status: 500, json: async () => ({ project: project() }) }
+      if (String(url).endsWith('/session')) {
+        if (host.associationOk === false) return { ok: false, status: 500, json: async () => ({}) }
+        const existing = listed.find(item => item.id === body.projectId)!
+        const opened = { ...existing, activeSessionId: body.sessionId, updatedAt: new Date().toISOString() }
+        listed = listed.map(item => item.id === opened.id ? opened : item)
+        return { ok: true, status: 200, json: async () => ({ project: opened }) }
+      }
       const created = project({ id: 'p2', name: 'Untitled 1' })
       listed = [created, ...listed]
       return { ok: true, json: async () => ({ project: created }) }
@@ -127,9 +134,10 @@ function fixture(host: {
         options: { name: string; key?: string; inject?: () => Injection },
         component: React.ComponentType<Record<string, unknown>>,
       ) => {
-        if (options.inject) injections.set(options.name, options.inject)
-        entries.set(options.key === undefined ? options.name : `${options.name}:${options.key}`, component)
-        return () => { entries.delete(options.name) }
+        const key = options.key === undefined ? options.name : `${options.name}:${options.key}`
+        if (options.inject) injections.set(key, options.inject)
+        entries.set(key, component)
+        return () => { entries.delete(key); injections.delete(key) }
       },
     },
     layout: { selectPanel: handles.selectPanel, toggleSidebar: handles.toggleSidebar, panelInfo },
@@ -142,7 +150,7 @@ function fixture(host: {
         await callback({ binding: { session: { rename: handles.renameSession } } })
         return { ok: true }
       }),
-      list: { subscribe: () => () => {}, getSnapshot: () => ({ byId: host.knownSessions ?? {} }) },
+      list: { subscribe: () => () => {}, getSnapshot: () => sessionList },
     },
     workspaces: { create: handles.createWorkspace, rename: handles.renameWorkspace },
     uiWorkspace: { openSession: handles.openSession, connectWorkspace: handles.connect },
@@ -156,10 +164,13 @@ function fixture(host: {
       const usePanelInfo = ((selector: (value: { activePanelId: string | null }) => unknown) =>
         selector(panelInfo.getSnapshot())) satisfies SnapshotSelectorHook<{ activePanelId: string | null }>
       const injected = injections.get(key)?.()
-      const source = injected?.hooks.sidebar
+      const sidebarSource = injected?.hooks.sidebar
+      const sessionsSource = injected?.hooks.sessions
       const useSidebar = (selector: (value: string) => unknown) =>
-        selector(React.useSyncExternalStore(source!.subscribe, source!.getSnapshot))
-      return React.createElement(component, { t: translate, usePanelInfo, useSidebar, ...injected })
+        selector(React.useSyncExternalStore(sidebarSource!.subscribe, sidebarSource!.getSnapshot))
+      const useSessions = (selector: (value: typeof sessionList) => unknown) =>
+        selector(React.useSyncExternalStore(sessionsSource!.subscribe, sessionsSource!.getSnapshot))
+      return React.createElement(component, { t: translate, usePanelInfo, useSidebar, useSessions, ...injected })
     },
   }
 }
@@ -194,6 +205,27 @@ it('reuses the session a project already recorded', async () => {
   expect(view.connect).not.toHaveBeenCalled()
   expect(view.openSession).toHaveBeenCalledWith('session-1')
   expect(view.sidebar.openTabIn).toHaveBeenCalledWith('session-1', 'print-studio')
+})
+
+it('orders projects by session activity and moves a reopened project to the front', async () => {
+  const editingTime = new Date('2026-10-04T10:00:00.000Z')
+  vi.setSystemTime(new Date('2026-10-05T10:00:00.000Z'))
+  const reopened = project({ sessionIds: ['session-1'], activeSessionId: 'session-1' })
+  const created = project({ id: 'p2', name: 'New cup', updatedAt: '2026-10-03T10:00:00.000Z' })
+  const edited = project({ id: 'p3', name: 'Marble run', sessionIds: ['session-3'] })
+  const view = fixture({
+    projects: [created, reopened, edited],
+    knownSessions: { 'session-1': {}, 'session-3': { updatedAt: editingTime.valueOf() } },
+  })
+  render(view.view('main:projects'))
+  await settle()
+  const order = () => screen.getAllByRole('button').map(button => button.getAttribute('aria-label'))
+  expect(order()).toEqual(['Marble run', 'New cup', 'Dragon cup'])
+  expect(screen.getByText(`Last active ${editingTime.toLocaleDateString()}`)).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Dragon cup' }))
+  await settle()
+  expect(view.posts.at(-1)?.body).toEqual({ projectId: 'p1', sessionId: 'session-1' })
+  expect(order()).toEqual(['Dragon cup', 'Marble run', 'New cup'])
 })
 
 it.each([true, false])('reopens a recorded project with its sidebar expanded=%s', async (expanded) => {

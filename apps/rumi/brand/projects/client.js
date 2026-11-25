@@ -34,7 +34,7 @@ window.__ModuleLoader__.load({
       regularPreview: 'Regular view',
       empty: 'No projects yet.',
       emptyHint: 'Make one, then ask Rumi to help build it.',
-      updated: 'Updated {when}',
+      lastActive: 'Last active {when}',
       failed: 'That did not work. Try again.',
       open: 'Open',
       delete: 'Delete',
@@ -54,7 +54,7 @@ window.__ModuleLoader__.load({
       regularPreview: '常规视图',
       empty: '还没有项目',
       emptyHint: '先新建一个，然后请 Rumi 一起制作',
-      updated: '更新于 {when}',
+      lastActive: '最近活动于 {when}',
       failed: '没有成功，请再试一次',
       open: '打开',
       delete: '删除',
@@ -300,6 +300,16 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
       }
     }
 
+    function sessionSummary(sessions, id) {
+      return sessions instanceof Map ? sessions.get(id) : sessions?.[id];
+    }
+
+    function projectActivity(project, sessions) {
+      const recorded = Math.max(Date.parse(project.updatedAt) || 0, Date.parse(project.createdAt) || 0);
+      return project.sessionIds.reduce((latest, id) =>
+        Math.max(latest, sessionSummary(sessions, id)?.updatedAt ?? 0), recorded);
+    }
+
     /** One project list shared by the gallery and the window-chrome control. */
     function createProjectList(ctx) {
       let snapshot = { phase: 'loading', projects: [], error: '', activeId: null };
@@ -344,13 +354,23 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
         },
         async open(project) {
           try {
-            const sessionId = await this.sessionFor(project);
+            const { sessionId, workspaceId } = await this.sessionFor(project);
+            const response = await fetch(`${ROUTE}/session`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ projectId: project.id, sessionId, workspaceId }),
+            });
+            if (!response.ok) throw new Error(`project session association failed: ${response.status}`);
+            const { project: opened } = await json(response);
             commitProjectNavigation(() => {
               // The conversation render adopts the session's sidebar tabs.
               flushSync(() => {
                 ctx.uiWorkspace.openSession(sessionId);
                 ctx.layout.selectPanel(null);
-                publish({ activeId: project.id, error: '' });
+                publish({
+                  activeId: project.id, error: '',
+                  projects: snapshot.projects.map(item => item.id === opened.id ? { ...item, ...opened } : item),
+                });
               });
               const sidebar = ctx.sidebarRight;
               const dockTabId = sidebar.commandTarget(null)?.tabId;
@@ -390,11 +410,9 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
          * workspace connects.
          */
         async sessionFor(project) {
-          const known = ctx.sessions.list.getSnapshot();
-          const byId = known?.byId;
-          const exists = (id) => byId instanceof Map ? byId.has(id) : Boolean(byId?.[id]);
+          const { byId } = ctx.sessions.list.getSnapshot();
           const recorded = project.activeSessionId ?? project.sessionIds.at(-1);
-          if (recorded !== undefined && exists(recorded)) return recorded;
+          if (recorded !== undefined && sessionSummary(byId, recorded)) return { sessionId: recorded };
           const workspace = await ctx.workspaces.create({ path: project.path });
           // DSH workspace titles are unique; project display names may repeat.
           const sessionId = await ctx.uiWorkspace.connectWorkspace(workspace.workspaceId);
@@ -404,13 +422,7 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
             reference => reference.binding.session.rename(project.name),
           );
           if (!renamed.ok) throw new Error(renamed.error.message);
-          const response = await fetch(`${ROUTE}/session`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ projectId: project.id, sessionId, workspaceId: workspace.workspaceId }),
-          });
-          if (!response.ok) throw new Error(`project session association failed: ${response.status}`);
-          return sessionId;
+          return { sessionId, workspaceId: workspace.workspaceId };
         },
       };
     }
@@ -436,9 +448,8 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
               : h('span', { className: 'rumi-project-initial' }));
         }
 
-        function ProjectCard({ project, t, onOpen, onMenu }) {
-          const updated = new Date(project.updatedAt);
-          const when = Number.isNaN(updated.valueOf()) ? '' : updated.toLocaleDateString();
+        function ProjectCard({ project, activity, t, onOpen, onMenu }) {
+          const when = activity === 0 ? '' : new Date(activity).toLocaleDateString();
           return h('button', {
             className: 'rumi-project', type: 'button', onClick: () => onOpen(project),
             onContextMenu: (event) => {
@@ -449,7 +460,7 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
           },
             h(Cover, { project }),
             h('p', { className: 'rumi-project-name' }, project.name),
-            when === '' ? null : h('p', { className: 'rumi-project-meta' }, t('updated', { when })),
+            when === '' ? null : h('p', { className: 'rumi-project-meta' }, t('lastActive', { when })),
           );
         }
 
@@ -543,8 +554,14 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
                 h('button', { type: 'button', className: 'rumi-alert-button rumi-alert-delete', disabled: busy, onClick: onConfirm }, t('delete')))));
         }
 
-        function Gallery({ t }) {
+        function Gallery({ t, useSessions }) {
           const state = React.useSyncExternalStore(list.subscribe, list.getSnapshot);
+          const activityTimes = useSessions(
+            ({ byId }) => state.projects.map(project => projectActivity(project, byId)),
+            (left, right) => left.length === right.length && left.every((time, index) => time === right[index]),
+          );
+          const ordered = state.projects.map((project, index) => ({ project, activity: activityTimes[index] }))
+            .sort((left, right) => right.activity - left.activity);
           const [menu, setMenu] = React.useState(null);
           const [confirming, setConfirming] = React.useState(null);
           React.useEffect(() => { void list.load(); }, []);
@@ -573,8 +590,8 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
                 h('p', { className: 'rumi-projects-empty-title' }, t('empty')),
                 h('p', { className: 'rumi-projects-empty-hint' }, t('emptyHint')))
               : h('div', { className: 'rumi-projects-grid' },
-                state.projects.map(project => h(ProjectCard, {
-                  key: project.id, project, t,
+                ordered.map(({ project, activity }) => h(ProjectCard, {
+                  key: project.id, project, activity, t,
                   onOpen: p => { void list.open(p) },
                   onMenu: (p, x, y, opener) => setMenu({ project: p, x, y, opener }),
                 }))),
@@ -633,6 +650,7 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
 
         ctx.slots.inject('main', () => ctx.slots.register({
           name: 'main', key: PANEL_ID, locale: NS,
+          inject: () => ({ hooks: { sessions: ctx.sessions.list } }),
         }, Gallery));
         ctx.slots.inject('shell.leading', () => ctx.slots.register({
           name: 'shell.leading', locale: NS,

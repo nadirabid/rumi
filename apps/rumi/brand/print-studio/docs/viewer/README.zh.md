@@ -46,7 +46,7 @@ Rumi 在创建或更新特征名称时读取模型源文件、查看从不同角
 
 要以青绿色显示已保存的特征，请将名称、ID 或别名传给 `viewer_highlight.region`，并提供当前模型标识。查看器绘制的位置与命名区域模式相同。自定义 STL 高亮可通过 `regionName` 提供标签。高亮不影响测量、导出或封面。传入空字符串 `meshPath`、更换源码版本或切换模型会清除高亮。只有 `rendered` 表示可见查看器已绘制高亮。
 
-`viewer_cursor_snapshot` 捕获调用方对话预览中的固定选区或当前悬停目标。只要预览仍打开，即使窗口隐藏也可以捕获固定选区。结果包括 PNG、捕获时间、相机和模型标识。光标命中网格时，结果包括部件路径、三角形索引和命中点。对于已保存的特征，`namedRegion` 标识其位置和区域表版本，即使光标命中空白处的特征也一样。活动部件预览期间，`region.modelLocalPoint` 定位已保存的表面，世界坐标则随部件姿势改变。
+`viewer_cursor_snapshot` 捕获调用方对话预览中的固定选区或当前悬停目标。只要预览仍打开，即使窗口隐藏也可以捕获固定选区。结果包括 PNG、捕获时间、相机和模型标识。图片保持视口的取景范围，长边最多为 1,600 像素，必要时降低分辨率以符合上传大小限制。光标命中网格时，结果包括部件路径、三角形索引和命中点。对于已保存的特征，`namedRegion` 标识其位置和区域表版本，即使光标命中空白处的特征也一样。预览关节时，`region.modelLocalPoint` 定位已保存的表面，世界坐标则随部件姿势改变。
 
 捕获包含可编辑模型中的选中三角形时，`mesh.path` 提供 `.rumi/cursor-selections` 下二进制 STL 文件的项目相对路径，`mesh.triangleCount` 报告导出的三角形数量。STL 使用模型局部毫米坐标，Z 轴朝上，应用已保存姿势下的部件变换，不含查看器的放置变换。要以青绿色显示用户选区，请先核对 `identity.design` 与当前模型，再将导出的路径原样传给 `viewer_highlight.meshPath`。无法导出时，`meshUnavailable` 报告 `unsupported_model`、`empty_selection`、`geometry_unavailable` 或 `storage_failed`。仍可查看图像和光标详情。
 

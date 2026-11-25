@@ -136,6 +136,16 @@ export function createProjectStore(root) {
     if (!/^[A-Za-z0-9-]+$/u.test(id)) throw new Error(`project: invalid id ${id}`)
     return join(root, id)
   }
+  const replace = async (id, filename, bytes) => {
+    const directory = directoryOf(id)
+    const temporary = join(directory, `.${randomUUID()}.tmp`)
+    try {
+      await writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 })
+      await rename(temporary, join(directory, filename))
+    } finally {
+      await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error })
+    }
+  }
   const read = async (id) => {
     const raw = await readFile(join(directoryOf(id), 'project.json'), 'utf8')
     let thumbnailVersion = null
@@ -145,7 +155,7 @@ export function createProjectStore(root) {
   }
   const write = async (project) => {
     const { path: _, thumbnailVersion: _thumbnail, ...metadata } = project
-    await writeFile(join(directoryOf(project.id), 'project.json'), `${JSON.stringify(metadata, undefined, 2)}\n`)
+    await replace(project.id, 'project.json', `${JSON.stringify(metadata, undefined, 2)}\n`)
     return { ...metadata, path: directoryOf(project.id) }
   }
   const allocateName = async () => {
@@ -228,13 +238,7 @@ export function createProjectStore(root) {
     async saveThumbnail(sessionId, bytes) {
       const project = (await this.list()).find(item => item.sessionIds.includes(sessionId))
       if (!project) return false
-      const temporary = join(directoryOf(project.id), `.preview-${randomUUID()}.tmp`)
-      try {
-        await writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 })
-        await rename(temporary, join(directoryOf(project.id), '.preview.png'))
-      } finally {
-        await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error })
-      }
+      await replace(project.id, '.preview.png', bytes)
       return true
     },
     async attachSession(id, sessionId, workspaceId) {
@@ -318,11 +322,14 @@ export function apply(ctx, config = {}) {
       const sessionId = url.searchParams.get('sessionId')
       if (!sessionId) return json({ error: 'session_required' }, 400)
       const bytes = Buffer.from(await request.arrayBuffer())
-      // Only the fixed-size viewport PNG is accepted; never serve arbitrary uploaded content.
-      if (bytes.length < 24 || bytes.length > 512 * 1024
+      if (bytes.length < 24 || bytes.length > 6 * 1024 * 1024
         || !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-        || bytes.toString('ascii', 12, 16) !== 'IHDR'
-        || bytes.readUInt32BE(16) !== 480 || bytes.readUInt32BE(20) !== 320) {
+        || bytes.toString('ascii', 12, 16) !== 'IHDR') {
+        return json({ error: 'invalid_thumbnail' }, 400)
+      }
+      const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20)
+      const legacy = width === 480 && height === 320 && bytes.length <= 512 * 1024
+      if (!legacy && (width !== 1440 || height !== 960)) {
         return json({ error: 'invalid_thumbnail' }, 400)
       }
       return await store.saveThumbnail(sessionId, bytes)

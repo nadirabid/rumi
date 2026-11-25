@@ -59,7 +59,7 @@ export function installViewer(ctx, React, primitives) {
   }, 'print viewer: generated artifacts')
   const h = React.createElement
   const AnalogPanel = createAnalogPanel(React)
-  const MovementControls = createMovementControls(React, primitives, AnalogPanel)
+  const MovementControls = createMovementControls(React, AnalogPanel)
   const { PluginArtworkDefault, Button, IconCloseOutlineRegular } = primitives
   const ModelSelector = createModelSelector(React, Button)
   const PrintLayoutPanel = createPrintLayoutPanel(React, primitives)
@@ -593,10 +593,10 @@ export function installViewer(ctx, React, primitives) {
     return h(React.Fragment, null,
       view?.design && h(PrintLayoutPanel, { state: printState, available: !view.design.analog && !failed,
         busy: printBusy, working, message: printMessage, saveStatus, t, action: printAction }),
-      h('div', { className: 'pv-bottom-controls', hidden: printState?.active },
       motion && h(MovementControls, { key: motion.id, spec: { ...motion, label: t('motionControls') }, t, viewport, stage: holder,
         hidden: printState?.active, disabled: failed || working || Boolean(view?.design?.analog) || view?.design?.url !== motion.id,
         onError: () => setBuildError('buildFailed') }),
+      h('div', { className: 'pv-bottom-controls', hidden: printState?.active },
       h('div', { className: 'pv-cursor-controls', role: 'group', 'aria-label': t('cursorHighlighting') },
         ['patch', 'surface', 'part', 'edge', 'named'].map(mode => h(Button, {
           key: mode, variant: 'ghost', size: 'sm', 'aria-pressed': cursorMode === mode,
@@ -618,7 +618,7 @@ export function installViewer(ctx, React, primitives) {
         analogRendered.current = values; setBuildError(null); return true
       }, onRelease: values => { void sendShape('adjusted', values).catch(_error => { /* sendShape reports delivery failure in the viewer. */ }) } })) : null,
       h('div', { className: 'pv-stage', ref: holder, role: 'img', 'aria-label': t(working ? activity === 'checking' ? 'activityChecking' : 'activityBuilding' : 'view'), 'aria-busy': working, 'data-activity': activity, 'data-testid': 'print-viewport',
-        tabIndex: highlight?.regionName && !printState?.active && !failed ? 0 : undefined,
+        tabIndex: highlight?.regionName && !printState?.active && !failed ? 0 : -1,
         onFocus: event => { if (event.currentTarget.matches(':focus-visible')) viewport.current?.setRegionFocused(true) },
         onBlur: event => { if (!regionMarker.current?.contains(event.relatedTarget)) viewport.current?.setRegionFocused(false) },
       }),

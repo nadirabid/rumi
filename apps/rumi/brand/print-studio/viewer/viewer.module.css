@@ -1,4 +1,19 @@
-.rumi-print-viewer{position:relative;display:flex;flex-direction:column;width:100%;height:100%;min-height:0;min-width:0;overflow:hidden;color:var(--dsw-alias-label-primary);background:radial-gradient(circle,color-mix(in srgb,var(--dsw-alias-label-tertiary) 18%,transparent) .6px,transparent .7px) 0 0/12px 12px,var(--dsw-alias-bg-layer-1)}
+.rumi-print-viewer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  --pv-grid-opacity: .34;
+  background: var(--dsw-alias-bg-layer-1);
+}
+body[data-ds-dark-theme] .rumi-print-viewer {
+  --pv-grid-opacity: .18;
+}
 .rumi-print-viewer .pv-models{position:absolute;top:0;left:0;right:0;z-index:2;display:flex;flex-wrap:wrap;gap:8px;padding:4px 12px 8px;background:transparent;pointer-events:none}
 .rumi-print-viewer .pv-model-button,.rumi-print-viewer .pv-print-glass{box-sizing:border-box;pointer-events:auto;border-radius:999px;corner-shape:round;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 78%,transparent);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--dsw-alias-label-primary-foreground) 55%,transparent),0 1px 3px var(--dsw-alias-bg-mask-2);transition:background-color 120ms ease,box-shadow 120ms ease}
 .rumi-print-viewer .pv-model-button{display:inline-flex;align-items:center;max-width:100%;height:34px;padding:0 14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -12,7 +27,7 @@
 .rumi-print-viewer .pv-catalog-error{margin:0;padding:8px 12px;font-size:12px;color:var(--dsw-alias-state-error-primary)}
 .rumi-print-viewer .pv-stage{position:absolute;inset:0;overflow:hidden;touch-action:none}
 .rumi-print-viewer .pv-stage canvas{display:block;width:100%;height:100%}
-.rumi-region-glass,.rumi-print-viewer .pv-movement .pv-movement-trigger {
+.rumi-region-glass {
   box-sizing: border-box;
   border-radius: 999px;
   border: 1px solid var(--dsw-alias-border-l2);
@@ -56,7 +71,7 @@
 .rumi-region-glass button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
 .rumi-region-dock [role='alert'] { color: var(--dsw-alias-state-error-primary); font-size: 13px; }
 @media (prefers-reduced-transparency: reduce),(prefers-contrast: more) {
-  .rumi-region-glass,.rumi-print-viewer .pv-movement .pv-movement-trigger { border-color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); backdrop-filter: none; }
+  .rumi-region-glass { border-color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); backdrop-filter: none; }
 }
 @media (pointer: coarse) {
   .rumi-region-glass button { min-width: 44px; min-height: 44px; }
@@ -259,33 +274,7 @@
 .rumi-print-viewer .pv-bottom-controls .pv-cursor-controls {
   position: relative; inset: auto; z-index: auto; max-width: 100%; pointer-events: auto;
 }
-.rumi-print-viewer .pv-movement { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
-.rumi-print-viewer .pv-movement-trigger, .rumi-print-viewer .pv-movement-picker {
-  pointer-events: auto;
-  min-height: 34px;
-  padding-inline: 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-primary);
-}
-.rumi-print-viewer .pv-movement-trigger {
-  border-radius: 999px;
-}
-.rumi-print-viewer .pv-movement .pv-movement-trigger:is(:hover:not(:disabled), [aria-expanded='true']) {
-  background-color: var(--dsw-alias-interactive-bg-hover);
-}
-.rumi-print-viewer .pv-movement .pv-movement-trigger:active:not(:disabled) {
-  background-color: var(--dsw-alias-interactive-bg-active);
-}
-.rumi-print-viewer .pv-movement-picker { display: flex; align-items: center; position: relative; padding: 0; }
-.rumi-print-viewer .pv-movement-picker select {
-  appearance: none; border: 0; border-radius: inherit;
-  min-height: 32px; max-width: 144px; padding: 0 30px 0 12px;
-  font: inherit; color: inherit; background: transparent; cursor: pointer;
-  text-overflow: ellipsis;
-}
-.rumi-print-viewer .pv-movement-picker option { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); }
-.rumi-print-viewer .pv-movement-picker svg { position: absolute; inset-inline-end: 10px; pointer-events: none; }
+.rumi-print-viewer .pv-movement { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 .rumi-print-viewer .pv-joint-target {
   position: absolute; z-index: 1; left: var(--pv-joint-x); top: var(--pv-joint-y);
   translate: -50% -50%;
@@ -300,11 +289,11 @@
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--dsw-alias-label-primary) 70%, transparent);
 }
 .rumi-print-viewer .pv-joint-target:hover::before,
-.rumi-print-viewer .pv-joint-target[aria-pressed='true']::before {
+.rumi-print-viewer .pv-joint-target[aria-expanded='true']::before {
   inset: 6px; background: var(--dsw-alias-button-info-fill);
 }
-.rumi-print-viewer .pv-joint-target[aria-pressed='true'] { z-index: 2; }
-.rumi-print-viewer .pv-movement :is(button, select):focus-visible {
+.rumi-print-viewer .pv-joint-target:is(:focus-visible, [aria-expanded='true']) { z-index: 2; }
+.rumi-print-viewer .pv-movement button:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px;
 }
 .rumi-print-viewer .pv-joint-popover {
@@ -354,11 +343,10 @@
   }
 }
 @media (pointer: coarse) {
-  .rumi-print-viewer .pv-movement-trigger, .rumi-print-viewer .pv-movement-picker select,
   .rumi-print-viewer .pv-joint-popover .av-reset { min-height: 44px; }
   .rumi-print-viewer .pv-joint-target { width: 44px; height: 44px; }
   .rumi-print-viewer .pv-joint-target::before { inset: 14px; }
-  .rumi-print-viewer .pv-joint-target:is(:hover, [aria-pressed='true'])::before { inset: 12px; }
+  .rumi-print-viewer .pv-joint-target:is(:hover, [aria-expanded='true'])::before { inset: 12px; }
 }
 
 /* Glass is confined to controls; the canvas never receives a backdrop filter. */

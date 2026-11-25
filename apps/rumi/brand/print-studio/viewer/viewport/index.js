@@ -18,9 +18,11 @@ import { generateStl } from '../generation/export.js'
  */
 import * as THREE from 'three'
 import { createActivity } from './activity.js'
+import { createSphereGrid } from './sphere-grid.js'
 import { createHover } from './hover.js'
 import { createHighlight } from './highlight.js'
 import { cursorMeshSnapshot } from './cursor-geometry.js'
+import { MAX_CURSOR_IMAGE_CHARS } from '../image-limits.js'
 import { createNamedRegionIndex, createNamedRegionVisual, namedRegionMesh } from './named-regions.js'
 import { createRegionPicker, regionAnchor } from './region-marker.js'
 import { modelRegionReference } from '../model-regions.js'
@@ -35,10 +37,45 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 const FALLBACK_INK = '#8a8a8a'
 const FALLBACK_ACCENT = '#3d6fe0'
 const FALLBACK_BLOCKED = '#c0392b'
+const COVER_WIDTH = 1440
+const COVER_HEIGHT = 960
 
 function token(element, name, fallback) {
   const value = getComputedStyle(element).getPropertyValue(name).trim()
   return value === '' ? fallback : value
+}
+
+function frameCover(bounds) {
+  const { center, radius } = bounds.getBoundingSphere(new THREE.Sphere())
+  const distance = Math.max(radius, 1) * 3
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, Math.max(0.01, distance - radius - 1), distance + radius + 1)
+  camera.up.set(0, 0, 1)
+  camera.position.copy(center).add(new THREE.Vector3(1, -1, 0.8).setLength(distance))
+  camera.lookAt(center)
+  camera.updateMatrixWorld()
+  const projected = new THREE.Box3(), corner = new THREE.Vector3()
+  for (const x of [bounds.min.x, bounds.max.x]) {
+    for (const y of [bounds.min.y, bounds.max.y]) {
+      for (const z of [bounds.min.z, bounds.max.z]) {
+        projected.expandByPoint(corner.set(x, y, z).applyMatrix4(camera.matrixWorldInverse))
+      }
+    }
+  }
+  const size = projected.getSize(corner), aspect = COVER_WIDTH / COVER_HEIGHT
+  const halfHeight = Math.max(size.x / aspect, size.y, 0.01) * 0.57
+  camera.left = -halfHeight * aspect
+  camera.right = halfHeight * aspect
+  camera.top = halfHeight
+  camera.bottom = -halfHeight
+  camera.updateProjectionMatrix()
+  const key = new THREE.DirectionalLight(0xffffff, 0.68)
+  key.position.set(-0.85, 0.95, 0.5)
+  key.target.position.set(0, 0, -1)
+  const fill = new THREE.DirectionalLight(0xffffff, 0.45)
+  fill.position.set(0.9, -0.15, 0.4)
+  fill.target = key.target
+  camera.add(key, fill, key.target)
+  return camera
 }
 
 /**
@@ -129,6 +166,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   let sceneRevision = 0, sceneGeneration = 0
   let designSpec = null, designVolume = null, designPending = null, requestedRenderRequest = null
   let measurement = null
+  const gridBounds = new THREE.Sphere()
   const ink = token(element, '--dsw-alias-label-tertiary', FALLBACK_INK)
   const solidMaterial = new THREE.MeshStandardMaterial({
     color: token(element, '--dsw-alias-brand-primary', FALLBACK_ACCENT),
@@ -144,25 +182,27 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   let namedIndex = null, namedMap = null, namedDesign = null, namedCursor = null, namedAgent = null
   const projected = new THREE.Vector3()
   const motionViewportSize = new THREE.Vector2()
-  const jointPoint = new THREE.Vector3()
+  const jointPoint = new THREE.Vector3(), viewDirection = new THREE.Vector3()
   const motionProjection = { owner: null, values: null, points: [], camera: new THREE.Matrix4(),
     projection: new THREE.Matrix4(), placement: new THREE.Matrix4() }
   function drawMotionOverlay() {
     if (!motionOverlay || motionOverlay.id !== designUrl || !motion || !design || shapeDeformer || printPreview) return
     const owner = motionPreview ?? design
-    if (motionProjection.owner !== owner || motionProjection.values !== motion.values ||
-        !motionProjection.camera.equals(camera.matrixWorldInverse) || !motionProjection.projection.equals(camera.projectionMatrix) ||
-        !motionProjection.placement.equals(designRoot.matrixWorld)) {
+    const posed = motionProjection.owner !== owner || motionProjection.values !== motion.values ||
+      !motionProjection.placement.equals(designRoot.matrixWorld)
+    if (posed || !motionProjection.camera.equals(camera.matrixWorldInverse) || !motionProjection.projection.equals(camera.projectionMatrix)) {
+      if (posed) owner.motionOcclusion.update()
       motionProjection.owner = owner
       motionProjection.values = motion.values
       motionProjection.camera.copy(camera.matrixWorldInverse)
       motionProjection.projection.copy(camera.projectionMatrix)
       motionProjection.placement.copy(designRoot.matrixWorld)
+      camera.getWorldDirection(viewDirection)
       motionProjection.points = motion.controls.map((_, index) => {
         owner.motionAnchor(index, jointPoint).applyMatrix4(designRoot.matrixWorld)
         projected.copy(jointPoint).project(camera)
         if (Math.abs(projected.x) > 1 || Math.abs(projected.y) > 1 || Math.abs(projected.z) > 1 ||
-            owner.motionOccluded(index, camera.position, jointPoint)) return null
+            owner.motionOcclusion.hidden(index, camera.position, viewDirection, jointPoint)) return null
         return { x: (projected.x + 1) * 50, y: (1 - projected.y) * 50 }
       })
     }
@@ -214,7 +254,11 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     if (closed) return
     if (motionFrame !== null) { cancelAnimationFrame(motionFrame); motionFrame = null }
     updateNamedVisuals()
-    renderer.render(scene, camera)
+    grid.update(camera, controls.target, gridBounds)
+    const modelLayers = camera.layers.mask
+    camera.layers.mask |= grid.shell.layers.mask
+    try { renderer.render(scene, camera) }
+    finally { camera.layers.mask = modelLayers }
     drawMotionOverlay()
     const highlight = marker && surfaceOverlay.visible ? marker.hit ?? (regionFocused ? marker.anchor : null) : null
     const named = namedAgent?.entry.region
@@ -242,6 +286,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   element.appendChild(renderer.domElement)
   const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 10000)
   camera.up.set(0, 0, 1)
+  const grid = createSphereGrid(element, ink, renderer.getPixelRatio(), render)
+  scene.add(grid.shell)
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = false
   const activity = createActivity(element, render)
@@ -307,13 +353,22 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     scene.add(plate, grid, envelope)
   }
 
-  function frame() {
+  function previewBounds() {
     const bounds = new THREE.Box3()
     for (const { mesh } of objects.values()) bounds.expandByObject(mesh)
     if (printPreview) { bounds.expandByObject(printPreview.root); if (volumeNodes[0]) bounds.expandByObject(volumeNodes[0]) }
     else if (design) bounds.expandByObject(designRoot)
-    if (bounds.isEmpty()) return
-    const { center, radius } = bounds.getBoundingSphere(new THREE.Sphere())
+    return bounds
+  }
+
+  function updateGridBounds() {
+    previewBounds().getBoundingSphere(gridBounds)
+  }
+
+  function frame() {
+    updateGridBounds()
+    if (gridBounds.isEmpty()) return
+    const { center, radius } = gridBounds
     // The pane is usually taller than wide, so clear the narrower of the two fields.
     const vertical = camera.fov * Math.PI / 180
     const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect)
@@ -321,6 +376,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     camera.position.copy(center).add(new THREE.Vector3(1, -1, 0.8).setLength(distance))
     controls.target.copy(center)
     controls.update()
+    grid.frame(camera)
   }
 
   observer = new ResizeObserver(() => {
@@ -423,6 +479,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       designRoot.matrix.fromArray(placed.matrix)
       designRoot.updateMatrixWorld(true)
       measurement = { design, key, report: analyzeMesh(placed.positions, { volume: designVolume }) }
+      if (framed) updateGridBounds()
       if (design.motionIssue) {
         measurement.report.checks.push({ code: 'assembly_motion_unavailable', severity: 'warning', message: design.motionIssue })
         if (measurement.report.status === 'ok') measurement.report.status = 'review'
@@ -522,7 +579,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         return printSnapshot()
       } catch (error) { highlightOverlay?.resume(); showMotion(); syncHighlight(); render(); throw error }
     },
-    closePrintLayout() { clearPrint(); showMotion(); syncHighlight(); render() },
+    closePrintLayout() { clearPrint(); showMotion(); updateGridBounds(); syncHighlight(); render() },
     printLayoutState: printSnapshot,
     selectPrintPart(id) { printSelected = id; printPlate = printLayout.parts.find(part => part.id === id).plate; drawPrint(); publishPrint() },
     selectPrintPlate(plate) { printPlate = plate; printSelected = printLayout.parts.find(part => part.plate === plate)?.id ?? printSelected; drawPrint(); publishPrint() },
@@ -575,6 +632,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         ?? { node: pin.object, point: designRoot.worldToLocal(pin.point.clone()) })
       motion.values = next
       try { showMotion() } catch (error) { motion.values = previous; throw error }
+      updateGridBounds()
       poses.delete(designSpec.path); poses.set(designSpec.path, { values: { ...next }, identity: design.poseIdentity ?? null })
       if (poses.size > 32) poses.delete(poses.keys().next().value)
       const relocated = saved && (motionPreview
@@ -686,18 +744,24 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       }
       const size = renderer.getSize(new THREE.Vector2())
       const ratio = renderer.getPixelRatio()
-      const factor = Math.min(1, 960 / Math.max(size.x, size.y))
+      const longest = Math.max(size.x, size.y, 1)
+      const resolution = Math.min(1600, longest * 2)
       let image
       try {
         renderer.setPixelRatio(1)
-        renderer.setSize(Math.max(1, Math.round(size.x * factor)), Math.max(1, Math.round(size.y * factor)), false)
-        renderer.render(scene, camera)
-        image = renderer.domElement.toDataURL('image/png')
+        for (const limit of new Set([resolution, Math.min(resolution, 960), Math.min(resolution, 640)])) {
+          const factor = limit / longest
+          renderer.setSize(Math.max(1, Math.round(size.x * factor)), Math.max(1, Math.round(size.y * factor)), false)
+          renderer.render(scene, camera)
+          image = renderer.domElement.toDataURL('image/png')
+          if (image.length <= MAX_CURSOR_IMAGE_CHARS) break
+        }
       } finally {
         renderer.setPixelRatio(ratio)
         renderer.setSize(size.x, size.y, false)
         render()
       }
+      if (image.length > MAX_CURSOR_IMAGE_CHARS) return { status: 'capture_failed' }
       return {
         status: 'captured', capturedAt: new Date().toISOString(),
         identity: { sceneRevision, design: designIdentity },
@@ -721,25 +785,16 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       showOverlay(visible)
       render()
     },
-    /** Capture a fitted 480 × 320 PNG using the loaded geometry; restore the interactive viewport. */
+    /** Capture a studio-lit 1440 × 960 PNG using the loaded geometry and restore the interactive viewport. */
     thumbnail() {
       if (closed || shapeDeformer || printPreview || (objects.size === 0 && !design)) return null
-      const bounds = new THREE.Box3()
-      for (const { mesh } of objects.values()) bounds.expandByObject(mesh)
-      if (design) bounds.expandByObject(designRoot)
+      const bounds = previewBounds()
       if (bounds.isEmpty()) return null
-      const { center, radius } = bounds.getBoundingSphere(new THREE.Sphere())
-      const coverCamera = camera.clone()
-      coverCamera.aspect = 1.5
-      const distance = Math.max(radius, 1) / Math.sin(coverCamera.fov * Math.PI / 360) * 1.15
-      coverCamera.position.copy(center).add(new THREE.Vector3(1, -1, 0.8).setLength(distance))
-      coverCamera.near = Math.max(distance / 1000, 0.001)
-      coverCamera.far = distance + radius * 4 + 1
-      coverCamera.lookAt(center)
-      coverCamera.updateProjectionMatrix()
+      const coverCamera = frameCover(bounds)
       const size = renderer.getSize(new THREE.Vector2())
       const ratio = renderer.getPixelRatio()
       const overlayVisible = highlightVisible
+      const lightVisible = light.visible
       const activityMode = activity.uniform.value.x
       const hoverRadius = hover.sphere.value.w
       const cursorVisible = namedCursor?.root.visible
@@ -750,8 +805,10 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         showOverlay(false)
         if (namedCursor) namedCursor.root.visible = false
         for (const node of volumeNodes) node.visible = false
+        light.visible = false
+        scene.add(coverCamera)
         renderer.setPixelRatio(1)
-        renderer.setSize(480, 320, false)
+        renderer.setSize(COVER_WIDTH, COVER_HEIGHT, false)
         renderer.render(scene, coverCamera)
         return renderer.domElement.toDataURL('image/png')
       } finally {
@@ -760,6 +817,8 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         showOverlay(overlayVisible)
         if (namedCursor) namedCursor.root.visible = cursorVisible
         volumeNodes.forEach((node, index) => { node.visible = visibility[index] })
+        scene.remove(coverCamera)
+        light.visible = lightVisible
         renderer.setPixelRatio(ratio)
         renderer.setSize(size.x, size.y, false)
         render()
@@ -780,6 +839,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         clearShape(); clearMotion(); clearHighlight()
         if (design) { designRoot.remove(design.root); clearShape(); disposeDesign(design) }
         measurement = null; design = null; motion = null; designUrl = null; requestedUrl = null; requestedRenderRequest = null
+        updateGridBounds()
         updateNamedIndex()
         render()
         return null
@@ -880,6 +940,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
             volumeKey = key
           }
           if (!framed && (objects.size > 0 || design !== null) && renderer.domElement.width > 0) { framed = true; frame() }
+          else updateGridBounds()
           render()
         } finally { for (const model of loaded.values()) disposeModel(model.root) }
       })())
@@ -912,6 +973,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       clearVolume()
       solidMaterial.dispose()
       blockedMaterial.dispose()
+      grid.dispose()
       environment.dispose()
       renderer.dispose()
       renderer.forceContextLoss()

@@ -5,13 +5,14 @@ import { join } from 'node:path'
 import { normalizeSelection } from './highlight.js'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { encodeStl, parseStl, STL_LIMITS } from './stl.js'
+import { MAX_CURSOR_IMAGE_CHARS } from './image-limits.js'
 
 const rendererUnavailableReasons = new Set(['viewer_not_open', 'viewer_closed', 'viewer_hidden', 'temporary_edit', 'movement_preview', 'print_layout'])
 const meshUnavailableReasons = new Set(['unsupported_model', 'empty_selection', 'geometry_unavailable'])
 const maxMeshBase64 = 4 * Math.ceil((84 + 50 * STL_LIMITS.maxTriangles) / 3)
 
 /** Limit a cursor request to the existing image budget and one maximum-size binary STL. */
-export const MAX_CURSOR_BODY_CHARS = 3_100_000 + maxMeshBase64
+export const MAX_CURSOR_BODY_CHARS = MAX_CURSOR_IMAGE_CHARS + 100_000 + maxMeshBase64
 
 function readMesh(value, hasSurfaceSelection) {
   if (value.meshStl === undefined) {
@@ -146,7 +147,7 @@ export function validateCursorSnapshot(value) {
   if (!camera || !vector(camera.position) || !vector(camera.target) || !vector(camera.up)
     || !Number.isFinite(camera.fov) || camera.fov <= 0 || camera.fov >= 180
     || !Number.isFinite(camera.aspect) || camera.aspect <= 0) throw new Error('Invalid cursor camera')
-  if (typeof value.image !== 'string' || value.image.length > 3_000_000
+  if (typeof value.image !== 'string' || value.image.length > MAX_CURSOR_IMAGE_CHARS
     || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value.image)) throw new Error('Invalid cursor image')
   return {
     status: 'captured', capturedAt: value.capturedAt, identity: value.identity,

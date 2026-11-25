@@ -93,11 +93,12 @@ export function robotMotion(metadata, nodes, root, nodeIndices, labels, presenta
     parent: joint.parent, child: joint.child, pivot: new THREE.Vector3(...joint.pivot), kind: joint.kind,
   }]))
   const controlAnchors = definitions.map(control => anchors.get(control.axes[0].key))
+  const meshMasses = new WeakMap()
   return {
     parameters, motionDefinitions: definitions, poseIdentity: JSON.stringify(assembly),
     motionUnit: key => anchors.get(key)?.kind === 'revolute' ? 'degree' : 'millimeter',
     motionAnchor: (index, target) => target.copy(controlAnchors[index].pivot),
-    motionOccluded: createJointOcclusion(meshes, controlAnchors),
+    motionOcclusion: createJointOcclusion(meshes, controlAnchors, meshMasses),
     createMotionPreview(parent) {
       const preview = new THREE.Group(), visible = root.visible
       const transforms = new Map(assembly.parts.map(part => [part.id, new THREE.Matrix4()]))
@@ -115,9 +116,10 @@ export function robotMotion(metadata, nodes, root, nodeIndices, labels, presenta
         posed.set(mesh.node, { node, inverseSaved: mesh.inverseSaved })
         return [node, mesh]
       }))
+      const posedMeshes = [...copies].map(([node, mesh]) => ({ node, part: mesh.part }))
       return {
         root: preview,
-        motionOccluded: createJointOcclusion([...copies].map(([node, mesh]) => ({ node, part: mesh.part })), controlAnchors),
+        motionOcclusion: createJointOcclusion(posedMeshes, controlAnchors, meshMasses),
         savedHit(node, worldPoint) {
           const mesh = copies.get(node)
           if (!mesh) return null

@@ -62,8 +62,7 @@ export const en = {
   layoutSlicerMissing: 'Ask Rumi to install Bambu Studio, then open the plate again.',
   layoutOpenFailed: 'The plate was saved, but Bambu Studio did not confirm opening. Try opening it again.',
 
-  motionControls: 'Movement',
-  motionChooseJoint: 'Choose joint',
+  motionControls: 'Joints',
   motionMillimeters: '{value} mm',
   validationChanged: 'Model changed. Checks are updating…',
   validationChecksPassed: 'Model checks passed. Review supports and slicing in Bambu Studio.',
@@ -166,8 +165,7 @@ export const zh = {
   layoutSlicerMissing: '请让 Rumi 安装 Bambu Studio，然后重新打开打印板。',
   layoutOpenFailed: '打印板已保存，但 Bambu Studio 未确认打开。请重试。',
 
-  motionControls: '活动部件',
-  motionChooseJoint: '选择关节',
+  motionControls: '关节',
   motionMillimeters: '{value} 毫米',
   validationChanged: '模型已更改，正在更新检查…',
   validationChecksPassed: '模型检查通过。请在 Bambu Studio 中检查支撑和切片',

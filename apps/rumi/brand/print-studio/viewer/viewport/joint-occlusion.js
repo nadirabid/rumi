@@ -1,42 +1,82 @@
 /** Test joint visibility against the pose's indexed display meshes. */
 import * as THREE from 'three'
 
+function meshMass(geometry) {
+  const { boundingBox: bounds, index } = geometry
+  const positions = geometry.getAttribute('position')
+  const origin = bounds.getCenter(new THREE.Vector3())
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), cross = new THREE.Vector3()
+  const vertices = [a, b, c], center = new THREE.Vector3()
+  let volume = 0
+  for (let i = 0; i < (index?.count ?? positions.count); i += 3) {
+    for (let corner = 0; corner < vertices.length; corner++) {
+      const vertex = i + corner
+      vertices[corner].fromBufferAttribute(positions, index ? index.getX(vertex) : vertex).sub(origin)
+    }
+    // Each triangle and the origin form a signed tetrahedron.
+    const signed = a.dot(cross.crossVectors(b, c))
+    volume += signed
+    center.addScaledVector(a.add(b).add(c), signed)
+  }
+  if (!Number.isFinite(volume) || volume === 0) return null
+  center.divideScalar(4 * volume).add(origin)
+  return bounds.containsPoint(center) ? { center, volume: Math.abs(volume) / 6 } : null
+}
+
 /**
- * Find opaque surfaces between the camera and a joint. A joint embedded in either
- * of its own parts remains visible until the sightline passes through that part.
+ * Check rear joints against opaque surfaces. A sightline must exit a joint's own
+ * part to obscure its pin. Front joints overlay the model.
  * @param {object[]} meshes Display meshes with their physical part ids.
  * @param {object[]} anchors Controls mapped to the parent and child of their first joint.
- * @returns {Function} Test a control index, camera position and joint position in world space.
+ * @param {WeakMap} meshMasses Rest geometry estimates shared by both poses.
+ * @returns {object} Assembly placement refresh and world-space occlusion query.
  */
-export function createJointOcclusion(meshes, anchors) {
+export function createJointOcclusion(meshes, anchors, meshMasses) {
   const entries = meshes.map(({ node, part }) => ({
-    node, part, geometry: null, matrix: new THREE.Matrix4(), inverse: new THREE.Matrix4(),
+    node, part, geometry: node.geometry, inverse: new THREE.Matrix4(),
     bounds: new THREE.Box3(), material: null, front: null, exit: null,
   }))
   const sightline = new THREE.Ray(), local = new THREE.Ray()
-  const point = new THREE.Vector3()
+  const point = new THREE.Vector3(), center = new THREE.Vector3(), bounds = new THREE.Box3()
   const mask = (material, side) => ({
     visible: material.visible && (!material.transparent || material.opacity >= 1),
     side: side ?? material.side,
   })
   const sides = (materials, side) => Array.isArray(materials) ? materials.map(material => mask(material, side)) : mask(materials, side)
 
-  return (index, camera, target) => {
+  function update() {
+    bounds.makeEmpty()
+    center.set(0, 0, 0)
+    let totalMass = 0, complete = true
+    for (const entry of entries) {
+      const { node, geometry } = entry
+      if (!node.visible) continue
+      if (geometry.boundingBox === null) geometry.computeBoundingBox()
+      entry.inverse.copy(node.matrixWorld).invert()
+      entry.bounds.copy(geometry.boundingBox).applyMatrix4(node.matrixWorld)
+      bounds.union(entry.bounds)
+      if (!meshMasses.has(geometry)) meshMasses.set(geometry, meshMass(geometry))
+      const mass = meshMasses.get(geometry)
+      if (!mass) { complete = false; continue }
+      const weight = mass.volume * Math.abs(node.matrixWorld.determinant())
+      totalMass += weight
+      center.addScaledVector(point.copy(mass.center).applyMatrix4(node.matrixWorld), weight)
+    }
+    if (complete && totalMass > 0) center.divideScalar(totalMass)
+    else bounds.getCenter(center)
+  }
+
+  function hidden(index, camera, direction, target) {
+    if (point.subVectors(target, center).dot(direction) < 0) return false
     const anchor = anchors[index]
     sightline.origin.copy(camera)
     const distance = sightline.direction.subVectors(target, camera).length()
     sightline.direction.divideScalar(distance)
     for (const entry of entries) {
       const { node, part } = entry
-      const { geometry, matrixWorld, material } = node
+      const { geometry, material } = node
       const spatial = geometry.userData.rumiSurfaceIndex
       if (!node.visible || !spatial) continue
-      if (entry.geometry !== geometry || !entry.matrix.equals(matrixWorld)) {
-        entry.geometry = geometry
-        entry.matrix.copy(matrixWorld)
-        entry.inverse.copy(matrixWorld).invert()
-        entry.bounds.copy(geometry.boundingBox).applyMatrix4(matrixWorld)
-      }
       if (!entry.bounds.containsPoint(camera) &&
           (!sightline.intersectBox(entry.bounds, point) || camera.distanceTo(point) > distance)) continue
       if (entry.material !== material) {
@@ -54,4 +94,5 @@ export function createJointOcclusion(meshes, anchors) {
     }
     return false
   }
+  return { update, hidden }
 }

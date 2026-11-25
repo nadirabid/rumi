@@ -2,8 +2,41 @@
 import * as THREE from 'three'
 import { expect, it, vi } from 'vitest'
 import { parseGlbModel } from '../viewer/viewport/glb.js'
+import { createJointOcclusion } from '../viewer/viewport/joint-occlusion.js'
 import { disposeModel } from '../viewer/viewport/model.js'
+import { createSurfaceIndex } from '../viewer/viewport/surfaces.js'
 import { assembly, assemblyGlb } from './fixtures/assembly-glb.js'
+
+it('draws a front joint over a foreground part and hides it from the rear', () => {
+  const root = new THREE.Group(), material = new THREE.MeshBasicMaterial()
+  function part(id: string, width: number, height: number, depth: number, x: number) {
+    const geometry = new THREE.BoxGeometry(width, height, depth)
+    geometry.userData.rumiSurfaceIndex = createSurfaceIndex(geometry)
+    const node = new THREE.Mesh(geometry, material)
+    node.position.x = x
+    root.add(node)
+    return { node, part: id }
+  }
+  const body = part('body', 10, 10, 10, 0)
+  const cover = part('cover', 1, 8, 8, 8)
+  const handle = part('handle', 1, 1, 1, 30)
+  const joint = new THREE.Vector3(5.1, 0, 0)
+  const occlusion = createJointOcclusion([body, cover, handle], [{ parent: 'body', child: 'handle' }], new WeakMap())
+  function hidden(from: number) {
+    const camera = new THREE.Vector3(from, 0, 0)
+    return occlusion.hidden(0, camera, joint.clone().sub(camera).normalize(), joint)
+  }
+  try {
+    root.updateMatrixWorld(true)
+    occlusion.update()
+    expect(hidden(100)).toBe(false)
+    expect(hidden(-100)).toBe(true)
+    body.node.position.x = 13
+    root.updateMatrixWorld(true)
+    occlusion.update()
+    expect(hidden(100)).toBe(true)
+  } finally { disposeModel(root) }
+})
 
 it('moves a hinge, nested slider and fixed descendant in saved-world units without changing printable geometry', async () => {
   const model = await parseGlbModel(assemblyGlb().buffer)

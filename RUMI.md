@@ -179,6 +179,8 @@ Additional 3D models require an explicit user request or agreement to a clearly 
 
 ## Print Studio
 
+The medal button beside Plugins opens [mechanical badges](apps/rumi/brand/print-studio/README.md#mechanical-badges) from the gallery or a project.
+
 `apps/rumi/brand/print-studio/` installs Bambu Studio on request, detects its H2D profiles, and discovers the printer over SSDP. The **Plugins → Print Studio** card can sign in to Bambu to fetch the discovered printer’s access code. A different account-bound printer never supplies a fallback code for a known serial. The bundled `print-studio-setup` skill guides setup. The access code lives in the credential store.
 
 Rumi reads printer status and progress over local MQTT. To print, open a plate from the 3D preview and review, slice, and send it in Bambu Studio.

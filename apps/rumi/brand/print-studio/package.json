@@ -26,6 +26,8 @@
     "app-setup.js",
     "monitor.js",
     "skill-reminders.js",
+    "badges-*.js",
+    "badge-review*.js",
     "lib/client.js",
     "lib/THREE-LICENSE.txt",
     "viewer",

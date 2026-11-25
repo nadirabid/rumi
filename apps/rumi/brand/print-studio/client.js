@@ -1,4 +1,5 @@
 import { installViewer } from './viewer/client.js'
+import { installBadges } from './badges/client.js'
 /**
  * Print Studio — browser half.
  *
@@ -306,7 +307,9 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale', 'sidebarRight', 'sidebarRightTabs', 'documentPreviews'],
       apply(ctx) {
-        installViewer(ctx, React, require('@deepseek-ai/dsh-client-ui-primitives'));
+        const primitives = require('@deepseek-ai/dsh-client-ui-primitives');
+        installViewer(ctx, React, primitives);
+        installBadges(ctx, React, primitives);
         ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'rumi print studio: copy');
         const t = ctx.locale.bind(NS);
         ctx.slots.inject('plugins.item', () => ctx.slots.register({

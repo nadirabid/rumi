@@ -46,4 +46,5 @@ def barrel_hinge(parent, child, pivot, axis, parent_side, child_side, length=30,
 
     require_one_solid(parent, 'barrel_hinge', 'Bring the parent to within reach of the hinge axis on parent_side.')
     require_one_solid(child, 'barrel_hinge', 'Bring the child to within reach of the hinge axis on child_side.')
-    return joint(name or child.name + 'Hinge', 'revolute', parent, child, direction(axis), pivot, limits, control)
+    connection = joint(name or child.name + 'Hinge', 'revolute', parent, child, direction(axis), pivot, limits, control)
+    return record_feature('barrel-hinge', connection)

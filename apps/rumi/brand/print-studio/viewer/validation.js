@@ -211,7 +211,7 @@ export function createValidation(ctx, config, { view, notify, run = runValidatio
   }
   function result(item, stage, cached) {
     const report = item.stages[stage]
-    return { path: item.path, fingerprint: item.fingerprint, stage, cached, status: report.status,
+    return { path: item.path, fingerprint: item.fingerprint, sourceHash: item.sourceHash, stage, cached, status: report.status,
       report: stage === 'mechanics' ? summarizeValidationReport({ mechanics: report }).mechanics : report, printReady: false }
   }
   function read(id) {

@@ -21,8 +21,8 @@ function decision(namedRegions = 0.01, conciseReply = 0.01) {
   } })
 }
 
-async function identifyProject(root: string, sessionId: SessionId) {
-  await writeFile(join(root, 'project.json'), JSON.stringify({ id: basename(root), type: 'print', sessionIds: [sessionId] }))
+async function identifyProject(root: string, ...sessionIds: SessionId[]) {
+  await writeFile(join(root, 'project.json'), JSON.stringify({ id: basename(root), type: 'print', sessionIds }))
 }
 
 class ReviewReplay extends LlmAdapter {
@@ -156,7 +156,10 @@ class StepReplay extends LlmAdapter {
   }
 }
 
-it('coalesces completed steps and keeps one Bison request across active turns', async () => {
+it.each([
+  { scope: 'the same project', sharedProject: true },
+  { scope: 'another project', sharedProject: false },
+])('coalesces completed steps while another chat runs in $scope', async ({ sharedProject }) => {
   const root = await mkdtemp(join(tmpdir(), 'rumi-review-queue-'))
   const owner = new Context()
   const firstRequest = Promise.withResolvers<void>()
@@ -168,11 +171,15 @@ it('coalesces completed steps and keeps one Bison request across active turns', 
     const primaryId = SessionId('print-review-primary')
     const otherId = SessionId('print-review-other')
     const primaryRoot = join(root, 'primary')
-    const otherRoot = join(root, 'other')
+    const otherRoot = sharedProject ? primaryRoot : join(root, 'other')
     await mkdir(primaryRoot)
-    await mkdir(otherRoot)
-    await identifyProject(primaryRoot, primaryId)
-    await identifyProject(otherRoot, otherId)
+    if (sharedProject) {
+      await identifyProject(primaryRoot, primaryId, otherId)
+    } else {
+      await mkdir(otherRoot)
+      await identifyProject(primaryRoot, primaryId)
+      await identifyProject(otherRoot, otherId)
+    }
     await mountAgentLoopTestDependencies(owner)
     const harness = await mountAgentLoopTestHarness(owner)
     const adapter = new StepReplay(async (step) => {
@@ -196,11 +203,13 @@ it('coalesces completed steps and keeps one Bison request across active turns', 
     owner.on('agent/turn-stopping', ({ agent }) => {
       if (agent.session.id === otherId) otherStopping.resolve()
     })
-    const fetchDecision = vi.fn<typeof fetch>(async () => {
-      if (fetchDecision.mock.calls.length === 1) {
+    const fetchDecision = vi.fn<typeof fetch>(async (_url, options) => {
+      const { request, completedStep } = JSON.parse(String(options?.body)).state
+      if (request === 'Inspect the other model.') return decision()
+      if (completedStep === 1) {
         firstRequest.resolve()
         await releaseFirstRequest.promise
-      } else if (fetchDecision.mock.calls.length === 2) {
+      } else if (completedStep === 3) {
         mergedRequest.resolve()
       }
       return decision()
@@ -213,13 +222,14 @@ it('coalesces completed steps and keeps one Bison request across active turns', 
     await firstRequest.promise
     other.followup(prompt('Inspect the other model.'))
     await Promise.all([thirdStep.promise, otherStopping.promise])
-    expect(fetchDecision).toHaveBeenCalledTimes(1)
-    other.cancel({ kind: 'user' })
+    if (sharedProject) other.cancel({ kind: 'user' })
     await other.whenIdle()
+    expect(fetchDecision).toHaveBeenCalledTimes(sharedProject ? 1 : 2)
     releaseFirstRequest.resolve()
     await primary.whenIdle()
-    expect(fetchDecision).toHaveBeenCalledTimes(3)
-    const states = fetchDecision.mock.calls.map(([, options]) => JSON.parse(String(options?.body)).state)
+    expect(fetchDecision).toHaveBeenCalledTimes(sharedProject ? 3 : 4)
+    const requests = fetchDecision.mock.calls.map(([, options]) => JSON.parse(String(options?.body)).state)
+    const states = requests.filter(state => state.request === 'Inspect the primary model.')
     const publish = { step: 1, tool: 'bash', description: 'Publish the box model', outcome: 'completed', geometryCheck: 'needs_repair' }
     const inspect = { step: 2, tool: 'bash', description: 'Check the section profile', outcome: 'failed' }
     const verify = { step: 3, tool: 'bash', description: 'Verify the corrected mesh', outcome: 'completed' }
@@ -232,7 +242,7 @@ it('coalesces completed steps and keeps one Bison request across active turns', 
     const bodies = fetchDecision.mock.calls.map(([, options]) => String(options?.body)).join('')
     expect(bodies).not.toContain('Raw tool output')
     expect(bodies).not.toContain('local-script-with-private-content')
-    expect(states.every(state => state.request === 'Inspect the primary model.')).toBe(true)
+    expect(requests.filter(state => state.request === 'Inspect the other model.')).toHaveLength(sharedProject ? 0 : 1)
   } finally {
     firstRequest.resolve()
     releaseFirstRequest.resolve()

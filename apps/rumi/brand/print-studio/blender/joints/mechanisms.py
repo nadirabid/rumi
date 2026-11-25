@@ -111,7 +111,7 @@ def gear_pair(base, pivot, axis, teeth_a, teeth_b, toward=None, module=2, width=
     for gear, point, label, standoff in ((gear_a, pivot, controls[0], 1.0), (gear_b, centre_b, controls[1], 1.0 + stagger)):
         joints.append(axle(base, gear, point, axis, width=width, axle_diameter=axle_diameter, standoff=standoff, limits=limits,
                            control=label, name=gear.name + 'Axle'))
-    return joints
+    return record_feature('gear-pair', joints)
 
 
 # ---------------------------------------------------------------- rack and pinion
@@ -193,7 +193,7 @@ def rack_pinion(base, pivot, axis, slide, pinion_teeth=16, module=2, width=6, tr
                                    control=controls[0], name=names[0] + 'Axle')
     centre = tuple(world @ Vector((0, slot_y, zmid)))
     rack_joint = joint(names[1] + 'Slide', 'prismatic', base, rack, slide, centre, (-travel / 2, travel / 2), controls[1])
-    return [pinion_joint, rack_joint]
+    return record_feature('rack-and-pinion', [pinion_joint, rack_joint])
 
 
 # ---------------------------------------------------------------- ratchet

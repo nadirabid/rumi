@@ -82,7 +82,7 @@ def living_hinge(name, pivot, axis, across='X', panel_width=18, panel_thickness=
         raise ValueError('living_hinge: panel_width %.1f is too small for the relief; use at least %.1f' % (panel_width, half + relief + 1))
     outline = [(-panel_width, 0), (panel_width, 0), (panel_width, panel_thickness), (half + relief, panel_thickness),
                (half, web_thickness), (-half, web_thickness), (-half - relief, panel_thickness), (-panel_width, panel_thickness)]
-    return prism(name, outline, length, pivot, axis, across)
+    return record_feature('living-hinge', prism(name, outline, length, pivot, axis, across))
 
 
 def ball_socket(parent, child, pivot, axis, ball_diameter=12, clearance=0.4, wall=2.5, grip=0.8, stem_diameter=6,

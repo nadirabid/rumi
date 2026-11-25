@@ -1,4 +1,5 @@
 """Blender-only import and versioned export helpers. Work in metres with Z up."""
+import hashlib
 import json
 import math
 import os
@@ -126,6 +127,24 @@ def run_checks(usd, model_directory):
             shutil.rmtree(scratch, ignore_errors=True)
 
 
+def _publish_preview(directory, data):
+    """Replace the visible preview and identify the installed file when it still matches this write."""
+    target = directory / 'model.usda'
+    temporary = directory / ('.preview-' + uuid.uuid4().hex + '.usda')
+    try:
+        temporary.write_bytes(data)
+        before = temporary.stat()
+        os.replace(temporary, target)
+        after = target.stat()
+    finally:
+        temporary.unlink(missing_ok=True)
+    result = dict(sourceHash=hashlib.sha256(data).hexdigest())
+    if os.path.samestat(before, after) and (before.st_size, before.st_mtime_ns) == (after.st_size, after.st_mtime_ns):
+        result['savedFileStat'] = ':'.join(str(value) for value in (
+            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns))
+    return result
+
+
 def publish(model_directory, configure_robot=None, check=True):
     """Atomically publish self-contained model.usda and a recoverable editable .blend.
 
@@ -189,7 +208,10 @@ def publish(model_directory, configure_robot=None, check=True):
     metadata = read_robot(stage)
     _robot['require_separate_moving_parts'](metadata['assembly'])
     stage.GetRootLayer().Save()
-    if not 10 <= usd.stat().st_size <= 64 * 1024 * 1024 or '@' in usd.read_text():
+    if not 10 <= usd.stat().st_size <= 64 * 1024 * 1024:
+        raise ValueError('USD must fit 64 MiB')
+    data = usd.read_bytes()
+    if b'@' in data:
         raise ValueError('USD must fit 64 MiB and contain no external assets; use embedded surface colours')
     bpy.context.scene['rumi_robot_description'] = description_layer(stage)
     for key in ['rumi_assembly_json', 'rumi_mechanisms_json', 'rumiMotionKeys', 'rumiMotionRanges']:
@@ -204,13 +226,11 @@ def publish(model_directory, configure_robot=None, check=True):
                          for i, axis in enumerate('xyz')},
         'printReady': False,
     }
-    (revision / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
-    temporary = directory / ('.preview-' + uuid.uuid4().hex + '.usda')
-    try:
-        shutil.copyfile(usd, temporary)
-        os.replace(temporary, directory / 'model.usda')
-    finally:
-        temporary.unlink(missing_ok=True)
+    evidence = runpy.run_path(str(Path(__file__).with_name('recipe_evidence.py')))
+    features = evidence['published_features'](meshes, metadata['assembly'])
+    receipt = dict(report, badgeFeatures=features) if features else report
+    (revision / 'report.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    report.update(_publish_preview(directory, data))
     print('RUMI_MODEL ' + json.dumps(report))
     if check:
         report['checks'] = run_checks(usd, directory)
@@ -245,14 +265,8 @@ def restore_revision(model_directory, revision):
     if not stage.GetRootLayer().ImportFromString(data.decode('utf-8')):
         raise ValueError('Saved USD is invalid')
     read_robot(stage)
-    temporary = directory / ('.preview-' + uuid.uuid4().hex + '.usda')
-    try:
-        temporary.write_bytes(data)
-        os.replace(temporary, directory / 'model.usda')
-    finally:
-        temporary.unlink(missing_ok=True)
     report = dict(blend=str(blend), revisionUsd=str(usd), preview=str(directory / 'model.usda'),
-                  printReady=False, validation='pending')
+                  printReady=False, validation='pending', **_publish_preview(directory, data))
     print('RUMI_MODEL ' + json.dumps(report))
     return report
 

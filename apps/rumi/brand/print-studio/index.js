@@ -24,6 +24,8 @@ import { createAppSetup } from './app-setup.js'
 import { readPrinterStatus } from './monitor.js'
 import { applyBlender } from './blender/host.js'
 import { applySkillReminders } from './skill-reminders.js'
+import { BadgeReviewConfig, capturePrintBadgeRevisions, reviewPrintBadges } from './badge-review.js'
+import { createBadgeHost } from './badges-host.js'
 import { applyViewer } from './viewer/host.js'
 import { applyContextRetention } from './viewer/context-retention.js'
 import * as analogWorkflow from './viewer/analog/workflow.js'
@@ -34,6 +36,8 @@ export const name = 'print-studio'
 
 /** Print Studio diagnostics, validation policy, and app-owned storage paths. */
 export const Config = z.object({
+  badgeReview: BadgeReviewConfig,
+  badgeDatabase: z.string().min(1).default(join(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi'), 'print-studio', 'badges.sqlite')),
   appDownloadTimeoutSeconds: z.number().step(1).min(30).max(3600).default(900),
   appDownloadRetries: z.number().step(1).min(0).max(5).default(2),
   blenderExecutable: z.string().default(''),
@@ -248,6 +252,23 @@ export async function apply(ctx, config) {
       fetch,
     }), `print-studio: ${ROUTE}${path}`)
   }
+
+  ctx.inject(['rumiProjectScope', 'llm'], scoped => {
+    const badges = createBadgeHost(scoped, {
+      databasePath: config.badgeDatabase, config: config.badgeReview,
+      capture: capturePrintBadgeRevisions, review: reviewPrintBadges,
+    })
+    for (const [suffix, method, action] of [['/badges', 'GET', 'collection'], ['/badges/retry', 'POST', 'retry']]) {
+      scoped.effect(() => scoped.connection.fetch.register({
+        path: ROUTE + suffix, methods: [method], requestBody: 'buffered',
+        async fetch(request) {
+          const projectId = new URL(request.url).searchParams.get('projectId')
+          if (projectId !== null && !badges.knownProject(projectId)) return json({ error: 'project_not_found' }, 404)
+          return json(badges[action](projectId))
+        },
+      }), `print-studio: ${suffix}`)
+    }
+  })
 
   const setup = createAppSetup({ downloadTimeoutSeconds: config.appDownloadTimeoutSeconds, downloadRetries: config.appDownloadRetries })
   ctx.effect(() => () => setup.dispose(), 'print-studio: Bambu Studio setup')

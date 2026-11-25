@@ -12,7 +12,9 @@ def wheel(name, pivot, axis, diameter=30, width=10, end_play=0.3, tread=0, stand
             rib = box('_rib', (2.4, diameter * 0.12, width - 1.2), (diameter / 2, 0, standoff + end_play + width / 2))
             rotate(rib, 'Z', 360 * index / tread)
             join(part, rib)
-    return place(part, frame(pivot, axis))
+    placed = place(part, frame(pivot, axis))
+    placed['rumi_wheel_blank'] = _recipe_evidence['mesh_signature'](placed)
+    return placed
 
 
 def captive_axle(parent, child, pivot, axis, width=10, axle_diameter=6, clearance=0.3, end_play=0.3,
@@ -27,6 +29,8 @@ def captive_axle(parent, child, pivot, axis, width=10, axle_diameter=6, clearanc
     for print-in-place. recess=True sinks the head into a counterbore so it does not stand proud of the wheel.
     Returns the revolute joint record.
     """
+    blank = child.get('rumi_wheel_blank')
+    made_wheel = bool(blank) and blank == _recipe_evidence['mesh_signature'](child)
     radius = axle_diameter / 2
     bore = radius + clearance
     head_radius = bore + head_overhang
@@ -58,4 +62,5 @@ def captive_axle(parent, child, pivot, axis, width=10, axle_diameter=6, clearanc
         cut(axle, slot)
     join(parent, place(axle, world))
     require_one_solid(parent, 'captive_axle', 'Put the pivot on the parent surface so the axle root is embedded in it.')
-    return joint(name or child.name + 'Axle', 'revolute', parent, child, direction(axis), pivot, limits, control)
+    connection = joint(name or child.name + 'Axle', 'revolute', parent, child, direction(axis), pivot, limits, control)
+    return record_feature('wheel-and-axle', connection) if made_wheel else connection

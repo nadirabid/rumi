@@ -194,7 +194,7 @@ function emptyProgress() {
 }
 
 /**
- * Review completed steps in registered Print Studio conversations.
+ * Review completed steps in registered Print Studio conversations, one active review per project.
  * @param {object} ctx Host context.
  * @param {object} config Review cadence, limits and decision threshold.
  * @param {Function} resolveKey Resolve the Baseten credential at turn admission.
@@ -204,9 +204,8 @@ function emptyProgress() {
 export function applySkillReminders(ctx, config, resolveKey, createUserMessage, transport = fetch) {
   if (!config.enabled) return
   const turns = new WeakMap()
-  const pending = new Set()
+  const projects = new Map()
   const lifetime = new AbortController()
-  let drain = null
 
   async function evaluate(state, { textStep, draft }, request) {
     const { step, actions, plan } = state
@@ -255,7 +254,7 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
     }
   }
 
-  async function drainReviews() {
+  async function drainReviews(cwd, pending) {
     for (const state of pending) {
       pending.delete(state)
       state.scheduledStep = state.step
@@ -269,32 +268,40 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
         state.settled = null
       }
     }
-    drain = null
+    projects.delete(cwd)
   }
 
   function schedule(state) {
     if (state.signal.aborted || state.step <= state.scheduledStep || state.sent.size === checkCount) return
     state.scheduledStep = state.step
     state.settled ??= Promise.withResolvers()
-    pending.add(state)
-    // Defer the pump until its owner has recorded the drain promise.
-    drain ??= Promise.resolve().then(drainReviews)
+    const project = projects.get(state.cwd)
+    if (project) {
+      project.pending.add(state)
+      return
+    }
+    const pending = new Set([state])
+    projects.set(state.cwd, { pending, drain: Promise.resolve().then(() => drainReviews(state.cwd, pending)) })
   }
 
   function closeTurn(session) {
     const state = turns.get(session)
     if (!state) return
     turns.delete(session)
-    pending.delete(state)
+    projects.get(state.cwd)?.pending.delete(state)
     state.controller.abort()
     state.settled?.resolve()
   }
 
   ctx.effect(() => async () => {
     lifetime.abort()
-    for (const state of pending) state.settled.resolve()
-    pending.clear()
-    await drain
+    const drains = []
+    for (const { pending, drain } of projects.values()) {
+      for (const state of pending) state.settled.resolve()
+      pending.clear()
+      drains.push(drain)
+    }
+    await Promise.all(drains)
   }, 'print-studio: skill reminder lifetime')
   ctx.on('agent/pre-step', async ({ agent, messages, turn, step, signal }, next) => {
     const request = messages.filter(message => message.source.kind === 'user').at(-1)

@@ -1,0 +1,208 @@
+/** Evaluate completed print turns outside the agent loop and expose the owner's badge collection. */
+import { constants, closeSync, fstatSync, openSync, readFileSync, realpathSync } from 'node:fs'
+import { basename, join, relative, resolve } from 'node:path'
+import { openBadgeStore } from './badges-store.js'
+import { PRINT_BADGE_KINDS } from './badges-kinds.js'
+
+const projectIdPattern = /^[a-f0-9-]{36}$/u
+
+function projectById(workspace, id) {
+  if (!projectIdPattern.test(id)) return null
+  try {
+    const root = realpathSync(workspace)
+    const path = join(root, id)
+    if (realpathSync(path) !== path) return null
+    const file = openSync(join(path, 'project.json'), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    try {
+      const info = fstatSync(file)
+      if (!info.isFile() || info.size > 1_048_576) return null
+      const metadata = JSON.parse(readFileSync(file, 'utf8'))
+      if (metadata?.id !== id || metadata.type !== 'print' || typeof metadata.name !== 'string' || !Array.isArray(metadata.sessionIds)) return null
+      return { id, path, name: metadata.name, type: metadata.type, sessionIds: metadata.sessionIds }
+    } finally { closeSync(file) }
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR' || error.code === 'ELOOP') return null
+    throw error
+  }
+}
+
+function owningProject(scope, session) {
+  const cwd = session.header.cwd
+  if (!cwd || !projectIdPattern.test(basename(cwd))) return null
+  const project = projectById(scope.workspaceRoot, basename(cwd))
+  if (!project || !project.sessionIds.includes(session.id) || realpathSync(cwd) !== project.path) return null
+  return project
+}
+
+function validationPath(event, project) {
+  if (event.data.name !== 'validation_mechanics' || event.data.isError) return null
+  let args = event.data.arguments
+  if (event.type === 'tool/call') {
+    try { args = JSON.parse(args) }
+    catch (_invalidToolJson) { return null }
+  }
+  return typeof args?.path === 'string' ? relative(project.path, resolve(project.path, args.path)).split('\\').join('/') : null
+}
+
+function turnEvents(observation, endSeq) {
+  const { events, inheritedEventCount } = observation
+  const end = events[endSeq]
+  if (!end || end.seq !== endSeq || end.type !== 'turn/end' || end.data.reason.kind !== 'completed' || endSeq < inheritedEventCount) {
+    throw new Error('The saved badge review does not reference a completed project turn')
+  }
+  let first = endSeq
+  while (first > inheritedEventCount && events[first - 1].type !== 'turn/end') first--
+  return events.slice(first, endSeq + 1)
+}
+
+function eligibleAwards(results, targets) {
+  return results.map(({ kind, evidence, evidenceRefs, modelPath, revision, sourceHash, working }) => {
+    if (!PRINT_BADGE_KINDS.includes(kind) || !targets.some(target => target.modelPath === modelPath && (target.changed || working === true)) || !evidence?.trim()
+      || typeof working !== 'boolean' || !revision || !/^[\da-f]{64}$/u.test(sourceHash)
+      || !Array.isArray(evidenceRefs) || !evidenceRefs.every(ref => typeof ref === 'string')) throw new Error('Invalid badge review result')
+    return { kind, evidence, evidenceRefs, modelPath, revision, sourceHash, working }
+  })
+}
+
+/** Observe revision changes at turn boundaries and run each project's review queue until disposal.
+ * @param {object} ctx Scoped Print Studio host services.
+ * @param {object} options Configured evaluator, revision inspector, and profile database path.
+ * @returns {object} Owner-only gallery, explicit retry, and quiescence operations.
+ */
+export function createBadgeHost(ctx, { databasePath, config, capture, review }) {
+  const store = openBadgeStore(databasePath)
+  const lifetime = new AbortController()
+  const turns = new WeakMap()
+  const workspace = ctx.rumiProjectScope.workspaceRoot
+  const tasks = new Map()
+
+  async function evaluate(job) {
+    const signal = lifetime.signal
+    const metadata = projectById(workspace, job.projectId)
+    if (!metadata?.sessionIds.includes(job.sessionId)) return []
+    const observed = await ctx.sessionQuery.observeSession(job.sessionId, { projectionMode: 'none', signal })
+    try {
+      const session = { id: observed.header.id, header: observed.header }
+      const project = owningProject(ctx.rumiProjectScope, session)
+      if (!project || project.id !== job.projectId || session.id !== job.sessionId) return []
+      const events = turnEvents(observed, job.turnEndSeq)
+      const results = await review(ctx, {
+        session, project, events, turnEndSeq: job.turnEndSeq, targets: job.targets, signal,
+        recordRequest: async record => {
+          signal.throwIfAborted()
+          if (!owningProject(ctx.rumiProjectScope, session)) throw new Error('The review project is no longer registered')
+          store.recordRequest(job, record)
+        },
+      }, config)
+      signal.throwIfAborted()
+      if (!owningProject(ctx.rumiProjectScope, session)) return []
+      return eligibleAwards(results, job.targets)
+    } finally { observed[Symbol.dispose]() }
+  }
+
+  async function drain(projectId) {
+    try {
+      while (!lifetime.signal.aborted) {
+        const job = store.take(projectId)
+        if (!job) break
+        try {
+          const awards = await evaluate(job)
+          lifetime.signal.throwIfAborted()
+          store.commit(job, awards)
+        } catch (error) {
+          if (lifetime.signal.aborted) return
+          store.fail(job)
+          ctx.logger.warn(`Print Studio badge review failed for ${job.sessionId}/${job.turnEndSeq}: ${error.code ?? error.name}`)
+        }
+      }
+    } catch (error) {
+      ctx.logger.warn(`Print Studio badge storage could not finish a review: ${error.code ?? error.name}`)
+    } finally {
+      tasks.delete(projectId)
+    }
+  }
+
+  function schedule(projectId) {
+    if (config.enabled === false || lifetime.signal.aborted || tasks.has(projectId)) return
+    const completion = Promise.resolve().then(() => drain(projectId))
+    tasks.set(projectId, completion)
+  }
+
+  function observe(session, event) {
+    if (event.type === 'turn/start') {
+      const project = owningProject(ctx.rumiProjectScope, session)
+      if (project) turns.set(session, { project, turn: event.data.turn, baseline: new Map(capture(project.path).map(item => [item.modelPath, item.statKey])), checked: new Set() })
+      return
+    }
+    const state = turns.get(session)
+    if (!state || (event.type !== 'tool/ptc-dispatch' && event.data.turn !== state.turn)) return
+    if (event.type === 'tool/call' || event.type === 'tool/ptc-dispatch') {
+      const path = validationPath(event, state.project)
+      if (path) state.checked.add(path)
+    }
+    if (event.type !== 'turn/end') return
+    turns.delete(session)
+    if (event.data.reason.kind !== 'completed' || !owningProject(ctx.rumiProjectScope, session)) return
+    const targets = []
+    for (const item of capture(state.project.path)) {
+      const changed = state.baseline.get(item.modelPath) !== item.statKey
+      if (changed || state.checked.has(item.modelPath)) targets.push({ ...item, changed })
+    }
+    if (targets.length) {
+      store.enqueue(state.project.id, session.id, event.seq, targets)
+      schedule(state.project.id)
+    }
+  }
+
+  function collection(projectId) {
+    const projects = new Map()
+    const project = id => {
+      if (projectId !== null && id !== projectId) return null
+      if (!projects.has(id)) projects.set(id, projectById(workspace, id))
+      return projects.get(id)
+    }
+    const awards = []
+    for (const award of store.awards()) {
+      const owner = project(award.projectId)
+      if (owner?.sessionIds.includes(award.sessionId)) awards.push({ ...award, projectName: owner.name })
+    }
+    const counts = { pending: 0, failed: 0 }
+    for (const { projectId: id, sessionId, status, count } of store.pendingByProject()) {
+      if (project(id)?.sessionIds.includes(sessionId)) counts[status === 'failed' ? 'failed' : 'pending'] += count
+    }
+    return { awards, ...counts }
+  }
+
+  ctx.on('session/event', (session, event) => {
+    if (config.enabled === false || lifetime.signal.aborted) return
+    try { observe(session, event) }
+    catch (error) { ctx.logger.warn(`Print Studio could not track a badge revision: ${error.code ?? error.name}`) }
+  })
+  ctx.effect(() => async () => {
+    lifetime.abort()
+    await Promise.all(tasks.values())
+    store.close()
+  }, 'print-studio: badge reviews')
+  for (const { projectId, status } of store.pendingByProject()) {
+    if (status === 'pending') schedule(projectId)
+  }
+  return {
+    collection,
+    knownProject: id => projectById(workspace, id) !== null,
+    retry(projectId) {
+      let queued = 0
+      for (const entry of store.pendingByProject()) {
+        if (entry.status !== 'failed' || (projectId !== null && entry.projectId !== projectId)) continue
+        if (config.enabled === false || !projectById(workspace, entry.projectId)?.sessionIds.includes(entry.sessionId)) continue
+        const updated = store.retry(entry.projectId, entry.sessionId)
+        if (updated) schedule(entry.projectId)
+        queued += updated
+      }
+      return { queued }
+    },
+    async whenIdle(projectId) {
+      if (projectId === undefined) await Promise.all(tasks.values())
+      else await tasks.get(projectId)
+    },
+  }
+}

@@ -1,0 +1,71 @@
+.rumi-badges {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: calc(var(--dsh-frame-top-clearance, 48px) + 28px) clamp(20px, 4vw, 56px) 48px;
+  color: var(--dsw-alias-label-primary);
+  background: radial-gradient(ellipse at 85% 0%, color-mix(in srgb, var(--dsw-alias-brand-primary) 5%, transparent), transparent 60%), var(--dsw-alias-bg-base);
+  -webkit-font-smoothing: antialiased;
+}
+.rumi-badges-heading { margin-bottom: 24px; }
+.rumi-badges-heading h1 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
+.rumi-badges-heading p, .rumi-badges-pending, .rumi-badges-notice {
+  margin: 6px 0 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.rumi-badges-pending, .rumi-badges-notice { margin: 0 0 16px; }
+.rumi-badges-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.rumi-badges-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 16px;
+  max-width: 1120px;
+  align-items: start;
+}
+.rumi-badge-card, .rumi-badges-skeleton {
+  min-width: 0;
+  box-sizing: border-box;
+  border-radius: 20px;
+  overflow-wrap: anywhere;
+}
+.rumi-badge-card { --rumi-tint: 56%; --rumi-sy: 3px; --rumi-sb: 10px; --rumi-sa: .075; }
+.rumi-badge-face { padding: 22px 20px 20px; }
+.rumi-badge-medallion {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  color: var(--dsw-alias-label-secondary);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--dsw-alias-bg-layer-2) 85%, transparent), transparent),
+    color-mix(in srgb, var(--dsw-alias-label-tertiary) 14%, var(--dsw-alias-bg-layer-1));
+  box-shadow: inset 0 1px 1px color-mix(in srgb, var(--dsw-alias-label-primary-foreground) 75%, transparent),
+    inset 0 0 0 1px var(--dsw-alias-border-l2), 0 2px 4px color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent);
+}
+.rumi-badge-card[data-earned] .rumi-badge-medallion {
+  color: var(--dsw-alias-state-done-primary);
+  background: linear-gradient(145deg, var(--dsw-alias-bg-layer-2), color-mix(in srgb, var(--dsw-alias-state-done-primary) 18%, var(--dsw-alias-bg-layer-1)));
+}
+.rumi-badge-card h2 { margin: 16px 0 4px; font-size: 16px; font-weight: 500; letter-spacing: -.012em; }
+.rumi-badge-description, .rumi-badge-projects p { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 1.5; }
+.rumi-badge-projects { padding: 0 20px; }
+.rumi-badge-projects summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 0;
+  border-top: 1px solid var(--dsw-alias-border-l2); font-size: 13px; font-weight: 500; cursor: pointer; list-style: none;
+}
+.rumi-badge-projects summary::-webkit-details-marker { display: none; }
+.rumi-badge-projects summary:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
+.rumi-badge-projects[open] summary svg { transform: rotate(90deg); }
+.rumi-badge-projects ul { list-style: none; padding: 0 0 16px; margin: 0; display: grid; gap: 12px; }
+.rumi-badge-projects h3 { margin: 0 0 2px; font-size: 13px; font-weight: 500; }
+.rumi-badge-projects .rumi-badge-checked { margin-top: 4px; font-size: 12px; }
+.rumi-badges-skeleton { height: 154px; background: var(--dsw-alias-bg-layer-1); }
+.rumi-badges-button[aria-pressed=true] { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-1); }
+@media (prefers-reduced-transparency: reduce) {
+  .rumi-badge-card::before { background: var(--dsw-alias-bg-layer-1); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}

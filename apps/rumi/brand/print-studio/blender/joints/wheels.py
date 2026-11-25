@@ -45,7 +45,8 @@ def through_axle(parent, child, pivot, axis, body_width, axle_diameter=6, wheel_
             _rib_ring(part, wheel_diameter / 2, wheel_width, centre, tread, 2.4)
     place(part, world)
     require_one_solid(parent, 'through_axle', 'The parent must be solid round the bore; keep body_width no larger than the parent is thick at the pivot.')
-    return joint(name or child + 'Axle', 'revolute', parent, part, direction(axis), pivot, limits, control)
+    connection = joint(name or child + 'Axle', 'revolute', parent, part, direction(axis), pivot, limits, control)
+    return record_feature('wheel-and-axle', connection)
 
 
 def _pegged_disc(name, radius, thickness, pegs, peg_radius, height):

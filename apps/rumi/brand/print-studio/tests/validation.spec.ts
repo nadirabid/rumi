@@ -263,6 +263,7 @@ it('records explicit validation tools and their results within one agent turn', 
   expect(recorded.map(value => ({
     stage: value.stage ?? value.status, status: value.status, printReady: value.printReady,
   }))).toMatchSnapshot()
+  expect(recorded[0].sourceHash).toBe(f.validation.read(agent.session.id).models[0].sourceHash)
   expect(recorded.at(-1)?.status).toBe('accepted')
   expect(adapter.requests[0]!.tools?.map(tool => tool.name).filter(name => name.startsWith('validation_')).sort())
     .toEqual(['validation_accept', 'validation_mechanics'])

@@ -118,8 +118,9 @@ def dovetail_slide(parent, child, pivot, axis, up, travel=30, length=16, stem_wi
                     length - 2, (0, 0, 0), 'X', 'Y'))
     join(child, place(key, world))
     require_one_solid(child, 'dovetail_slide', 'The stem must overlap the child; make the child cover the groove at the pivot.')
-    return joint(name or child.name + 'Slide', 'prismatic', parent, child, direction(axis), pivot,
-                 limits if limits is not None else (-travel / 2, travel / 2), control)
+    connection = joint(name or child.name + 'Slide', 'prismatic', parent, child, direction(axis), pivot,
+                       limits if limits is not None else (-travel / 2, travel / 2), control)
+    return record_feature('dovetail-slide', connection)
 
 
 def tslot_rail(parent, child, pivot, axis, up, travel=30, length=16, stem_width=6, head_width=12, head_height=4, neck_depth=3,

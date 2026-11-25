@@ -36,7 +36,7 @@ function translate(key: string, params?: Record<string, unknown>) {
 }
 
 const COPY: Record<string, string> = {
-  title: 'Projects', new: 'New', plugins: 'Plugins', back: 'All projects',
+  title: 'Projects', new: 'New', plugins: 'Plugins', back: 'All projects', goBack: 'Back',
   openPreview: 'Open sidebar', closePreview: 'Close sidebar', fullPreview: 'Full view', regularPreview: 'Regular view',
   empty: 'No projects yet.', emptyHint: 'Make one, then ask Rumi to help build it.',
   lastActive: 'Last active {when}', failed: 'That did not work. Try again.', untitled: 'Untitled project',
@@ -63,6 +63,7 @@ function fixture(host: {
   deleteOk?: boolean
   dockTab?: { id: string; kind: string }
   sidebarExpanded?: boolean
+  toolbar?: (slot: string, props: { openPage: (id: string, title: string) => void }) => React.ReactNode
 } = {}) {
   const sessionList = { byId: host.knownSessions ?? {} }
   type Injection = {
@@ -111,7 +112,7 @@ function fixture(host: {
     renameSession: vi.fn(async (_title: string) => {}),
     connect: vi.fn(async () => 'session-new'),
     openSession: vi.fn(),
-    selectPanel: vi.fn(),
+    selectPanel: vi.fn((panelId: string | null) => { host.activePanelId = panelId }),
     toggleSidebar: vi.fn(),
   }
   let expanded = host.sidebarExpanded ?? true
@@ -170,7 +171,8 @@ function fixture(host: {
         selector(React.useSyncExternalStore(sidebarSource!.subscribe, sidebarSource!.getSnapshot))
       const useSessions = (selector: (value: typeof sessionList) => unknown) =>
         selector(React.useSyncExternalStore(sessionsSource!.subscribe, sessionsSource!.getSnapshot))
-      return React.createElement(component, { t: translate, usePanelInfo, useSidebar, useSessions, ...injected })
+      return React.createElement(component, { t: translate, usePanelInfo, useSidebar, useSessions,
+        renderSlot: host.toolbar ?? (() => null), ...injected })
     },
   }
 }
@@ -370,6 +372,20 @@ it.each(['projects', null])('opens Plugins from the glass toolbar on panel %s', 
   expect(view.selectPanel).toHaveBeenCalledWith('plugins')
   expect(view.connect).not.toHaveBeenCalled()
   expect(view.posts).toEqual([])
+})
+
+it.each(['projects', null])('returns from a toolbar page to its opening panel %s', activePanelId => {
+  const view = fixture({ activePanelId, toolbar: (slot, { openPage }) => {
+    expect(slot).toBe('rumi.projects.toolbar')
+    return <button aria-label="Badges" onClick={() => openPage('print-studio-badges', 'Badges')} />
+  } })
+  render(view.view('shell.leading'))
+  const actions = [...document.querySelectorAll('.rumi-header-actions button')].map(button => button.getAttribute('aria-label'))
+  expect(actions.slice(-3)).toEqual(['Badges', 'Plugins', 'New'])
+  fireEvent.click(screen.getByRole('button', { name: 'Badges' }))
+  expect(view.selectPanel).toHaveBeenLastCalledWith('print-studio-badges')
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+  expect(view.selectPanel).toHaveBeenLastCalledWith(activePanelId)
 })
 
 it('omits sidebar controls on the project gallery', () => {

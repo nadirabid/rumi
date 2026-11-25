@@ -65,6 +65,6 @@ Host 端负责文件系统并返回各项目的绝对 `path`；浏览器端负�
 
 右侧栏从项目标题栏下方开始，保证预览标签和 Close 控件可见。
 
-顶栏在 Plugins 和 New 前提供 Full/Regular view 和 Open/Close sidebar 控件。关闭侧栏会保留标签，Open 会恢复它们。侧栏关闭时禁用尺寸控件。侧栏 Split 控件被隐藏。
+顶栏在侧栏控件与 Plugins 之间显示 Print Studio 的[徽章](../print-studio/README.zh.md#mechanical-badges)按钮。在徽章面板点击返回会回到上一个面板。关闭侧栏会保留标签，Open 会恢复它们。侧栏关闭时禁用尺寸控件。侧栏 Split 控件被隐藏。
 
 右键点击项目会打开玻璃菜单，包含“打开”和“删除”。删除前会先确认：提示框显示项目封面和名称，并说明无法恢复；默认选项是“取消”。确认后项目目录会从磁盘移除。浏览器没有可用的 canvas 时，玻璃效果退回为普通模糊。

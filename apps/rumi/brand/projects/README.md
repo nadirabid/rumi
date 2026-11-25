@@ -65,6 +65,6 @@ The app header has a separate tinted surface and a single divider; the underlyin
 
 The right sidebar starts below the project header so its preview tabs and Close controls remain visible.
 
-The top bar keeps Full/Regular view and Open/Close sidebar controls before Plugins and New. Closing the sidebar preserves its tabs; Open restores them. The size control is disabled while closed. Sidebar Split controls are hidden.
+The top bar places Print Studio’s [Badges](../print-studio/README.md#mechanical-badges) button between the sidebar controls and Plugins. Back returns from the collection to the previous panel. Closing the sidebar preserves its tabs; Open restores them. The size control is disabled while closed. Sidebar Split controls are hidden.
 
 Right-clicking a project opens a glass menu with Open and Delete. Delete asks first, in an alert that shows the project's cover and name and says it cannot be undone; Cancel is the default. Confirming removes the project directory from disk. Where the browser's canvas is unavailable, the glass falls back to a plain blur.

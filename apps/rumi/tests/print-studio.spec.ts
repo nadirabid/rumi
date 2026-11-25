@@ -34,3 +34,5 @@ import '../brand/print-studio/tests/fields.spec.ts'
 import '../brand/print-studio/tests/control-review.spec.ts'
 
 import '../brand/print-studio/tests/skill-reminders.spec.ts'
+import '../brand/print-studio/tests/badges-host.spec.ts'
+import '../brand/print-studio/tests/badge-review.spec.ts'

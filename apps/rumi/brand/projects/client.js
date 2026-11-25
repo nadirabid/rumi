@@ -28,6 +28,7 @@ window.__ModuleLoader__.load({
       new: 'New',
       plugins: 'Plugins',
       back: 'All projects',
+      goBack: 'Back',
       openPreview: 'Open sidebar',
       closePreview: 'Close sidebar',
       fullPreview: 'Full view',
@@ -48,6 +49,7 @@ window.__ModuleLoader__.load({
       new: '新建',
       plugins: '插件',
       back: '所有项目',
+      goBack: '返回',
       openPreview: '打开侧栏',
       closePreview: '关闭侧栏',
       fullPreview: '全屏视图',
@@ -607,12 +609,24 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
           );
         }
 
-        function Leading({ usePanelInfo, useSidebar, toggleSidebar, toggleMode, openPlugins, t }) {
+        function Leading({ usePanelInfo, useSidebar, toggleSidebar, toggleMode, selectPanel, renderSlot, t }) {
           const sidebar = useSidebar(value => value);
           const shown = sidebar !== 'closed' && sidebar !== 'none';
           const modeLabel = t(sidebar === 'full' ? 'regularPreview' : 'fullPreview');
           const toggleLabel = t(shown ? 'closePreview' : 'openPreview');
-          const onHome = usePanelInfo(info => info.activePanelId === PANEL_ID);
+          const activePanel = usePanelInfo(info => info.activePanelId);
+          const onHome = activePanel === PANEL_ID;
+          const [page, setPage] = React.useState(null);
+          const atPage = page !== null && page.id === activePanel;
+          const openPage = (id, title) => {
+            if (atPage && id === activePanel) {
+              selectPanel(page.origin);
+              setPage(null);
+              return;
+            }
+            setPage({ id, title, origin: activePanel });
+            selectPanel(id);
+          };
           const state = React.useSyncExternalStore(list.subscribe, list.getSnapshot);
           const project = state.projects.find(item => item.id === state.activeId);
           const [busy, setBusy] = React.useState(false);
@@ -621,13 +635,14 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
             setBusy(true);
             try { await list.create(); } finally { setBusy(false); }
           };
+          const title = atPage ? page.title : onHome ? t('title') : project?.name;
+          const back = t(atPage ? 'goBack' : 'back');
           return h('header', { className: 'rumi-projects-leading' },
             onHome ? null : h('button', {
-              type: 'button', className: 'rumi-glass', 'aria-label': t('back'), title: t('back'),
-              onClick: () => list.close(),
+              type: 'button', className: 'rumi-glass', 'aria-label': back, title: back,
+              onClick: () => atPage ? openPage(page.id, page.title) : list.close(),
             }, h(IconChevronLeftOutlineRegular, { size: 16 })),
-            h('span', { className: 'rumi-header-title', title: onHome ? t('title') : project?.name },
-              onHome ? t('title') : project?.name),
+            h('span', { className: 'rumi-header-title', title }, title),
             h('div', { className: 'rumi-header-actions' },
               sidebar === 'none' ? null : h(React.Fragment, null,
                 h(Tooltip, { label: modeLabel, side: 'bottom', portal: true, delayMs: 500 },
@@ -637,9 +652,10 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
                   h('button', { type: 'button', className: 'rumi-glass', 'aria-label': toggleLabel,
                     'aria-expanded': shown, onClick: toggleSidebar },
                     h(IconPanelLeftOutlineRegular, { size: 16, className: 'rumi-sidebar-glyph' })))),
+              renderSlot('rumi.projects.toolbar', { openPage, activePanel }),
               h(Tooltip, { label: t('plugins'), side: 'bottom', portal: true, delayMs: 500 },
                 h('button', {
-                  type: 'button', className: 'rumi-glass', 'aria-label': t('plugins'), onClick: openPlugins,
+                  type: 'button', className: 'rumi-glass', 'aria-label': t('plugins'), onClick: () => selectPanel('plugins'),
                 }, h(PluginsGlyph))),
               h('button', {
                 type: 'button', className: 'rumi-glass rumi-header-new', 'aria-label': t('new'), title: t('new'),
@@ -654,9 +670,10 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
         }, Gallery));
         ctx.slots.inject('shell.leading', () => ctx.slots.register({
           name: 'shell.leading', locale: NS,
+          children: { 'rumi.projects.toolbar': { kind: 'list', scope: 'root' } },
           inject: () => ({
             hooks: { sidebar: sidebarSource(ctx.sidebarRight) },
-            openPlugins: () => ctx.layout.selectPanel('plugins'),
+            selectPanel: id => ctx.layout.selectPanel(id),
             toggleSidebar: () => ctx.sidebarRight.toggleExpanded(),
             toggleMode: () => {
               const target = ctx.sidebarRight.commandTarget(null);

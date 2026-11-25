@@ -9,7 +9,7 @@ import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { apply } from '../src/index.js'
 import type { PrintBadgeEarned } from '../../print-studio/badges-event-types.js'
 
@@ -516,4 +516,43 @@ it('suspends an idle countdown when typed work starts and removes timers on clos
   expect(vi.getTimerCount()).toBe(0)
   f.owner.emit('api-session/status', SessionId('s'), false)
   expect(vi.getTimerCount()).toBe(0)
+})
+
+it('stays quiet during a delegated turn without forwarding tool calls or in-flight messages', async () => {
+  const f = await fixture()
+  await f.request('/session', { sessionId: 's' })
+  expect(f.offers[0]?.session.instructions).toContain('Stay silent while delegated work runs.')
+  expect(f.offers[0]?.session.instructions).not.toContain('unless useful to the user')
+  const socket = await f.started.promise
+
+  socket.send(JSON.stringify({ type: 'session.input_transcript.delta', delta: 'Round the back of the helmet' }))
+  socket.send(JSON.stringify({ type: 'session.delegation.created', delegation: { id: 'quiet-turn', target: 'client' } }))
+  await f.entered.promise
+  await expect.poll(() => f.frames.some(frame => frame.content?.includes('accepted the request into its inbox'))).toBe(true)
+
+  f.session.append('turn/start', { turn: 1 })
+  const echoedUser = f.session.append('user/message', createUserMessage({
+    content: [{ type: 'text', text: 'Round the back of the helmet' }], source: { kind: 'user' },
+  }), { surfaceOp: 'append' })
+  f.owner.emit('session/event', f.session, echoedUser)
+  f.owner.emit('session/event', f.session, { type: 'tool/call', data: { name: 'bash' } } as never)
+  f.owner.emit('session/event', f.session, { type: 'tool/call', data: { name: 'read_image' } } as never)
+  const midAssistant = f.session.append('assistant/message', {
+    turn: 1, step: 1, message: createAssistantMessage({ content: [{ type: 'text', text: 'Checking the mesh now.' }], source: { provider: 'test', model: 'test' } }),
+  }, { surfaceOp: 'append' })
+  f.owner.emit('session/event', f.session, midAssistant)
+  const finalAssistant = f.session.append('assistant/message', {
+    turn: 1, step: 2, message: createAssistantMessage({ content: [{ type: 'text', text: 'The back is rounded now.' }], source: { provider: 'test', model: 'test' } }),
+  }, { surfaceOp: 'append' })
+  f.owner.emit('session/event', f.session, finalAssistant)
+  f.session.append('turn/end', { turn: 1, reason: { kind: 'stop' } })
+
+  f.idle.resolve(undefined)
+  await expect.poll(() => f.frames.some(frame => frame.type === 'session.commentary.append')).toBe(true)
+
+  expect(f.frames.map(frame => ({ type: frame.type, content: frame.content }))).toEqual([
+    { type: 'session.thinking.append', content: '' },
+    { type: 'session.thinking.append', content: expect.stringContaining('accepted the request into its inbox') },
+    { type: 'session.commentary.append', content: 'The back is rounded now.' },
+  ])
 })

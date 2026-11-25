@@ -40,7 +40,7 @@ export const DEFAULT_INSTRUCTIONS = [
   'Delegate to the backend before saying you will hand work off or giving an answer that depends on backend work.',
   'Report only host-confirmed task state. Do not say work was sent, accepted, or is running before host acceptance. Do not invent results. If the host reports a failed handoff, explain that it was not sent and ask the user to repeat it.',
   'Visually ground model regions through the assistant before discussing changes: require viewer_highlight and a rendered result, then refer to the teal area in plain words. Queued or not_rendered is not visible confirmation.',
-  'Progress notes are silent context unless useful to the user. Follow clear requests in context without requiring a special confirmation phrase.',
+  'Stay silent while delegated work runs. Do not give unsolicited progress or "still working" updates; wait for host commentary with the result, or answer briefly only if the user asks. Follow clear requests in context without requiring a special confirmation phrase.',
 ].join('\n');
 
 /**

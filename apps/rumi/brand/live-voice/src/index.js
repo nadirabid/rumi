@@ -225,9 +225,6 @@ export function apply(ctx, config) {
   });
 }
 
-/** Shortest gap between two progress notes, so a busy turn stays quiet. */
-const NARRATION_INTERVAL_MS = 4_000;
-
 /** Allow a pending voice reply to start and leave time for buffered audio to play. */
 const VOICE_REPLY_GRACE_MS = 5_000;
 
@@ -239,35 +236,6 @@ function hasSpeechAudio(delta) {
     if (Math.abs(pcm.readInt16LE(offset)) >= 256) return true;
   }
   return false;
-}
-
-/**
- * Follow one Session's activity and report it as quiet progress.
- *
- * Only tool calls are narrated, and only one every few seconds: the point is a
- * voice that is not silent for minutes, not a transcript. Notes go through
- * `thinking`, so the model can follow along without speaking them.
- * @param {object} ctx - host plugin context.
- * @param {string} sessionId - Session to follow.
- * @param {(content: string) => void} note - Sends one thinking note.
- * @returns {() => void} Stops the subscription.
- */
-function narrate(ctx, sessionId, note) {
-  let lastAt = 0;
-  let lastTool = '';
-  const stop = ctx.on('session/event', (session, event) => {
-    if (session.id !== sessionId) return;
-    if (event.type !== 'tool/call') return;
-    const tool = event.data?.name;
-    if (typeof tool !== 'string' || tool === '') return;
-    const now = Date.now();
-    if (tool === lastTool && now - lastAt < NARRATION_INTERVAL_MS * 4) return;
-    if (now - lastAt < NARRATION_INTERVAL_MS) return;
-    lastAt = now;
-    lastTool = tool;
-    note(`The harness is using ${tool}.`);
-  });
-  return typeof stop === 'function' ? stop : () => {};
 }
 
 /**
@@ -293,8 +261,6 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sdp, session
   let agentRunning = agent.status === 'running';
   let stopStatus = () => {};
   const turns = new Set();
-  /** Stop the session-event narration; runs before the socket closes. */
-  let stopNarration = () => {};
   let stopContext = () => {};
   const pendingContext = [];
 
@@ -437,7 +403,6 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sdp, session
     journal.close();
     bridge.close();
     speechLifetime.abort();
-    stopNarration();
     stopContext();
     stopStatus();
     clearTimeout(idleTimer);
@@ -457,6 +422,7 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sdp, session
       : event.type === 'assistant/message' ? event.data.message : null;
     if (message === null) return;
     if (event.type === 'user/message' && event.data.source.kind === 'user') noteUserActivity();
+    if (bridge.busy) return;
     for (const content of contextChunks(conversationText(message))) {
       const frame = { type: 'session.thinking.append', delegation_id: null, content };
       if (live.open) live.send(frame);
@@ -484,23 +450,6 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sdp, session
   }
   for (const frame of pendingContext.splice(0)) live.send(frame);
   push({ type: 'ready', model });
-
-  /** The delegation whose work is running, or null between tasks. */
-  const currentDelegation = () => bridge.snapshot().inFlight?.delegationId ?? null;
-
-  /**
-   * Tell the voice model what the harness is doing without asking it to say it.
-   *
-   * These are `thinking` notes, so the model can follow along silently; the
-   * spoken answer arrives later as commentary.
-   */
-  const noteProgress = (content) => {
-    if (content === '') return;
-    journal.record('host.progress', { delegationId: currentDelegation(), content });
-    live.send({ type: 'session.thinking.append', event_id: randomUUID(), delegation_id: currentDelegation(), content });
-  };
-
-  stopNarration = narrate(ctx, sessionId, noteProgress);
 
   cap = setTimeout(() => end('max_session_minutes'), (config.maxSessionMinutes ?? 60) * 60_000);
   cap.unref?.();

@@ -178,7 +178,6 @@ export class LiveBridge {
   #start(task) {
     this.#inFlight = { ...task, startedAt: this.now() };
     this.log(`dispatch delegation ${task.delegationId}: ${task.text}`);
-    this.thinking(task.delegationId, 'The handoff is pending. Do not say the assistant accepted it until the host confirms acceptance.');
     this.dispatch(task);
   }
 

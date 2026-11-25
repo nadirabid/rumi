@@ -5,7 +5,7 @@ const CAMERA_RADIUS_FRACTION = 0.72
 const DEPTH_STRETCH = 5
 
 /**
- * Create the preview's dotted enclosure and its theme subscription.
+ * Create the dotted enclosure and apply its ink color and opacity from the viewer theme.
  * @param {HTMLElement} element - The stage inheriting the viewer's theme tokens.
  * @param {string} ink - The default dot color when theme tokens are unavailable.
  * @param {number} pixelRatio - The interactive renderer's pixel ratio.
@@ -27,7 +27,7 @@ export function createSphereGrid(element, ink, pixelRatio, redraw) {
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
   const uniforms = {
-    ink: { value: new THREE.Color(ink) }, opacity: { value: 0.34 },
+    ink: { value: new THREE.Color(ink) }, opacity: { value: 0.28 },
     size: { value: 2.6 * pixelRatio }, depthRadius: { value: 1 },
   }
   const material = new THREE.ShaderMaterial({

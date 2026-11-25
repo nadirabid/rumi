@@ -8,7 +8,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--dsw-alias-label-primary);
-  --pv-grid-opacity: .34;
+  --pv-grid-opacity: .28;
   background: var(--dsw-alias-bg-layer-1);
 }
 body[data-ds-dark-theme] .rumi-print-viewer {

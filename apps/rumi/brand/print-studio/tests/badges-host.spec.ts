@@ -15,6 +15,7 @@ import { MockAdapter, textResponse, toolCallResponse } from '../../../../../pack
 import { createProjectStore } from '../../projects/index.js'
 import { createBadgeHost } from '../badges-host.js'
 import { openBadgeStore } from '../badges-store.js'
+import type { PrintBadgeEarned } from '../badges-event-types.d.ts'
 import { BadgeReviewConfig, reviewPrintBadges } from '../badge-review.js'
 import { capturePrintBadgeRevisions } from '../badge-review-evidence.js'
 import { foldedPanels } from './fixtures/badge-fold.ts'
@@ -24,6 +25,7 @@ type Session = { id: string; header: { id: string; cwd: string } }
 type Input = { session: Session; signal: AbortSignal; targets: { modelPath: string; changed: boolean }[]; events: Event[]; recordRequest: (record: object) => Promise<void> }
 const disposers: (() => Promise<void> | void)[] = []
 afterEach(async () => { for (const dispose of disposers.splice(0).reverse()) await dispose() })
+const subscribeRequest = (signal?: AbortSignal) => new Request('http://localhost/api/print-studio/badges/events', { signal })
 
 function fixture() {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'rumi-badges-')))
@@ -55,7 +57,7 @@ function fixture() {
     return { finish, edit, emit, metadata, history, projectId, project, session, modelPath }
   }
   const main = createProject('Gearbox')
-  const start = (review: (input: Input) => Promise<object[]>) => {
+  const start = (review: (input: Input) => Promise<object[]>, onAward: (event: PrintBadgeEarned) => void = () => {}) => {
     let dispose: (() => Promise<void>) | undefined
     const ctx = {
       rumiProjectScope: { workspaceRoot: workspace }, logger: { warn: vi.fn() },
@@ -65,6 +67,7 @@ function fixture() {
         return { header: log.session.header, inheritedEventCount: 0, events: log.history.slice(), [Symbol.dispose]() {} }
       } },
       on(_type: string, handle: typeof listener) { listener = handle },
+      async parallel(_type: 'rumi/print-badge-earned', event: PrintBadgeEarned) { onAward(event) },
       effect(effect: () => () => Promise<void>) { dispose = effect() },
     }
     const host = createBadgeHost(ctx, { databasePath, config: {}, capture: capturePrintBadgeRevisions, review: (_ctx: object, input: Input) => review(input) })
@@ -82,7 +85,17 @@ it('awards a changed revision once per project and promotes it only with later w
     await input.recordRequest({ prompt: 'Exact independent request' })
     return [f.award(!input.targets[0]!.changed, String(input.events.at(-1)!.seq))]
   })
-  const host = f.start(review)
+  const announcements: PrintBadgeEarned[] = []
+  const host = f.start(review, event => {
+    const inspection = new DatabaseSync(f.databasePath, { readOnly: true })
+    try {
+      const stored = inspection.prepare('SELECT id FROM awards WHERE projectId=? AND kind=?').get(f.projectId, 'gear-pair')
+      expect(stored?.id).toBe(event.awards[0]?.id)
+      announcements.push(event)
+    } finally { inspection.close() }
+  })
+  const stream = host.subscribe(subscribeRequest())
+  expect(stream.headers.get('content-type')).toBe('text/event-stream; charset=utf-8')
   f.emit('turn/start'); f.edit(); f.finish()
   await host.whenIdle()
   const first = host.collection(null).awards[0]
@@ -98,11 +111,20 @@ it('awards a changed revision once per project and promotes it only with later w
   await host.whenIdle()
   expect(review).toHaveBeenCalledTimes(3)
   expect(host.collection(null).awards[0]?.id).toBe(first.id)
+  expect(announcements).toEqual([{
+    projectId: f.projectId, projectPath: f.project, projectName: 'Gearbox', awards: [{ id: first.id, kind: 'gear-pair' }],
+  }])
   const inspection = new DatabaseSync(f.databasePath, { readOnly: true })
   try { expect(inspection.prepare('SELECT count(*) AS total FROM requests').get()?.total).toBe(3) } finally { inspection.close() }
   expect(host.collection(randomUUID()).awards).toEqual([])
   f.metadata([])
   expect(host.collection(null).awards).toEqual([])
+  const lateSubscriber = host.subscribe(subscribeRequest())
+  await host.stop()
+  expect(await lateSubscriber.text()).toBe(': connected\n\n')
+  expect(await stream.text()).toBe(
+    `: connected\n\nevent: badge-earned\ndata: ${JSON.stringify({ projectId: f.projectId, projectName: 'Gearbox', awards: [{ id: first.id, kind: 'gear-pair' }] })}\n\n`,
+  )
 })
 
 it('keeps a failed review retryable after restarting and rejects unregistered sessions', async () => {
@@ -154,13 +176,51 @@ it('serializes claims across stores for one project and allows a different proje
   second.enqueue(separate.projectId, separate.session.id, 2, [])
   const other = second.take(separate.projectId)
   second.commit(other, [])
-  first.commit(job, [f.award(false)])
+  expect(() => second.commit(job, [f.award(false)])).toThrow('Badge review ownership changed')
+  expect(first.awards()).toEqual([])
+  expect(first.commit(job, [f.award(false)])).toMatchObject([{ kind: 'gear-pair' }])
   const next = second.take(f.projectId)
-  second.commit(next, [f.award(true)])
+  expect(second.commit(next, [f.award(true)])).toEqual([])
   first.enqueue(f.projectId, f.session.id, 3, [])
   const later = first.take(f.projectId)
   first.commit(later, [f.award(false)])
   expect(first.awards()).toMatchObject([{ working: true, turnEndSeq: 2 }])
+})
+
+it('closes an aborted badge subscription and keeps other clients subscribed', async () => {
+  const f = fixture()
+  const host = f.start(async () => [f.award()])
+  const aborted = new AbortController()
+  const reader = host.subscribe(subscribeRequest(aborted.signal)).body!.getReader()
+  expect(await reader.read()).toMatchObject({ done: false })
+  aborted.abort()
+  expect(await reader.read()).toEqual({ done: true, value: undefined })
+  const cancelled = host.subscribe(subscribeRequest())
+  await cancelled.body!.cancel()
+  const remaining = host.subscribe(subscribeRequest())
+  f.emit('turn/start'); f.edit(); f.finish()
+  await host.whenIdle()
+  await host.stop()
+  expect(await remaining.text()).toContain('\nevent: badge-earned\n')
+})
+
+it('keeps a batch of committed awards when an announcement listener fails', async () => {
+  const f = fixture()
+  const unavailable = vi.fn(() => { throw new Error('unavailable receiver') })
+  const host = f.start(async () => [f.award(), { ...f.award(), kind: 'living-hinge' }], unavailable)
+  const stream = host.subscribe(subscribeRequest())
+  f.emit('turn/start'); f.edit(); f.finish()
+  await host.whenIdle()
+  expect(host.collection(f.projectId)).toMatchObject({
+    awards: expect.arrayContaining([{ kind: 'gear-pair' }, { kind: 'living-hinge' }].map(award => expect.objectContaining(award))),
+    failed: 0,
+    pending: 0,
+  })
+  expect(unavailable).toHaveBeenCalledOnce()
+  await host.stop()
+  const frames = (await stream.text()).match(/^data: (.+)$/gm)
+  expect(frames).toHaveLength(1)
+  expect(JSON.parse(frames![0]!.slice('data: '.length)).awards.map((award: { kind: string }) => award.kind)).toEqual(['gear-pair', 'living-hinge'])
 })
 
 it('finishes a badge review in another project while remaining turns in the busy project wait', async () => {
@@ -205,6 +265,8 @@ it('records a custom fold from a finished project turn and keeps the badge revie
   const harness = await mountAgentLoopTestHarness(ctx)
   const host = createBadgeHost(ctx, { databasePath: join(home, 'print-studio', 'badges.sqlite'),
     config: BadgeReviewConfig({}), capture: capturePrintBadgeRevisions, review: reviewPrintBadges })
+  const announced: string[] = []
+  ctx.on('rumi/print-badge-earned', ({ awards }) => { announced.push(...awards.map(award => award.kind)) })
   ctx.effect(() => ctx.tools.register(defineContentToolFixture({
     name: 'save_model', description: 'Save the requested model revision.', parameters: {},
     async execute() {
@@ -243,9 +305,12 @@ it('records a custom fold from a finished project turn and keeps the badge revie
   using observed = await ctx.sessionQuery.observeSession(sessionId, { projectionMode: 'none' })
   const turns = observed.events.filter(event => event.type === 'turn/end')
   expect(earned?.turnEndSeq).toBe(turns[0]?.seq)
-  expect({ turns: turns.map(event => event.data.reason.kind), badge: earned?.kind, working: earned?.working,
+  expect({ turns: turns.map(event => event.data.reason.kind), badge: earned?.kind, announced, working: earned?.working,
     evidence: earned?.evidence, projects: host.collection(null).awards.map(item => item.projectName) }).toMatchInlineSnapshot(`
     {
+      "announced": [
+        "living-hinge",
+      ],
       "badge": "living-hinge",
       "evidence": "A thin strip joins the two thicker panels.",
       "projects": [

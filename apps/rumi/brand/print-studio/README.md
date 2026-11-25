@@ -20,9 +20,13 @@ To change what the modeling agent knows, start with the [print project instructi
 
 Open **Badges** beside **Plugins** to see the six mechanical badges. Earned badges appear first, ordered by the first time you earned each one across all projects. Open a badge’s project count to see which projects earned it and what the reviewer recognized. Each project earns a given badge once. A later passing movement check for the same mechanism can add movement evidence.
 
+When a project earns a new badge, a portrait glass tile spins into the center of the Rumi window, lands, and fades. It shows the mechanism and project name. With Reduce Motion on, the tile appears without the spin or stamp. If Live Voice is active in that project, it receives a short note about the badge that it can mention the next time it speaks. New awards stay in the collection if their reveal is missed.
+
 After a completed project turn changes a saved model, Print Studio reviews its final revision in the background. Chats in a project share one badge review queue. Different projects can run badge reviews concurrently. The reviewer uses the configured DeepSeek API connection independently of the project conversation. It receives part and joint descriptions, construction evidence, relevant project excerpts, and available movement checks. It can request local cross-sections to inspect custom mechanisms. The badge describes a feature in the design. Physical print performance requires its own test.
 
 For a removable dovetail saved in its locked pose, Print Studio can compare both mating profiles on a shared grid across the declared removal direction. Matching flared geometry can earn **Dovetail slide** before a movement check passes.
+
+For a custom living hinge, Print Studio samples additional cross-sections when the first cuts miss a short flexing web. Matching cuts through the web and its thicker sides help distinguish a hinge from a gap or a shallow groove.
 
 Rumi stores awards, pending reviews, and a private record of evaluator requests in `~/.rumi/print-studio/badges.sqlite`. The database follows `DSH_RUMI_HOME`. Failed reviews can be retried from **Badges** after reconnecting the provider. The [Print Studio configuration](index.js) exposes `badgeReview` and `badgeDatabase`.
 

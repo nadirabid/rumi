@@ -258,6 +258,10 @@ export async function apply(ctx, config) {
       databasePath: config.badgeDatabase, config: config.badgeReview,
       capture: capturePrintBadgeRevisions, review: reviewPrintBadges,
     })
+    scoped.effect(() => scoped.connection.fetch.register({
+      path: ROUTE + '/badges/events', methods: ['GET'], requestBody: 'buffered',
+      fetch: async (request) => badges.subscribe(request),
+    }), 'print-studio: badge events')
     for (const [suffix, method, action] of [['/badges', 'GET', 'collection'], ['/badges/retry', 'POST', 'retry']]) {
       scoped.effect(() => scoped.connection.fetch.register({
         path: ROUTE + suffix, methods: [method], requestBody: 'buffered',

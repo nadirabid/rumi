@@ -1,5 +1,6 @@
 /** Voice transports and pending starts belong to the plugin's Cordis lifetime. */
 import { Context } from '@deepseek-ai/cordis'
+import { brandString } from '@deepseek-ai/dsh-brand'
 import { afterEach, expect, it, vi } from 'vitest'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { once } from 'node:events'
@@ -10,6 +11,7 @@ import { join } from 'node:path'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { apply } from '../src/index.js'
+import type { PrintBadgeEarned } from '../../print-studio/badges-event-types.js'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -91,11 +93,21 @@ async function fixture(acknowledge = true, config = {}, initiallyRunning = false
   let flushed = false
   const session = new Session(SessionId('s'))
   const other = new Session(SessionId('other'))
+  const projectPath = join(diagnosticsDirectory, 'projects', 'dragon')
+  const otherProjectPath = join(diagnosticsDirectory, 'projects', 'car')
+  owner.provide('rumiProjectScope', {
+    rootFor(candidate: Session) {
+      if (candidate === session) return projectPath
+      if (candidate === other) return otherProjectPath
+      throw new Error('Unknown project session')
+    },
+  })
   session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'Make the dragon red, with a handle.' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
   other.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'Other conversation: a blue car.' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
-  const frames: { type: string; content?: string }[] = []
+  const frames: { type: string; content?: string; event_id?: string }[] = []
   const ctx = {
     effect: owner.effect.bind(owner),
+    inject: owner.inject.bind(owner),
     provide: owner.provide.bind(owner),
     on: owner.on.bind(owner),
     connection: { fetch: { register(route: { path: string; fetch: (request: Request) => Promise<Response> }) {
@@ -116,7 +128,7 @@ async function fixture(acknowledge = true, config = {}, initiallyRunning = false
   const request = (path: string, body?: object) => routes.get(`/api/live-voice${path}`)!(new Request(`http://rumi${path}`, {
     method: body ? 'POST' : 'GET', body: body ? JSON.stringify(path === '/session' ? { sdp: 'v=0 test offer', ...body } : body) : undefined,
   }))
-  return { injected, steered, registry: owner.get('liveVoice'), diagnosticsDirectory, owner, session, other, frames, offers, authorizations, request, started, offered, respond, holdProviderClose, entered, idle, flushed: () => flushed, key: () => key }
+  return { injected, steered, registry: owner.get('liveVoice'), diagnosticsDirectory, owner, session, other, projectPath, otherProjectPath, frames, offers, authorizations, request, started, offered, respond, holdProviderClose, entered, idle, flushed: () => flushed, key: () => key }
 }
 
 it('closes an established socket when its Cordis owner unloads', async () => {
@@ -189,6 +201,43 @@ it('keeps voice exclusive until the provider closes and ignores stale close IDs'
   expect(f.offers).toHaveLength(2)
   expect(f.flushed()).toBe(false)
   f.idle.resolve(undefined)
+})
+
+it('shares new badge awards as silent context only with active voice for the owning project', async () => {
+  const f = await fixture()
+  type Award = PrintBadgeEarned['awards'][number]
+  const award = (projectPath: string, id: string, kind: Award['kind']) => f.owner.parallel('rumi/print-badge-earned', {
+    projectId: brandString<PrintBadgeEarned['projectId']>(projectPath),
+    projectPath,
+    projectName: 'A project title never needed in voice context',
+    awards: [{ id: brandString<Award['id']>(id), kind }],
+  })
+  await award(f.projectPath, 'older', 'barrel-hinge')
+  const { liveId } = await (await f.request('/session', { sessionId: 's' })).json()
+  await award(f.otherProjectPath, 'elsewhere', 'gear-pair')
+  await award(f.projectPath, 'new-award', 'dovetail-slide')
+  await expect.poll(() => f.frames).toMatchObject([{
+    type: 'session.thinking.append', event_id: expect.any(String), delegation_id: null,
+    content: expect.stringContaining('The user just earned the Dovetail slide badge in this project.'),
+  }])
+  const note = f.frames[0]!
+  expect(note.content).toContain('your next relevant reply')
+  expect(note.content).not.toContain('project title')
+
+  const acknowledgment = f.holdProviderClose()
+  const closing = f.request('/close', { liveId })
+  await acknowledgment.requested
+  await award(f.projectPath, 'after-stop', 'rack-and-pinion')
+  acknowledgment.release()
+  expect((await closing).status).toBe(204)
+  expect(f.frames.map(frame => frame.type)).toEqual(['session.thinking.append', 'session.close'])
+  expect(f.steered).toEqual([])
+  expect(f.injected).toEqual([])
+
+  const log = await readFile(join(f.diagnosticsDirectory, `${liveId}.jsonl`), 'utf8')
+  expect(log.trim().split('\n').map(line => JSON.parse(line)).filter(row => row.type === 'host.thinking')).toEqual([
+    expect.objectContaining({ data: { delegationId: null, eventId: note.event_id, awardIds: ['new-award'], content: note.content } }),
+  ])
 })
 
 it('allows another conversation to start after the provider rejects an offer', async () => {

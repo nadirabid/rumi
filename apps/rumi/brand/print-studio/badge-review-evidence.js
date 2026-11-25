@@ -503,22 +503,37 @@ function section(points, triangles, axis, fraction, extent, cropped = false) {
   })) }
 }
 
+function hasThinWeb({ verticalSpansMm }) {
+  const spans = verticalSpansMm.map(item => item.span)
+  const side = Math.min(Math.max(spans[0], spans[1]), Math.max(spans[5], spans[6]))
+  return side > 0 && spans.slice(2, 5).some(span => span > 0 && span <= .4 * side)
+}
+
 /**
- * Inspect selected axes of known mesh parts with fixed, coarse local cross-sections.
+ * Require corroborating thin web measurements at separate cuts.
+ * @param {object} section Evidence for an axis of one saved part.
+ * @returns {boolean} Whether at least two contours record a thinner central span between thicker sides.
+ */
+export function showsThinWeb(section) {
+  return section.contours.filter(hasThinWeb).length >= 2
+}
+
+/**
+ * Inspect selected axes of known mesh parts. For a possible fold, sample additional supporting cuts when the standard cuts miss it.
  * @param {object} geometry Geometry from the immutable reviewed revision.
- * @param {{part: string, axis: string}[]} requests At most three references admitted by the reviewer.
+ * @param {{part: string, axis: string, sampleThinWeb?: boolean}[]} requests At most three inspected axes. The initial single-mesh review may enable the extra sampling.
  * @returns {object[]} Local contours, axis and size in millimetres, each with a citeable identifier.
  */
 export function inspectPrintBadgeParts(geometry, requests) {
-  return requests.flatMap(({ part, axis }) => {
+  return requests.flatMap(({ part, axis, sampleThinWeb }) => {
     const entry = geometry.parts.find(item => item.ref === part)
     if (!entry || !['x', 'y', 'z'].includes(axis)) return []
-    const inspected = inspectPart(geometry.specs, entry, axis, entry.extent)
+    const inspected = inspectPart(geometry.specs, entry, axis, entry.extent, undefined, sampleThinWeb)
     return inspected ? [inspected] : []
   })
 }
 
-function inspectPart(specs, entry, axis, extent, frame) {
+function inspectPart(specs, entry, axis, extent, frame, sampleThinWeb = false) {
   const points = property(specs, entry.path, 'points')
   const counts = property(specs, entry.path, 'faceVertexCounts')
   const triangles = property(specs, entry.path, 'faceVertexIndices')
@@ -527,10 +542,22 @@ function inspectPart(specs, entry, axis, extent, frame) {
   const part = entry.ref
   const index = 'xyz'.indexOf(axis)
   const [horizontalAxis, verticalAxis] = [...'xyz'].filter(value => value !== axis)
+  const cut = fraction => ({ fraction, ...section(points, triangles, index, fraction, extent, Boolean(frame)) })
+  const contours = [.23, .51, .76].map(cut)
+  if (sampleThinWeb && verticalAxis === 'z') {
+    let supportingCuts = contours.filter(hasThinWeb).length
+    for (const fraction of [.36, .64, .11, .89]) {
+      if (supportingCuts >= 2) break
+      const candidate = cut(fraction)
+      if (!hasThinWeb(candidate)) continue
+      contours.push(candidate)
+      supportingCuts += 1
+    }
+    contours.sort((left, right) => left.fraction - right.fraction)
+  }
   return { ref: frame ? `mating:${part}:${axis}` : `section:${part}:${axis}`, part, axis, horizontalAxis, verticalAxis,
     sizeMm: extent[1].map((upper, i) => number((upper - extent[0][i]) * 1000)),
-    ...(frame ? { frame } : {}),
-    contours: [.23, .51, .76].map(fraction => ({ fraction, ...section(points, triangles, index, fraction, extent, Boolean(frame)) })) }
+    ...(frame ? { frame } : {}), contours }
 }
 
 function inspectRemovableMatingParts({ specs, parts, joints, removal }) {

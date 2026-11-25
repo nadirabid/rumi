@@ -73,17 +73,23 @@ export function openBadgeStore(path) {
       db.prepare('INSERT INTO requests(sessionId,turnEndSeq,payload) VALUES(?,?,?)')
         .run(job.sessionId, job.turnEndSeq, JSON.stringify(request))
     },
+    /** @returns {object[]} Award IDs and kinds inserted by the committed transaction. */
     commit(job, awards) {
       db.exec('BEGIN IMMEDIATE')
       try {
+        const inserted = []
+        const write = db.prepare(`INSERT INTO awards(projectId,kind,id,earnedAt,sessionId,turnEndSeq,detail) VALUES(?,?,?,?,?,?,?)
+          ON CONFLICT(projectId,kind) DO UPDATE SET sessionId=excluded.sessionId,turnEndSeq=excluded.turnEndSeq,detail=excluded.detail
+          WHERE json_extract(awards.detail,'$.working')=0 AND json_extract(excluded.detail,'$.working')=1
+          RETURNING id,kind`)
         for (const award of awards) {
-          db.prepare(`INSERT INTO awards(projectId,kind,id,earnedAt,sessionId,turnEndSeq,detail) VALUES(?,?,?,?,?,?,?)
-            ON CONFLICT(projectId,kind) DO UPDATE SET sessionId=excluded.sessionId,turnEndSeq=excluded.turnEndSeq,detail=excluded.detail
-            WHERE json_extract(awards.detail,'$.working')=0 AND json_extract(excluded.detail,'$.working')=1`)
-            .run(job.projectId, award.kind, randomUUID(), new Date().toISOString(), job.sessionId, job.turnEndSeq, JSON.stringify(award))
+          const id = randomUUID()
+          const saved = write.get(job.projectId, award.kind, id, new Date().toISOString(), job.sessionId, job.turnEndSeq, JSON.stringify(award))
+          if (saved?.id === id) inserted.push({ id, kind: award.kind })
         }
         finish(job, 'done')
         db.exec('COMMIT')
+        return inserted
       } catch (error) { db.exec('ROLLBACK'); throw error }
     },
     fail(job) { finish(job, 'failed') },

@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { BadgeReviewConfig, capturePrintBadgeRevisions, reviewPrintBadges } from '../badge-review.js'
 import { inspectPrintBadgeParts, readPrintBadgeEvidence } from '../badge-review-evidence.js'
 import { robotUsd } from './fixtures/robot-usd.js'
-import { foldedPanels } from './fixtures/badge-fold.ts'
+import { foldedPanels, slottedPanels } from './fixtures/badge-fold.ts'
 import { lockedSlide } from './fixtures/badge-locked-slide.ts'
 
 const modelPath = 'models/sample/model.usda'
@@ -193,6 +193,25 @@ it('withholds a living hinge when a shallow groove leaves most panel thickness',
     }] }
   }])
   await expect(reviewPrintBadges(r.ctx, r.input, r.config)).resolves.toEqual([])
+})
+
+it.each([
+  { description: 'the narrow web is between two relief slots', web: .6, expectedCuts: [.23, .36, .51, .76], earned: true },
+  { description: 'the cut between two relief slots leaves most panel thickness', web: 3, expectedCuts: [.23, .51, .76], earned: false },
+  { description: 'the seam stays open', web: 0, expectedCuts: [.23, .51, .76], earned: false },
+])('checks a slotted seam when $description', async ({ web, expectedCuts, earned }) => {
+  const f = await fixture(slottedPanels(web))
+  const r = reviewer(f, [request => {
+    const { sections } = prompt(request)
+    const { contours } = sections.find((section: { axis: string }) => section.axis === 'y')
+    expect(contours.map((cut: { fraction: number }) => cut.fraction)).toEqual(expectedCuts)
+    const middle = contours.find((cut: { fraction: number }) => cut.fraction === .51)
+    expect(middle.verticalSpansMm[3].span).toBe(web || null)
+    return foldFinding
+  }])
+  const result = await reviewPrintBadges(r.ctx, r.input, r.config)
+  if (earned) expect(result).toMatchObject([{ kind: 'living-hinge', working: false }])
+  else expect(result).toEqual([])
 })
 
 it('accepts a living hinge publication receipt in a one-part model with no rigid joint', async () => {

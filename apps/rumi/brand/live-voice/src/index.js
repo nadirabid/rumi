@@ -32,6 +32,14 @@ export const inject = ['connection', 'sessionController', 'sessions', 'credentia
 
 const ROUTE = '/api/live-voice';
 const DEFAULT_IDLE_TIMEOUT_MINUTES = 5;
+const PRINT_BADGE_NAMES = new Map([
+  ['barrel-hinge', 'Barrel hinge'],
+  ['living-hinge', 'Living hinge'],
+  ['wheel-and-axle', 'Wheel and axle'],
+  ['dovetail-slide', 'Dovetail slide'],
+  ['gear-pair', 'Gear pair'],
+  ['rack-and-pinion', 'Rack and pinion'],
+]);
 
 /** @typedef {{liveId: string, entry?: Awaited<ReturnType<typeof createEntry>>, stopping?: Promise<void>}} VoiceReservation */
 
@@ -131,6 +139,14 @@ export function apply(ctx, config) {
     void drained.then(() => draining.delete(drained));
     return current.stopping;
   };
+
+  ctx.inject(['rumiProjectScope'], scoped => {
+    scoped.on('rumi/print-badge-earned', ({ projectPath, awards }) => {
+      const current = reservation;
+      if (!current?.entry || current.stopping || lifetime.signal.aborted) return;
+      current.entry.noteBadges(scoped.rumiProjectScope, projectPath, awards);
+    });
+  });
 
   register('/session', ['POST'], async (request) => {
     const body = await readJson(request);
@@ -493,6 +509,25 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sdp, session
   return {
     get closed() { return isClosed; },
     answer,
+    noteBadges(scope, projectPath, awards) {
+      if (isClosed || !live.open) return;
+      let root;
+      try { root = scope.rootFor(session); }
+      catch (_unregisteredSession) {
+        // Voice can be open while its project is removed or its chat is detached.
+        return;
+      }
+      if (root !== projectPath) return;
+      const names = awards.map(award => PRINT_BADGE_NAMES.get(award.kind)).filter(Boolean);
+      if (names.length === 0) return;
+      const awardNote = names.length === 1
+        ? `The user just earned the ${names[0]} badge in this project.`
+        : `The user just earned these badges in this project. ${names.join(', ')}.`;
+      const content = `${awardNote} You may mention this briefly in your next relevant reply, in the user's language. Wait for a normal chance to speak. Print readiness requires a separate check.`;
+      const eventId = randomUUID();
+      journal.record('host.thinking', { delegationId: null, eventId, awardIds: awards.map(award => award.id), content });
+      if (!isClosed) live.send({ type: 'session.thinking.append', event_id: eventId, delegation_id: null, content });
+    },
     closeTransport() {
       end('close_requested', false);
       return live.close();

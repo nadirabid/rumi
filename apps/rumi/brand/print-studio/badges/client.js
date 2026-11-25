@@ -1,10 +1,13 @@
 /** Project awards and their supporting evidence in Rumi's global badge collection. */
 import stylesheet from './collection.css?inline'
 import { PRINT_BADGE_KINDS as kinds } from '../badges-kinds.js'
+import { createBadgeAwardFeed } from './award-feed.js'
 
 const PANEL = 'print-studio-badges'
 const NS = 'rumi.printBadges'
 const ROUTE = '/api/print-studio/badges'
+const REVEAL_HOLD_MS = 3_700
+const REVEAL_FADE_MS = 600
 
 const en = {
   title: 'Badges', empty: 'Build a mechanism in a project to earn its badge.',
@@ -13,6 +16,9 @@ const en = {
   loadError: 'Your badges couldn’t be loaded.', retryError: 'The badge check couldn’t be restarted.',
   retry: 'Try again', oneProject: '1 project', projects: '{count} projects',
   movementChecked: 'Movement checked',
+  earned: 'Badge earned',
+  earnedAnnouncement: 'You earned the {badge} badge in {project}.',
+  dismissReveal: 'Dismiss badge reveal',
   'barrel-hinge': 'Barrel hinge', 'living-hinge': 'Living hinge', 'wheel-and-axle': 'Wheel and axle',
   'dovetail-slide': 'Dovetail slide', 'gear-pair': 'Gear pair', 'rack-and-pinion': 'Rack and pinion',
 }
@@ -23,6 +29,9 @@ const zh = {
   loadError: '徽章未能加载', retryError: '未能重新开始徽章检查',
   retry: '再试一次', oneProject: '1 个项目', projects: '{count} 个项目',
   movementChecked: '已检查活动情况',
+  earned: '获得徽章',
+  earnedAnnouncement: '你在{project}项目中获得了{badge}徽章。',
+  dismissReveal: '关闭徽章提示',
   'barrel-hinge': '圆筒铰链', 'living-hinge': '柔性铰链', 'wheel-and-axle': '车轮与轮轴',
   'dovetail-slide': '燕尾导轨', 'gear-pair': '齿轮组', 'rack-and-pinion': '齿轮齿条',
 }
@@ -43,9 +52,12 @@ const medal = 'M8 13.5 6.5 21 11 18.5 13.5 21l.6-6.5 M16 13.5l2.2 7.5-4.6-2.5 M1
  * @param {object} ctx - The current Print Studio client scope.
  * @param {object} React - Shell React instance.
  * @param {object} primitives - Shared controls and tooltip components.
+ * @param {Function} createPortal - Shell portal for the reveal above floating project panes.
  */
-export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOutlineRegular }) {
+export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOutlineRegular, IconCloseOutlineRegular }, createPortal) {
   const h = React.createElement
+  const feed = createBadgeAwardFeed(ROUTE + '/events')
+  ctx.effect(feed.connect, 'print badges: award events')
   ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'print badges: locale')
   ctx.effect(() => {
     const style = document.createElement('style')
@@ -81,11 +93,71 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
           award.working && h('p', { className: 'rumi-badge-checked' }, t('movementChecked')))))))
   }
 
+  function RevealCard({ award, t }) {
+    const [hovered, setHovered] = React.useState(false)
+    const [focused, setFocused] = React.useState(false)
+    const [visible, setVisible] = React.useState(() => !document.hidden)
+    const [leaving, setLeaving] = React.useState(false)
+    React.useEffect(() => {
+      const onVisibility = () => setVisible(!document.hidden)
+      document.addEventListener('visibilitychange', onVisibility)
+      return () => document.removeEventListener('visibilitychange', onVisibility)
+    }, [])
+    React.useEffect(() => {
+      setLeaving(false)
+      if (hovered || focused || !visible) return
+      const fade = setTimeout(() => setLeaving(true), REVEAL_HOLD_MS)
+      const dismiss = setTimeout(() => feed.dismiss(award.id), REVEAL_HOLD_MS + REVEAL_FADE_MS)
+      return () => { clearTimeout(fade); clearTimeout(dismiss) }
+    }, [award.id, hovered, focused, visible])
+
+    const dismiss = () => feed.dismiss(award.id)
+    return h('aside', {
+      className: 'rumi-badge-reveal', hidden: !visible,
+      'data-leaving': leaving || undefined,
+      style: { '--badge-fade': REVEAL_FADE_MS + 'ms' },
+      onPointerEnter: event => { if (event.pointerType !== 'touch') setHovered(true) },
+      onPointerLeave: () => setHovered(false),
+      onFocus: () => setFocused(true),
+      onBlur: event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false) },
+      onKeyDown: event => {
+        if (event.key !== 'Escape') return
+        event.stopPropagation()
+        dismiss()
+      },
+    },
+    h('div', { className: 'rumi-badge-reveal-scene' },
+      h('div', { className: 'rumi-badge-reveal-flight' },
+        h('div', { className: 'rumi-badge-reveal-plate' },
+          h('div', { className: 'rumi-badge-reveal-side rumi-badge-reveal-front' },
+            h('p', { className: 'rumi-badge-reveal-label' }, t('earned')),
+            h('div', { className: 'rumi-badge-reveal-art', 'data-kind': award.kind, 'aria-hidden': true },
+              award.kind === 'living-hinge'
+                ? h('div', { className: 'rumi-badge-reveal-hinge' }, h('span'))
+                : h(Glyph, { kind: award.kind, size: 96 })),
+            h('div', { className: 'rumi-badge-reveal-content' },
+              h('p', { className: 'rumi-badge-reveal-title' }, t(award.kind)),
+              h('p', { className: 'rumi-badge-reveal-project' }, h('bdi', null, award.projectName)))),
+          h('div', { className: 'rumi-badge-reveal-side rumi-badge-reveal-back', 'aria-hidden': true },
+            h(Glyph, { size: 85 }))))),
+    h(Button, { className: 'rumi-badge-reveal-dismiss', size: 'sm', variant: 'ghost',
+      'aria-label': t('dismissReveal'), onClick: dismiss }, h(IconCloseOutlineRegular, { size: 16, 'aria-hidden': 'true' })))
+  }
+
+  function Reveal({ t }) {
+    const award = React.useSyncExternalStore(feed.subscribe, feed.active)
+    return h(React.Fragment, null,
+      h('div', { className: 'rumi-badge-announcement', role: 'status' },
+        award ? t('earnedAnnouncement', { badge: t(award.kind), project: award.projectName }) : ''),
+      award && createPortal(h(RevealCard, { key: award.id, award, t }), document.body))
+  }
+
   function Collection({ t }) {
     const [data, setData] = React.useState(null)
     const [error, setError] = React.useState(null)
     const [refresh, setRefresh] = React.useState(0)
     const [retrying, setRetrying] = React.useState(false)
+    const awardRevision = React.useSyncExternalStore(feed.subscribe, feed.revision)
     const retryRequest = React.useRef(null)
     React.useEffect(() => () => retryRequest.current?.abort(), [])
     React.useEffect(() => {
@@ -118,7 +190,7 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
         clearTimeout(timer)
         document.removeEventListener('visibilitychange', load)
       }
-    }, [refresh])
+    }, [refresh, awardRevision])
     async function retry() {
       if (retryRequest.current) return
       if (error === 'loadError') {
@@ -170,4 +242,7 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
     name: 'rumi.projects.toolbar', id: 'print-studio-badges', locale: NS,
   }, Toolbar))
   ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL, locale: NS }, Collection))
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay', id: 'print-studio-badge-reveal', locale: NS,
+  }, Reveal))
 }

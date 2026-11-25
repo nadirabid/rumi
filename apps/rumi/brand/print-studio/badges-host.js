@@ -1,6 +1,7 @@
 /** Evaluate completed print turns outside the agent loop and expose the owner's badge collection. */
 import { constants, closeSync, fstatSync, openSync, readFileSync, realpathSync } from 'node:fs'
 import { basename, join, relative, resolve } from 'node:path'
+import { createBadgeEvents } from './badges-events.js'
 import { openBadgeStore } from './badges-store.js'
 import { PRINT_BADGE_KINDS } from './badges-kinds.js'
 
@@ -67,10 +68,11 @@ function eligibleAwards(results, targets) {
 /** Observe revision changes at turn boundaries and run each project's review queue until disposal.
  * @param {object} ctx Scoped Print Studio host services.
  * @param {object} options Configured evaluator, revision inspector, and profile database path.
- * @returns {object} Owner-only gallery, explicit retry, and quiescence operations.
+ * @returns {object} Owner-only gallery, live announcements, explicit retry, and quiescence operations.
  */
 export function createBadgeHost(ctx, { databasePath, config, capture, review }) {
   const store = openBadgeStore(databasePath)
+  const reveals = createBadgeEvents()
   const lifetime = new AbortController()
   const turns = new WeakMap()
   const workspace = ctx.rumiProjectScope.workspaceRoot
@@ -105,14 +107,27 @@ export function createBadgeHost(ctx, { databasePath, config, capture, review }) 
       while (!lifetime.signal.aborted) {
         const job = store.take(projectId)
         if (!job) break
+        let inserted
         try {
           const awards = await evaluate(job)
           lifetime.signal.throwIfAborted()
-          store.commit(job, awards)
+          inserted = store.commit(job, awards)
         } catch (error) {
           if (lifetime.signal.aborted) return
           store.fail(job)
           ctx.logger.warn(`Print Studio badge review failed for ${job.sessionId}/${job.turnEndSeq}: ${error.code ?? error.name}`)
+          continue
+        }
+        if (inserted.length > 0) {
+          try {
+            const project = projectById(workspace, projectId)
+            if (!project?.sessionIds.includes(job.sessionId)) continue
+            const announcement = { projectId, projectName: project.name, awards: inserted }
+            reveals.publish(announcement)
+            await ctx.parallel('rumi/print-badge-earned', { ...announcement, projectPath: project.path })
+          } catch (error) {
+            ctx.logger.warn(`Print Studio saved the badges for ${job.sessionId}/${job.turnEndSeq} but could not present them: ${error.code ?? error.name}`)
+          }
         }
       }
     } catch (error) {
@@ -180,6 +195,7 @@ export function createBadgeHost(ctx, { databasePath, config, capture, review }) 
   })
   ctx.effect(() => async () => {
     lifetime.abort()
+    reveals.close()
     await Promise.all(tasks.values())
     store.close()
   }, 'print-studio: badge reviews')
@@ -188,6 +204,7 @@ export function createBadgeHost(ctx, { databasePath, config, capture, review }) 
   }
   return {
     collection,
+    subscribe: (request) => reveals.response(request.signal),
     knownProject: id => projectById(workspace, id) !== null,
     retry(projectId) {
       let queued = 0

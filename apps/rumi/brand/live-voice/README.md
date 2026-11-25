@@ -36,6 +36,8 @@ The composer supplies its session ID. Before connecting, the host resolves that 
 
 New committed messages from that same session are forwarded as silent context, including messages received during the connection handshake. Updates from other sessions are ignored. Switching the composer to another session stops voice and resets its controls. Voice cannot inspect the viewer or project files directly; it delegates those questions to the harness.
 
+An active connection can also receive quiet [badge notifications](../print-studio/README.md#mechanical-badges) from its project. The voice journal records the exact note sent to the model.
+
 The host owns delegation IDs and channel selection. Other plugins contribute startup instructions through `ctx.liveVoice`:
 
 ```js

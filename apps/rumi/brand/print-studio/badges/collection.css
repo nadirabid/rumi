@@ -87,6 +87,196 @@
 .rumi-badge-projects .rumi-badge-checked { margin-top: 4px; font-size: 12px; }
 .rumi-badges-skeleton { height: 174px; background: var(--dsw-alias-bg-layer-1); }
 .rumi-badges-button[aria-pressed=true] { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-1); }
+
+.rumi-badge-announcement {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.rumi-badge-reveal {
+  --badge-glass: var(--dsw-static-neutral-150);
+  --badge-silver: var(--dsw-static-neutral-bluish-400);
+  --badge-pearl: var(--dsw-static-neutral-bluish-300);
+  --badge-light: var(--dsw-static-neutral-00);
+  --badge-steel: var(--dsw-static-neutral-500);
+  --badge-edge: var(--dsw-static-neutral-bluish-750);
+  --badge-shadow: var(--dsw-static-neutral-800);
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  margin: auto;
+  inline-size: min(216px, calc(100% - 32px), calc(75dvh - 24px));
+  block-size: fit-content;
+  color: var(--dsw-alias-label-primary);
+  transition: opacity 340ms ease-out;
+  -webkit-app-region: no-drag;
+}
+[data-ds-dark-theme] .rumi-badge-reveal {
+  --badge-glass: var(--dsw-static-neutral-bluish-800);
+  --badge-pearl: var(--dsw-static-neutral-bluish-600);
+  --badge-steel: var(--dsw-static-neutral-bluish-500);
+  --badge-shadow: var(--dsw-static-neutral-900);
+}
+@starting-style { .rumi-badge-reveal { opacity: 0; } }
+.rumi-badge-reveal[data-leaving] { opacity: 0; transition-duration: var(--badge-fade); }
+.rumi-badge-reveal::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--badge-shadow) 6%, transparent);
+  backdrop-filter: saturate(.25);
+}
+.rumi-badge-reveal-scene { position: relative; perspective: 960px; }
+.rumi-badge-reveal-scene::before {
+  content: '';
+  position: absolute;
+  inset: -18%;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--badge-silver) 38%, transparent) 21%, transparent 68%);
+  animation: rumi-badge-reveal-impact 680ms 1100ms ease-out both;
+}
+.rumi-badge-reveal-flight, .rumi-badge-reveal-plate { position: relative; transform-style: preserve-3d; }
+.rumi-badge-reveal-flight { animation: rumi-badge-reveal-land 1560ms both; }
+.rumi-badge-reveal-plate { animation: rumi-badge-reveal-spin 1160ms cubic-bezier(.43, 0, .26, 1) both; }
+.rumi-badge-reveal-side {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px;
+  backface-visibility: hidden;
+  backdrop-filter: blur(22px);
+  background-color: color-mix(in srgb, var(--badge-glass) 96%, transparent);
+  background-image:
+    radial-gradient(ellipse 80% 75% at 17% 0%, color-mix(in srgb, var(--badge-light) 35%, transparent), transparent 83%),
+    radial-gradient(ellipse 43% 30% at 13% 110%, color-mix(in srgb, var(--badge-silver) 44%, transparent), transparent),
+    radial-gradient(ellipse 63% 41% at 96% 103%, color-mix(in srgb, var(--badge-pearl) 33%, transparent), transparent);
+  box-shadow:
+    inset 2px 3px 4px -2px color-mix(in srgb, var(--badge-light) 86%, transparent),
+    inset -2px -3px 5px -2px color-mix(in srgb, var(--badge-light) 62%, transparent),
+    inset 0 -6px 13px -8px color-mix(in srgb, var(--badge-shadow) 38%, transparent),
+    0 17px 30px -11px color-mix(in srgb, var(--badge-shadow) 36%, transparent),
+    0 3px 6px -3px color-mix(in srgb, var(--badge-shadow) 22%, transparent);
+}
+.rumi-badge-reveal-side::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(155deg, transparent 24%, color-mix(in srgb, var(--badge-light) 17%, transparent) 37%,
+    transparent 38.5% 42%, color-mix(in srgb, var(--badge-light) 9%, transparent) 45%, transparent 57%);
+  background-size: 210% 145%;
+  animation: rumi-badge-reveal-reflection 1550ms cubic-bezier(.34, 0, .22, 1) both;
+}
+.rumi-badge-reveal-front {
+  box-sizing: border-box;
+  aspect-ratio: 3 / 4;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  padding: 24px 16px;
+  text-align: center;
+  transform: translateZ(0);
+}
+.rumi-badge-reveal-back {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--dsw-alias-label-secondary);
+  transform: rotateY(180deg) translateZ(5px);
+}
+.rumi-badge-reveal-art { position: relative; display: grid; place-items: center; perspective: 240px; }
+.rumi-badge-reveal-art svg, .rumi-badge-reveal-back svg {
+  position: relative;
+  max-inline-size: 100%;
+  max-block-size: 100%;
+  color: var(--dsw-alias-label-secondary);
+  fill: color-mix(in srgb, var(--badge-silver) 28%, transparent);
+  filter: drop-shadow(0 1px 1px color-mix(in srgb, var(--badge-light) 70%, transparent));
+}
+.rumi-badge-reveal-hinge {
+  display: grid;
+  grid-template-columns: 1fr 7px 1fr;
+  inline-size: min(104px, 100%);
+  block-size: min(74px, 100%);
+  transform: rotateX(21deg) rotateZ(-17deg);
+  transform-style: preserve-3d;
+}
+.rumi-badge-reveal-hinge::before, .rumi-badge-reveal-hinge::after {
+  content: '';
+  border-radius: 9px 3px 3px 9px;
+  transform-origin: right center;
+  transform: rotateY(34deg);
+  background: linear-gradient(137deg, var(--badge-light), var(--badge-silver) 37%, var(--badge-steel) 85%);
+  box-shadow: inset 1px 2px 3px -1px var(--badge-light), inset -2px -3px 3px -2px var(--badge-edge),
+    0 2px 0 var(--badge-edge), 0 7px 10px -5px var(--badge-edge);
+}
+.rumi-badge-reveal-hinge::after {
+  border-radius: 3px 9px 9px 3px;
+  transform-origin: left center;
+  transform: rotateY(-25deg);
+  background: linear-gradient(142deg, var(--badge-light), var(--badge-silver) 55%, var(--badge-steel));
+}
+.rumi-badge-reveal-hinge span {
+  margin-block: 1px;
+  background: linear-gradient(90deg, var(--badge-steel), var(--badge-edge) 42%, var(--badge-steel));
+  box-shadow: 0 2px 0 var(--badge-edge);
+}
+.rumi-badge-reveal p { margin: 0; }
+.rumi-badge-reveal-label, .rumi-badge-reveal-project {
+  position: relative;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+.rumi-badge-reveal-label { font-weight: 500; }
+.rumi-badge-reveal-content { position: relative; display: grid; gap: 4px; min-inline-size: 0; overflow-wrap: anywhere; }
+.rumi-badge-reveal-title { font-size: 21px; font-weight: 500; letter-spacing: -.025em; line-height: 1.15; }
+.rumi-badge-reveal-project { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.rumi-badge-reveal .rumi-badge-reveal-dismiss {
+  position: absolute;
+  inset-block-start: 6px;
+  inset-inline-end: 6px;
+  inline-size: 32px;
+  block-size: 32px;
+  padding: 0;
+  border-radius: 50%;
+  corner-shape: round;
+}
+@media (hover: hover) {
+  .rumi-badge-reveal:not(:hover, :focus-within) .rumi-badge-reveal-dismiss { opacity: 0; }
+}
+@media (pointer: coarse) {
+  .rumi-badge-reveal .rumi-badge-reveal-dismiss { inline-size: 44px; block-size: 44px; }
+}
+@keyframes rumi-badge-reveal-spin { from { transform: rotateY(0); } to { transform: rotateY(360deg); } }
+@keyframes rumi-badge-reveal-land {
+  0% { transform: translate3d(0, 12px, -60px) scale(.83); animation-timing-function: cubic-bezier(.2, .78, .24, 1); }
+  62% { transform: translate3d(0, -16px, 34px) scale(1); animation-timing-function: cubic-bezier(.43, 0, .74, 1); }
+  76% { transform: translate3d(0, 2px, 0) scale(1.012, .987); animation-timing-function: cubic-bezier(.18, .86, .3, 1); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes rumi-badge-reveal-impact {
+  from { opacity: 0; transform: scale(.88); }
+  18% { opacity: .7; }
+  to { opacity: 0; transform: scale(1.18); }
+}
+@keyframes rumi-badge-reveal-reflection {
+  from { background-position: 100% 30%; }
+  85% { background-position: 18% 30%; }
+  to { background-position: 20% 30%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rumi-badge-reveal { transition: none; }
+  .rumi-badge-reveal[data-leaving] { opacity: 1; }
+  .rumi-badge-reveal-flight, .rumi-badge-reveal-plate, .rumi-badge-reveal-scene::before,
+  .rumi-badge-reveal-side::before { animation: none; }
+}
 @media (prefers-reduced-transparency: reduce) {
-  .rumi-badge-card::before { background: var(--dsw-alias-bg-layer-1); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .rumi-badge-card::before, .rumi-badge-reveal-side { background: var(--dsw-alias-bg-layer-1); backdrop-filter: none; }
+  .rumi-badge-reveal::before { backdrop-filter: none; }
 }

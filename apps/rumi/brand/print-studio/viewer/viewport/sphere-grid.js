@@ -26,16 +26,22 @@ export function createSphereGrid(element, ink, pixelRatio, redraw) {
   }
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-  const uniforms = { ink: { value: new THREE.Color(ink) }, opacity: { value: 0.34 }, size: { value: 2.6 * pixelRatio } }
+  const uniforms = {
+    ink: { value: new THREE.Color(ink) }, opacity: { value: 0.34 },
+    size: { value: 2.6 * pixelRatio }, depthRadius: { value: 1 },
+  }
   const material = new THREE.ShaderMaterial({
     uniforms, transparent: true, depthWrite: false, toneMapped: false,
     vertexShader: /* glsl */ `
       uniform float size;
+      uniform float depthRadius;
       void main() {
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        // The offset keeps the perspective-scaled diameter finite at the camera plane.
+        float eyeDepth = max(gl_Position.w, 0.0) / depthRadius;
+        gl_PointSize = size / (eyeDepth + 0.0625);
         // Preserve the perspective projection while keeping the dots behind every model pixel.
         gl_Position.z = gl_Position.w;
-        gl_PointSize = size;
       }
     `,
     fragmentShader: /* glsl */ `
@@ -70,6 +76,7 @@ export function createSphereGrid(element, ink, pixelRatio, redraw) {
     shell.position.copy(target)
     shell.quaternion.copy(camera.quaternion)
     shell.scale.set(radius, radius, radius * DEPTH_STRETCH)
+    uniforms.depthRadius.value = shell.scale.z
     // Rotate the dots in the shell's local space before its depth stretch.
     points.quaternion.copy(camera.quaternion).invert().multiply(dotOrientation)
   }

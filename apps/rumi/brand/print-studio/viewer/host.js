@@ -191,10 +191,14 @@ function agentDesign(design) {
   })) } }
 }
 
-/** Keep sampled geometry out of conversational context; frozen recipe files retain every offset. */
+/** Keep per-vertex deformation offsets in the saved recipe when reporting controls. */
 function modelContextJson(value) {
-  return JSON.stringify(value, (key, entry) => key === 'fields' && Array.isArray(entry)
-    ? entry.map(({ offsets, ...field }) => ({ ...field, offsetCount: offsets.length })) : entry)
+  return JSON.stringify(value, (key, entry) => {
+    if (key === 'fields' && Array.isArray(entry)) {
+      return entry.map(({ offsets, ...field }) => ({ ...field, offsetCount: offsets.length }))
+    }
+    return entry
+  })
 }
 
 /** Exact source and measurement context awaited by viewer_load. */

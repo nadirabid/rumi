@@ -107,8 +107,8 @@ function fixture(host: {
     selectPanel: vi.fn(),
     toggleSidebar: vi.fn(),
   }
-  let expanded = host.sidebarExpanded ?? true;
-  const mounted = { getSnapshot: () => host.activePanelId === 'projects' ? undefined : 'session-1', subscribe: () => () => {} };
+  let expanded = host.sidebarExpanded ?? true
+  const mounted = { getSnapshot: () => host.activePanelId === 'projects' ? undefined : 'session-1', subscribe: () => () => {} }
   const sidebar = {
     mounted, isExpanded: () => expanded,
     openTabIn: vi.fn(),
@@ -116,22 +116,32 @@ function fixture(host: {
     toggleExpanded: vi.fn(() => { expanded = !expanded; document.documentElement.toggleAttribute('data-rightbar-collapsed', !expanded) }),
     commandTarget: vi.fn(() => ({ sessionId: 'session-1', ...(host.dockTab && { tabId: host.dockTab.id }) })),
     toggleFullscreen: vi.fn(() => { document.documentElement.toggleAttribute('data-rightbar-fullscreen') }),
-  };
+  }
   const ctx = {
     sidebarRight: sidebar,
     locale: { bind: () => translate, register },
     effect: (effect: () => (() => void | Promise<void>)) => { const dispose = effect(); disposers.push(dispose); return dispose },
     slots: {
       inject: (_name: string, registerEntry: () => (() => void)) => registerEntry(),
-      register: (options: { name: string; key?: string; inject?: () => Injection }, component: React.ComponentType<Record<string, unknown>>) => {
-        if (options.inject) injections.set(options.name, options.inject);
+      register: (
+        options: { name: string; key?: string; inject?: () => Injection },
+        component: React.ComponentType<Record<string, unknown>>,
+      ) => {
+        if (options.inject) injections.set(options.name, options.inject)
         entries.set(options.key === undefined ? options.name : `${options.name}:${options.key}`, component)
         return () => { entries.delete(options.name) }
       },
     },
     layout: { selectPanel: handles.selectPanel, toggleSidebar: handles.toggleSidebar, panelInfo },
     sessions: {
-      using: vi.fn(async (_id: string, _options: object, callback: (reference: { binding: { session: { rename: typeof handles.renameSession } } }) => Promise<void>) => { await callback({ binding: { session: { rename: handles.renameSession } } }); return { ok: true } }),
+      using: vi.fn(async (
+        _id: string,
+        _options: object,
+        callback: (reference: { binding: { session: { rename: typeof handles.renameSession } } }) => Promise<void>,
+      ) => {
+        await callback({ binding: { session: { rename: handles.renameSession } } })
+        return { ok: true }
+      }),
       list: { subscribe: () => () => {}, getSnapshot: () => ({ byId: host.knownSessions ?? {} }) },
     },
     workspaces: { create: handles.createWorkspace, rename: handles.renameWorkspace },
@@ -145,9 +155,10 @@ function fixture(host: {
       const component = entries.get(key)!
       const usePanelInfo = ((selector: (value: { activePanelId: string | null }) => unknown) =>
         selector(panelInfo.getSnapshot())) satisfies SnapshotSelectorHook<{ activePanelId: string | null }>
-      const injected = injections.get(key)?.();
-      const source = injected?.hooks.sidebar;
-      const useSidebar = (selector: (value: string) => unknown) => selector(React.useSyncExternalStore(source!.subscribe, source!.getSnapshot));
+      const injected = injections.get(key)?.()
+      const source = injected?.hooks.sidebar
+      const useSidebar = (selector: (value: string) => unknown) =>
+        selector(React.useSyncExternalStore(source!.subscribe, source!.getSnapshot))
       return React.createElement(component, { t: translate, usePanelInfo, useSidebar, ...injected })
     },
   }
@@ -185,7 +196,7 @@ it('reuses the session a project already recorded', async () => {
   expect(view.sidebar.openTabIn).toHaveBeenCalledWith('session-1', 'print-studio')
 })
 
-it.each([true, false])('reopens a recorded project with its sidebar expanded=%s', async expanded => {
+it.each([true, false])('reopens a recorded project with its sidebar expanded=%s', async (expanded) => {
   const known = project({ sessionIds: ['session-1'], activeSessionId: 'session-1' })
   const view = fixture({
     projects: [known], knownSessions: { 'session-1': { sessionId: 'session-1' } },

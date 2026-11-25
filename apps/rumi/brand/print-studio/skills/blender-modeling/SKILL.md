@@ -7,6 +7,12 @@ description: "Create, import, revise, or restore meshes with Blender Python. Pub
 
 Call `blender_status` for the executable and helper paths. Run Blender through the ordinary shell tool, using its permissions and cancellation; do not build a separate execution service. If Blender is unavailable, report the setup action returned by the tool.
 
+## Use checks at each stage
+
+- **Explore drafts.** Keep testing alternatives while draft findings are open. Fix a defect immediately when it prevents the next experiment. Compare drafts against the requested silhouette, details and dimensions, and keep the best draft for comparison.
+- **Refine the fit.** Once the parts have the intended shape, locate crossings or lost clearance. After each repair, check that the shape, wall thickness and fit still meet the request. If an error count goes down but the design gets worse, return to the better draft and try a different construction.
+- **Validate the chosen revision.** Resolve blocking geometry and fit errors before calling `validation_mechanics` or `validation_accept`. A draft with open findings can still be used for visual review.
+
 ## Start from the joints kit
 
 For any model with more than one part, or with a wheel, hinge, slider, snap or gear, read `printable-joints` first and build with its kit. It supplies millimetre primitives, cleaned Boolean operations, joint recipes and `K.publish`, which writes the whole USD assembly, so the script needs no `configure_robot`. Design moving parts for [separate printing and assembly](../printable-joints/SKILL.md#separate-printing-for-moving-parts); this is required, not a choice. Revisions, the viewer and validation below apply unchanged.
@@ -20,7 +26,7 @@ Use these defaults from the first modeling operation, including edits to existin
 - Joining Blender objects does not fuse their geometry. Union pieces intended to form one solid, while keeping separate mechanical parts and their clearances distinct.
 - Establish the main solid before bevels and other finishing operations. Keep bevel widths compatible with nearby features and wall thickness; inspect the evaluated result for collapsed features and self-intersections.
 - Reserve voxel remeshing for organic geometry where changes to topology, sharpness and detail are acceptable. Preserve the original, choose a voxel size that resolves the smallest required feature, and recheck dimensions. Do not use it as routine repair for threads, mating surfaces, thin walls or moving-part clearances, or remesh separate moving parts into one solid.
-- Inspect evaluated geometry after significant topology changes, before building further features on it. `Mesh.validate()` checks and can repair mesh data; it does not establish manifoldness. Use 3D Print Toolbox findings for geometry diagnosis. Prefer correcting the construction that caused a defect over broad automatic cleanup; inspect any cleanup result for lost features and changed dimensions. Before completion, follow the validation workflow below.
+- Inspect evaluated geometry after significant topology changes. `Mesh.validate()` checks and can repair mesh data; it does not establish manifoldness. Use 3D Print Toolbox findings to diagnose defects. Prefer correcting the construction that caused a defect over broad automatic cleanup; inspect any cleanup result for lost features and changed dimensions.
 
 ## Edit and publish
 
@@ -85,7 +91,7 @@ Export print meshes from the intended evaluated solids. Follow [FDM Design](../f
 
 ## Validate a finished revision
 
-Every `publish` checks the new revision in a separate Blender process and prints `RUMI_CHECKS <json>`: Toolbox geometry findings, part clearance, the assembly declaration error if any, and `dimensionsMm`. Only findings with a nonzero count appear. Read it after each build and fix `error` severity findings before building further; `warning` findings need judgment against the intended design. `status: "unavailable"` means no checks ran; call `blender_status` once in this project and publish again. Write no separate manifold, clearance or collision scripts, and do not invoke installed validator scripts or Bullet by hand.
+Every `publish` checks the new revision in a separate Blender process and prints `RUMI_CHECKS <json>` with Toolbox geometry findings, part clearance, any assembly declaration error and `dimensionsMm`. Only findings with a nonzero count appear. Read the report after each publish and judge warnings against the intended design. If the status is `unavailable`, call `blender_status` once in this project and publish again. Use the built-in validation tools to check the chosen revision.
 
 The open viewer automatically checks the selected saved revision and cancels superseded checks; it does not accept revisions or start repair turns. Explicit tools reuse completed stages. When the design is ready and `RUMI_CHECKS` has no blocking errors, call `validation_mechanics` once with the model `path`. The host re-runs any missing cheap checks for that revision first and stops with their findings if one blocks. Otherwise it runs Bullet, the costly stage (up to ten minutes), testing whole-assembly contacts, retention, sampled movement, declared sequences and removal paths with only the root held. Do not weaken settings, omit parts, narrow movement or substitute a reduced assembly to obtain a pass; incomplete coverage remains unverified. Then call `validation_accept` with the `path` and `fingerprint` it returned. For moving assemblies, declare removal paths for every nonroot part; missing paths produce `assembly_path_required` and block acceptance while retaining the motion findings. Only an `accepted` result supports an acceptance claim, and it does not certify slicing, deformation, strength, assembly accessibility or print readiness. A printer volume that was never configured means printer fit is unchecked.
 

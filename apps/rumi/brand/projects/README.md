@@ -29,6 +29,7 @@ The id is immutable and is the directory name; the name is user-facing and lives
 ## Routes
 
 - `GET /api/rumi-projects` — every readable project, most recently updated first.
+- `GET /api/rumi-projects/events` — Server-Sent Events stream publishing `project-updated` payloads when a project's metadata changes.
 - `POST /api/rumi-projects` — create one (`{ name }`).
 - `DELETE /api/rumi-projects?projectId=<id>` — delete a project and its directory; `204` on success, `404` when no such project exists.
 - `POST /api/rumi-projects/session` — record the session a project now uses and the time the project was opened (`{ projectId, sessionId }`).
@@ -57,7 +58,7 @@ On upgrade, Rumi migrates its seeded profile policy to `workspace-write` while p
 
 The gallery uses neutral board covers, a three-column grid that reduces to two or one column on narrow windows, and matching circular glass controls for Plugins and New. The puzzle-piece Plugins control sits immediately left of New and opens the stock Plugins page from the gallery or an open project. Covers show the last successfully previewed model as a 1440 × 960 PNG saved to `.preview.png` in the project directory. The open viewport reuses its loaded geometry and renderer to capture a fitted orthographic view with dedicated lighting after scene changes settle. The transparent cover follows the active DSH theme. The gallery loads existing covers lazily. Opening a model refreshes its cover at the current resolution. Projects without a saved preview show a neutral placeholder until their model is opened. Failed model builds retain the last successful cover; source changes made without opening the preview are not reflected. The gallery controls use CSS. The project header reserves a slot for the [desktop update badge](../../../../RUMI.md#package) during a download and when the update is ready.
 
-New projects and their initial sessions share the name `Untitled <number>`. The host reserves numbers exclusively on disk so concurrent creation and app restarts do not reuse them. Existing names are preserved.
+New projects start with a placeholder `Untitled <number>` name reserved exclusively on disk so concurrent creation and restarts do not reuse numbers. Initial sessions for untitled projects stay unpinned so `@rumi/projects/title-provider` names them automatically through `ctx.sessionTitle` once conversation messages arrive, persists the generated name into `project.json`, and streams updates to the header and gallery. Explicit user names are preserved. Reopening an earlier untitled project whose session was pinned to `Untitled <number>` refreshes its title once a model route is recorded.
 
 The home gallery owns project selection. Rumi shadows `conversation.hero.workspace` with a hidden occupant and hides the conversation hero’s workspace button in its app-owned stylesheet. The conversation does not expose the stock workspace picker.
 

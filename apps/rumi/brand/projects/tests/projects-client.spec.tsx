@@ -255,16 +255,52 @@ it('shows an empty gallery with an invitation', async () => {
   expect(screen.getByText(COPY.emptyHint)).toBeTruthy()
 })
 
-it('creates a project from the New control and opens it', async () => {
+it('creates a project from the New control and leaves its session unpinned for automatic naming', async () => {
   const view = fixture({ projects: [], activePanelId: 'projects' })
   render(view.view('shell.leading'))
   await settle()
   fireEvent.click(screen.getByRole('button', { name: COPY.new }))
   await settle()
   expect(view.posts[0]?.body).toEqual({})
-  expect(view.renameSession).toHaveBeenCalledWith('Untitled 1')
+  expect(view.renameSession).not.toHaveBeenCalled()
   expect(view.openSession).toHaveBeenCalled()
   expect(view.sidebar.openTabIn).toHaveBeenCalledWith('session-new', 'print-studio')
+})
+
+it('updates the header and gallery live when the host publishes an automatic project rename', async () => {
+  const listeners = new Map<string, ((event: { data: string }) => void)[]>()
+  const close = vi.fn()
+  class FakeEventSource {
+    constructor(public url: string) {}
+    addEventListener(type: string, listener: (event: { data: string }) => void) {
+      const list = listeners.get(type) ?? []
+      list.push(listener)
+      listeners.set(type, list)
+    }
+    removeEventListener(type: string, listener: (event: { data: string }) => void) {
+      listeners.set(type, (listeners.get(type) ?? []).filter(item => item !== listener))
+    }
+    close = close
+  }
+  vi.stubGlobal('EventSource', FakeEventSource)
+
+  const untitled = project({ id: 'p-auto', name: 'Untitled 1', nameSource: 'default', thumbnailVersion: '7' })
+  const view = fixture({ projects: [untitled] })
+  render(<>{view.view('main:projects')}{view.view('shell.leading')}</>)
+  await settle()
+  fireEvent.click(screen.getByRole('button', { name: 'Untitled 1' }))
+  await settle()
+  expect(document.querySelector('.rumi-header-title')?.textContent).toBe('Untitled 1')
+
+  act(() => {
+    for (const listener of listeners.get('project-updated') ?? []) {
+      listener({ data: JSON.stringify({ project: { id: 'p-auto', name: 'Spinning Mars Rover', nameSource: 'auto' } }) })
+    }
+  })
+
+  expect(document.querySelector('.rumi-header-title')?.textContent).toBe('Spinning Mars Rover')
+  expect(screen.getByRole('button', { name: 'Spinning Mars Rover' })).toBeTruthy()
+  expect(document.querySelector('.rumi-project-cover img')?.getAttribute('src')).toBe('/api/rumi-projects/thumbnail?projectId=p-auto&v=7')
 })
 
 it('returns to the gallery without ending the session', async () => {

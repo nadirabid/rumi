@@ -173,3 +173,127 @@ it('persists a cover across store restarts without changing session metadata', a
   expect(readFileSync(join(project.path, 'project.json'), 'utf8')).toBe(metadata)
   await expect(reopened.thumbnail('../escape')).rejects.toThrow('invalid id')
 })
+
+it('renames default projects automatically while protecting explicit user names and preserving covers', async () => {
+  const directory = root()
+  const store = createProjectStore(directory)
+  const untitled = await store.create('')
+  await store.attachSession(untitled.id, 'session-auto')
+  await store.saveThumbnail('session-auto', Buffer.from('cover'))
+  const before = (await store.list()).find(item => item.id === untitled.id)!
+
+  const first = await store.rename(untitled.id, 'Spinning Mars Rover', { source: 'auto' })
+  expect(first.changed).toBe(true)
+  expect(first.project.name).toBe('Spinning Mars Rover')
+  expect(first.project.nameSource).toBe('auto')
+  expect(first.project.updatedAt).toBe(before.updatedAt)
+  expect(first.project.thumbnailVersion).toBe(before.thumbnailVersion)
+
+  const unchanged = await store.rename(untitled.id, 'Spinning Mars Rover', { source: 'auto' })
+  expect(unchanged.changed).toBe(false)
+
+  const refined = await store.rename(untitled.id, 'Solar Mars Rover', { source: 'auto' })
+  expect(refined.changed).toBe(true)
+  expect(refined.project.name).toBe('Solar Mars Rover')
+
+  const pinned = await store.rename(untitled.id, 'My Rover', { source: 'user' })
+  expect(pinned.changed).toBe(true)
+  expect(pinned.project.nameSource).toBe('user')
+
+  const ignored = await store.rename(untitled.id, 'Another Name', { source: 'auto' })
+  expect(ignored.changed).toBe(false)
+  expect(ignored.project.name).toBe('My Rover')
+
+  const named = await store.create('Dragon cup')
+  expect(named.nameSource).toBe('user')
+  expect((await store.rename(named.id, 'Auto Name', { source: 'auto' })).changed).toBe(false)
+  await expect(store.rename(untitled.id, '   ')).rejects.toThrow('visible characters')
+})
+
+it('syncs provider session titles to project.json, publishes SSE updates, and unpins legacy untitled sessions', async () => {
+  const workspaceRoot = root()
+  const routes = new Map<string, (request: Request) => Promise<Response>>()
+  const cleanup: (() => void)[] = []
+  const listeners = new Map<string, ((...args: unknown[]) => void)[]>()
+  const sessions = new Map<string, { id: string; header: { cwd: string }; requestHeader: () => object | undefined }>()
+  const titles = new Map<string, { title: string; source: { kind: string } }>()
+  const refreshed: string[] = []
+
+  const emit = (event: string, ...args: unknown[]) => {
+    for (const listener of listeners.get(event) ?? []) listener(...args)
+  }
+
+  apply({
+    rumiProjectScope: { workspaceRoot },
+    inject: (names: string[], callback: (scoped: object) => void) => {
+      if (names.includes('sessions') && names.includes('sessionTitle')) {
+        callback({
+          sessions: { get: (id: string) => sessions.get(id) },
+          sessionTitle: {
+            get: (session: { id: string }) => titles.get(session.id),
+            refresh: async (session: { id: string }) => { refreshed.push(session.id) },
+          },
+          effect: (effect: () => (() => void)) => cleanup.push(effect()),
+          on: (event: string, listener: (...args: unknown[]) => void) => {
+            const list = listeners.get(event) ?? []
+            list.push(listener)
+            listeners.set(event, list)
+          },
+          logger: { warn: () => {} },
+        })
+      }
+    },
+    effect: (effect: () => (() => void)) => cleanup.push(effect()),
+    provide: () => () => {},
+    logger: { warn: () => {} },
+    connection: { fetch: { register: (route: { path: string; fetch: (request: Request) => Promise<Response> }) => {
+      routes.set(route.path, route.fetch)
+      return () => { routes.delete(route.path) }
+    } } },
+  })
+
+  const request = (path: string, init?: RequestInit) => routes.get(path.split('?')[0])!(new Request(`http://rumi${path}`, init))
+  const created = await (await request('/api/rumi-projects', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}),
+  })).json()
+  expect(created.project.name).toBe('Untitled 1')
+
+  await request('/api/rumi-projects/session', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ projectId: created.project.id, sessionId: 'session-live' }),
+  })
+
+  const streamAbort = new AbortController()
+  const streamResponse = await routes.get('/api/rumi-projects/events')!(new Request('http://rumi/api/rumi-projects/events', { signal: streamAbort.signal }))
+  const reader = streamResponse.body!.getReader()
+  const decoder = new TextDecoder()
+  expect(decoder.decode((await reader.read()).value)).toBe(': connected\n\n')
+
+  const liveSession = { id: 'session-live', header: { cwd: created.project.path }, requestHeader: () => ({ config: {} }) }
+  // Fallback titles from raw prompt words are ignored.
+  emit('session/event', liveSession, { type: 'session/title', data: { title: 'can you make a rocket', source: { kind: 'fallback' } } })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect((await (await request('/api/rumi-projects')).json()).projects[0].name).toBe('Untitled 1')
+
+  // Provider titles persist to project.json and stream to connected clients.
+  emit('session/event', liveSession, { type: 'session/title', data: { title: 'Rocket Ship', source: { kind: 'provider' } } })
+  const chunk = decoder.decode((await reader.read()).value)
+  expect(chunk).toContain('event: project-updated')
+  expect(chunk).toContain('"Rocket Ship"')
+  expect((await (await request('/api/rumi-projects')).json()).projects[0].name).toBe('Rocket Ship')
+
+  // Reopening a legacy Untitled project whose session was user-pinned triggers a refresh to unpin it.
+  const legacy = await (await request('/api/rumi-projects', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}),
+  })).json()
+  sessions.set('session-legacy', { id: 'session-legacy', header: { cwd: legacy.project.path }, requestHeader: () => ({ config: {} }) })
+  titles.set('session-legacy', { title: legacy.project.name, source: { kind: 'user' } })
+  await request('/api/rumi-projects/session', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ projectId: legacy.project.id, sessionId: 'session-legacy' }),
+  })
+  expect(refreshed).toEqual(['session-legacy'])
+
+  streamAbort.abort()
+  for (const dispose of cleanup.toReversed()) dispose()
+})

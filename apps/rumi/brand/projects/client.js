@@ -447,6 +447,34 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
             return false;
           }
         },
+        connectEvents() {
+          if (typeof EventSource !== 'function') return () => {};
+          const source = new EventSource(`${ROUTE}/events`);
+          const onUpdated = (event) => {
+            if (typeof event.data !== 'string' || event.data.length > 16_384) return;
+            let payload;
+            try {
+              payload = JSON.parse(event.data);
+            } catch (error) {
+              if (error instanceof SyntaxError) return;
+              throw error;
+            }
+            const updated = payload?.project;
+            if (typeof updated?.id !== 'string' || typeof updated?.name !== 'string') return;
+            const exists = snapshot.projects.some(item => item.id === updated.id);
+            if (!exists) return;
+            publish({
+              projects: snapshot.projects.map(item => item.id === updated.id
+                ? { ...item, ...updated, thumbnailVersion: updated.thumbnailVersion ?? item.thumbnailVersion }
+                : item),
+            });
+          };
+          source.addEventListener('project-updated', onUpdated);
+          return () => {
+            source.removeEventListener('project-updated', onUpdated);
+            source.close();
+          };
+        },
         close() {
           commitProjectNavigation(() => flushSync(() => ctx.layout.selectPanel(PANEL_ID)));
         },
@@ -464,12 +492,17 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
           const workspace = await ctx.workspaces.create({ path: project.path });
           // DSH workspace titles are unique; project display names may repeat.
           const sessionId = await ctx.uiWorkspace.connectWorkspace(workspace.workspaceId);
-          const renamed = await ctx.sessions.using(
-            sessionId,
-            { source: 'workspaceOperation' },
-            reference => reference.binding.session.rename(project.name),
-          );
-          if (!renamed.ok) throw new Error(renamed.error.message);
+          // Leave default untitled projects unpinned so the session-title provider names them automatically.
+          const isDefaultName = project.nameSource === 'default'
+            || (project.nameSource === undefined && /^Untitled \d+$/u.test(project.name ?? ''));
+          if (!isDefaultName) {
+            const renamed = await ctx.sessions.using(
+              sessionId,
+              { source: 'workspaceOperation' },
+              reference => reference.binding.session.rename(project.name),
+            );
+            if (!renamed.ok) throw new Error(renamed.error.message);
+          }
           return { sessionId, workspaceId: workspace.workspaceId };
         },
       };
@@ -485,6 +518,7 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
           () => h('span', { className: 'rumi-project-workspace-marker', hidden: true }),
         ));
         const list = createProjectList(ctx);
+        ctx.effect(() => list.connectEvents(), 'rumi projects: events');
 
         function Cover({ project }) {
           const [failedImage, setFailedImage] = React.useState(null);

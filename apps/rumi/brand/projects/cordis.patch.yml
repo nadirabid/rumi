@@ -33,3 +33,16 @@
 # Project instructions are supplied through the confined runtime context.
 - id: agent-instructions
   disabled: true
+
+# Replace the generic coding-session title generator with Rumi's project namer.
+- id: session-title-llm
+  disabled: true
+- insert:
+    - id: rumi-project-title
+      name: '@rumi/projects/title-provider'
+      config:
+        targetWords: 4
+        targetCjkCharacters: 8
+        maxInputBytes: 4096
+        maxOutputTokens: 4096
+        timeoutMs: 60000

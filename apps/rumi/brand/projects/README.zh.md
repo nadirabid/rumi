@@ -29,6 +29,7 @@
 ## 路由
 
 - `GET /api/rumi-projects` — 列出所有可读项目，最近更新的在前。
+- `GET /api/rumi-projects/events` — 当项目元数据更新时推送 `project-updated` 事件的 Server-Sent Events 流。
 - `POST /api/rumi-projects` — 创建项目（`{ name }`）。
 - `DELETE /api/rumi-projects?projectId=<id>` — 删除项目及其目录；成功返回 `204`，项目不存在返回 `404`。
 - `POST /api/rumi-projects/session` — 记录项目当前使用的会话和打开时间（`{ projectId, sessionId }`）。
@@ -57,7 +58,7 @@ Host 端负责文件系统并返回各项目的绝对 `path`；浏览器端负�
 
 画廊采用中性背景封面、在窄窗口下缩减为两列或一列的三列网格，以及样式一致的圆形玻璃 Plugins 和 New 控件。拼图形 Plugins 控件紧邻 New 左侧，可从画廊或已打开的项目进入原有插件页面。封面以 1440 × 960 PNG 显示最近成功预览的模型，并保存在项目目录的 `.preview.png` 中。场景稳定后，打开的视口复用已加载的几何体和渲染器，使用专用照明和适配模型尺寸的正交相机截图。透明封面跟随当前 DSH 主题。画廊延迟加载已有封面。打开模型会以当前分辨率刷新封面。没有已保存预览的项目显示中性占位图，直到打开模型。模型构建失败时保留上一次成功的封面；未打开预览时修改源码不会更新封面。画廊控件的玻璃效果由 CSS 实现。下载更新期间和更新就绪后，项目标题栏会为[桌面更新徽标](../../../../RUMI.md#package)保留位置。
 
-新项目及其初始会话使用相同的 `Untitled <number>` 名称。Host 在磁盘上独占保留编号，避免并发创建和应用重启后重复使用。现有名称保持不变。
+新项目先以磁盘独占保留的 `Untitled <number>` 作为占位名，避免并发创建和应用重启后重复编号。未命名项目的初始会话保持未钉住状态，收到对话消息后由 `@rumi/projects/title-provider` 通过 `ctx.sessionTitle` 自动生成名称，写入 `project.json`，并实时推送到标题栏和画廊。用户显式指定的名称保持不变。重新打开此前会话被钉住为 `Untitled <number>` 的旧项目时，若会话已有模型路由记录，会自动刷新并生成名称。
 
 首页画廊负责项目选择。Rumi 用隐藏占用者覆盖 `conversation.hero.workspace`，并在应用自己的样式表中隐藏对话首页的工作区按钮。对话不显示原版工作区选择器。
 

@@ -12,9 +12,10 @@
  */
 import { readFileSync } from 'node:fs'
 import { mkdir, readFile, readdir, writeFile, stat, rename, rm, unlink } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { canonical, checkedPath } from './isolation/paths.js'
+import { createProjectEvents } from './events.js'
 
 /** The plugin row id. */
 export const name = 'rumi-projects'
@@ -28,6 +29,8 @@ const NAME_LIMIT = 80
 const INSTRUCTIONS_FILE = 'AGENTS.md'
 const INSTRUCTIONS_TEMPLATE = 'AGENTS_TEMPLATE.md'
 const DEFAULT_TYPE = 'print'
+const DEFAULT_NAME_PATTERN = /^Untitled \d+$/u
+const PROJECT_ID_PATTERN = /^[A-Za-z0-9-]+$/u
 
 /**
  * The instructions a Session's project carries.
@@ -126,14 +129,31 @@ function normalizeName(name) {
   return trimmed.slice(0, NAME_LIMIT)
 }
 
+function effectiveNameSource(project) {
+  if (project?.nameSource === 'default' || project?.nameSource === 'auto' || project?.nameSource === 'user') {
+    return project.nameSource
+  }
+  return DEFAULT_NAME_PATTERN.test(project?.name ?? '') ? 'default' : 'user'
+}
+
 /**
  * The project directory store.
  * @param {string} root - Directory that holds one subdirectory per project.
- * @returns {object} Project listing, creation, removal, session association, and persistent PNG cover operations.
+ * @returns {object} Project listing, creation, renaming, removal, session association, and persistent PNG cover operations.
  */
 export function createProjectStore(root) {
+  const locks = new Map()
+  const withLock = (id, operation) => {
+    const previous = locks.get(id) ?? Promise.resolve()
+    const run = previous.catch(() => {}).then(operation)
+    const tracked = run.finally(() => {
+      if (locks.get(id) === tracked) locks.delete(id)
+    })
+    locks.set(id, tracked)
+    return run
+  }
   const directoryOf = (id) => {
-    if (!/^[A-Za-z0-9-]+$/u.test(id)) throw new Error(`project: invalid id ${id}`)
+    if (!PROJECT_ID_PATTERN.test(id)) throw new Error(`project: invalid id ${id}`)
     return join(root, id)
   }
   const replace = async (id, filename, bytes) => {
@@ -154,9 +174,9 @@ export function createProjectStore(root) {
     return { ...JSON.parse(raw), path: directoryOf(id), thumbnailVersion }
   }
   const write = async (project) => {
-    const { path: _, thumbnailVersion: _thumbnail, ...metadata } = project
+    const { path: _, thumbnailVersion, ...metadata } = project
     await replace(project.id, 'project.json', `${JSON.stringify(metadata, undefined, 2)}\n`)
-    return { ...metadata, path: directoryOf(project.id) }
+    return { ...metadata, path: directoryOf(project.id), thumbnailVersion: thumbnailVersion ?? null }
   }
   const allocateName = async () => {
     await mkdir(root, { recursive: true })
@@ -201,11 +221,27 @@ export function createProjectStore(root) {
       }
       return projects.sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)))
     },
+    async findBySession(sessionId, hintDirectory) {
+      if (typeof hintDirectory === 'string' && hintDirectory !== '') {
+        const candidateId = basename(hintDirectory)
+        if (PROJECT_ID_PATTERN.test(candidateId)) {
+          try {
+            const candidate = await read(candidateId)
+            if (Array.isArray(candidate.sessionIds) && candidate.sessionIds.includes(sessionId)) return candidate
+          } catch (error) {
+            if (error.code !== 'ENOENT') throw error
+          }
+        }
+      }
+      return (await this.list()).find(item => Array.isArray(item.sessionIds) && item.sessionIds.includes(sessionId)) ?? null
+    },
     async create(name, options = {}) {
       const now = new Date().toISOString()
+      const explicit = normalizeName(name)
       const project = {
         id: randomUUID(),
-        name: normalizeName(name) ?? await allocateName(),
+        name: explicit ?? await allocateName(),
+        nameSource: explicit === null ? 'default' : 'user',
         type: typeof options.type === 'string' ? options.type : null,
         sessionIds: [],
         activeSessionId: null,
@@ -223,6 +259,25 @@ export function createProjectStore(root) {
         await writeFile(join(directory, INSTRUCTIONS_FILE), options.instructions(project.name))
       }
       return write({ ...project, path: directory })
+    },
+    /** Rename a project in `project.json`; automatic updates never overwrite an explicit user name. */
+    async rename(id, name, options = {}) {
+      const normalized = normalizeName(name)
+      if (normalized === null) throw new Error('project: name must contain visible characters')
+      const source = options.source === 'user' ? 'user' : 'auto'
+      directoryOf(id)
+      return withLock(id, async () => {
+        const project = await read(id)
+        if (source === 'auto' && effectiveNameSource(project) === 'user') {
+          return { project, changed: false }
+        }
+        if (project.name === normalized && project.nameSource === source) {
+          return { project, changed: false }
+        }
+        project.name = normalized
+        project.nameSource = source
+        return { project: await write(project), changed: true }
+      })
     },
     /** Delete a project directory; only a directory with readable metadata counts as a project. */
     async remove(id) {
@@ -242,12 +297,15 @@ export function createProjectStore(root) {
       return true
     },
     async attachSession(id, sessionId, workspaceId) {
-      const project = await read(id)
-      if (!project.sessionIds.includes(sessionId)) project.sessionIds.push(sessionId)
-      project.activeSessionId = sessionId
-      if (workspaceId !== undefined) project.workspaceId = workspaceId
-      project.updatedAt = new Date().toISOString()
-      return write(project)
+      directoryOf(id)
+      return withLock(id, async () => {
+        const project = await read(id)
+        if (!project.sessionIds.includes(sessionId)) project.sessionIds.push(sessionId)
+        project.activeSessionId = sessionId
+        if (workspaceId !== undefined) project.workspaceId = workspaceId
+        project.updatedAt = new Date().toISOString()
+        return write(project)
+      })
     },
   }
 }
@@ -261,8 +319,75 @@ export function createProjectStore(root) {
 export function apply(ctx, config = {}) {
   const store = createProjectStore(config.root ?? ctx.rumiProjectScope.workspaceRoot)
   const types = createProjectTypes()
+  const events = createProjectEvents()
+  ctx.effect(() => () => events.close(), 'rumi projects: events')
   // A project-type plugin contributes here instead of importing this one.
   ctx.provide('rumiProjectTypes', types)
+
+  const syncSessionTitle = async (session, snapshot) => {
+    if (!snapshot || snapshot.source?.kind === 'fallback') return null
+    const owner = await store.findBySession(session.id, session.header?.cwd)
+    if (!owner) return null
+    const source = snapshot.source?.kind === 'user' ? 'user' : 'auto'
+    // Ignore legacy session pins written as "Untitled N" so default projects stay eligible for auto-naming.
+    if (source === 'user' && DEFAULT_NAME_PATTERN.test(snapshot.title) && effectiveNameSource(owner) === 'default') {
+      return owner
+    }
+    const { project, changed } = await store.rename(owner.id, snapshot.title, { source })
+    if (changed) events.publish(project)
+    return project
+  }
+
+  let titleServices = null
+  const refreshedLegacy = new Set()
+  const reconcileSessionTitle = async (session, knownOwner = null) => {
+    if (!titleServices || !session) return knownOwner
+    const owner = knownOwner ?? await store.findBySession(session.id, session.header?.cwd)
+    if (!owner || effectiveNameSource(owner) !== 'default') return owner
+    const current = titleServices.sessionTitle.get(session)
+    if (current?.source.kind === 'provider') {
+      return (await syncSessionTitle(session, current)) ?? owner
+    }
+    if (current?.source.kind === 'user'
+      && DEFAULT_NAME_PATTERN.test(current.title)
+      && typeof session.requestHeader === 'function'
+      && session.requestHeader() !== undefined
+      && !refreshedLegacy.has(session.id)) {
+      refreshedLegacy.add(session.id)
+      // Reopening a legacy untitled project unpins its placeholder session title so the provider can name it.
+      void titleServices.sessionTitle.refresh(session).catch(error => {
+        refreshedLegacy.delete(session.id)
+        ctx.logger?.warn(`rumi projects: failed to refresh legacy untitled project ${owner.id}: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    }
+    return owner
+  }
+
+  ctx.inject(['sessions', 'sessionTitle'], (scoped) => {
+    const services = { sessions: scoped.sessions, sessionTitle: scoped.sessionTitle }
+    titleServices = services
+    scoped.effect(() => () => {
+      if (titleServices === services) titleServices = null
+    }, 'rumi projects: session title services')
+    scoped.on('session/created', (session) => {
+      void reconcileSessionTitle(session).catch(error => {
+        scoped.logger?.warn(`rumi projects: failed to reconcile session title for ${session.id}: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    })
+    scoped.on('session/event', (session, event) => {
+      if (event.type === 'session/title') {
+        void syncSessionTitle(session, event.data).catch(error => {
+          scoped.logger?.warn(`rumi projects: failed to sync session title for ${session.id}: ${error instanceof Error ? error.message : String(error)}`)
+        })
+        return
+      }
+      if (event.type === 'request/header') {
+        void reconcileSessionTitle(session).catch(error => {
+          scoped.logger?.warn(`rumi projects: failed to reconcile legacy session title for ${session.id}: ${error instanceof Error ? error.message : String(error)}`)
+        })
+      }
+    })
+  })
 
   const currentInstructions = readFileSync(BASE_TEMPLATE, 'utf8')
   ctx.inject(['systemPrompt'], (scoped) => {
@@ -348,6 +473,7 @@ export function apply(ctx, config = {}) {
       throw error
     }
   })
+  route('/events', ['GET'], async (request) => events.response(request.signal))
   route('/session', ['POST'], async (request) => {
     const body = await request.json().catch(() => ({}))
     if (typeof body.projectId !== 'string' || typeof body.sessionId !== 'string') {
@@ -355,7 +481,14 @@ export function apply(ctx, config = {}) {
     }
     try {
       const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : undefined
-      return json({ project: await store.attachSession(body.projectId, body.sessionId, workspaceId) })
+      let project = await store.attachSession(body.projectId, body.sessionId, workspaceId)
+      if (effectiveNameSource(project) === 'default' && titleServices !== null) {
+        const session = titleServices.sessions.get(body.sessionId)
+        if (session !== undefined) {
+          project = (await reconcileSessionTitle(session, project)) ?? project
+        }
+      }
+      return json({ project })
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 404)
     }

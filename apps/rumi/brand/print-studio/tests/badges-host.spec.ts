@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, expect, it, vi } from 'vitest'
+import z from '@deepseek-ai/schemastery'
 import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -16,7 +17,7 @@ import { createProjectStore } from '../../projects/index.js'
 import { createBadgeHost } from '../badges-host.js'
 import { openBadgeStore } from '../badges-store.js'
 import type { PrintBadgeEarned } from '../badges-event-types.d.ts'
-import { BadgeReviewConfig, reviewPrintBadges } from '../badge-review.js'
+import { createBadgeReviewConfig, reviewPrintBadges } from '../badge-review.js'
 import { capturePrintBadgeRevisions } from '../badge-review-evidence.js'
 import { foldedPanels } from './fixtures/badge-fold.ts'
 
@@ -264,7 +265,7 @@ it('records a custom fold from a finished project turn and keeps the badge revie
   ctx.provide('rumiProjectScope', { workspaceRoot })
   const harness = await mountAgentLoopTestHarness(ctx)
   const host = createBadgeHost(ctx, { databasePath: join(home, 'print-studio', 'badges.sqlite'),
-    config: BadgeReviewConfig({}), capture: capturePrintBadgeRevisions, review: reviewPrintBadges })
+    config: createBadgeReviewConfig(z)({}), capture: capturePrintBadgeRevisions, review: reviewPrintBadges })
   const announced: string[] = []
   ctx.on('rumi/print-badge-earned', ({ awards }) => { announced.push(...awards.map(award => award.kind)) })
   ctx.effect(() => ctx.tools.register(defineContentToolFixture({

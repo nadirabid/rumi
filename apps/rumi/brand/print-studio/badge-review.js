@@ -1,5 +1,4 @@
 /** Run bounded, tool-free badge evaluations outside the project chat. */
-import z from '@deepseek-ai/schemastery'
 import { BlockAssembler, HarnessError } from '@deepseek-ai/dsh-llm'
 import { PRINT_BADGE_KINDS } from './badges-kinds.js'
 import { isCurrentPrintBadgeRevision, showsThinWeb } from './badge-review-evidence.js'
@@ -7,15 +6,21 @@ import { inspectSavedBadgeRevision } from './badge-review-worker.js'
 
 export { capturePrintBadgeRevisions } from './badge-review-evidence.js'
 
-/** DeepSeek route and request budget for the optional badge evaluator. */
-export const BadgeReviewConfig = z.object({
-  enabled: z.boolean().default(true),
-  provider: z.union(['deepseek-official', 'deepseek-account']).default('deepseek-official'),
-  model: z.string().min(1).default('deepseek-flash'),
-  reasoningEffort: z.string().min(1).default('off'),
-  timeoutMs: z.number().step(1).min(1000).max(120000).default(30000),
-  maxOutputTokens: z.number().step(1).min(256).max(8192).default(1200),
-}).default({})
+/**
+ * Build the Schemastery schema for the optional badge evaluator route and budget.
+ * @param {typeof import('@deepseek-ai/schemastery').default} z - Schemastery constructor from the plugin entrypoint.
+ * @returns {object} Badge review configuration schema with defaults.
+ */
+export function createBadgeReviewConfig(z) {
+  return z.object({
+    enabled: z.boolean().default(true),
+    provider: z.union(['deepseek-official', 'deepseek-account']).default('deepseek-official'),
+    model: z.string().min(1).default('deepseek-flash'),
+    reasoningEffort: z.string().min(1).default('off'),
+    timeoutMs: z.number().step(1).min(1000).max(120000).default(30000),
+    maxOutputTokens: z.number().step(1).min(256).max(8192).default(1200),
+  }).default({})
+}
 
 const purpose = 'rumi-print-badge-review'
 const maxFindings = PRINT_BADGE_KINDS.length

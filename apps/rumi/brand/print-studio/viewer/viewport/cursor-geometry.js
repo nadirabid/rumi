@@ -1,6 +1,6 @@
 /** Export the source faces selected by the viewport's cursor. */
 import * as THREE from 'three'
-import { encodeStl, STL_LIMITS } from '../stl.js'
+import { encodeStlBase64, STL_LIMITS } from '../stl.js'
 import { createSurfaceIndex } from './surfaces.js'
 
 /** The Gaussian support is shared by the cursor shader and the geometry export. */
@@ -95,6 +95,6 @@ export function cursorMeshSnapshot(hit, savedNode, placement, mode) {
     }
   }
   if (length === 0) return { meshUnavailable: 'empty_selection' }
-  const meshStl = new Uint8Array(encodeStl(output.subarray(0, length))).toBase64()
+  const meshStl = encodeStlBase64(output.subarray(0, length))
   return { meshStl }
 }

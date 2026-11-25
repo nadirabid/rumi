@@ -3,9 +3,10 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import z from '@deepseek-ai/schemastery'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { afterEach, expect, it, vi } from 'vitest'
-import { BadgeReviewConfig, capturePrintBadgeRevisions, reviewPrintBadges } from '../badge-review.js'
+import { capturePrintBadgeRevisions, createBadgeReviewConfig, reviewPrintBadges } from '../badge-review.js'
 import { inspectPrintBadgeParts, readPrintBadgeEvidence } from '../badge-review-evidence.js'
 import { robotUsd } from './fixtures/robot-usd.js'
 import { foldedPanels, slottedPanels } from './fixtures/badge-fold.ts'
@@ -59,7 +60,7 @@ function reviewer(f: Awaited<ReturnType<typeof fixture>>, decisions: ((request: 
       yield { type: 'finish', reason: { kind: 'stop' } }
     },
   }))
-  const config = BadgeReviewConfig({})
+  const config = createBadgeReviewConfig(z)({})
   const input = {
     session: { id: 'badge-review-project-session' }, project: { path: f.root }, turnEndSeq: 25, events: [],
     targets: [f.target], signal, recordRequest: async (record: RequestRecord) => { records.push(record) },

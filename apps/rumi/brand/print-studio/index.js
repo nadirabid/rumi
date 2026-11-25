@@ -24,7 +24,7 @@ import { createAppSetup } from './app-setup.js'
 import { readPrinterStatus } from './monitor.js'
 import { applyBlender } from './blender/host.js'
 import { applySkillReminders } from './skill-reminders.js'
-import { BadgeReviewConfig, capturePrintBadgeRevisions, reviewPrintBadges } from './badge-review.js'
+import { createBadgeReviewConfig, capturePrintBadgeRevisions, reviewPrintBadges } from './badge-review.js'
 import { createBadgeHost } from './badges-host.js'
 import { applyViewer } from './viewer/host.js'
 import { applyContextRetention } from './viewer/context-retention.js'
@@ -36,7 +36,7 @@ export const name = 'print-studio'
 
 /** Print Studio diagnostics, validation policy, and app-owned storage paths. */
 export const Config = z.object({
-  badgeReview: BadgeReviewConfig,
+  badgeReview: createBadgeReviewConfig(z),
   badgeDatabase: z.string().min(1).default(join(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi'), 'print-studio', 'badges.sqlite')),
   appDownloadTimeoutSeconds: z.number().step(1).min(30).max(3600).default(900),
   appDownloadRetries: z.number().step(1).min(0).max(5).default(2),

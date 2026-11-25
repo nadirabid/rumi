@@ -131,3 +131,19 @@ export function encodeStl(positions) {
   }
   return data
 }
+
+/**
+ * Encode triangle positions as base64-encoded binary STL across browser and Node runtimes.
+ * @param {ArrayLike<number>} positions - Flat XYZ triplets, three vertices per triangle.
+ * @returns {string} Base64-encoded binary STL bytes.
+ */
+export function encodeStlBase64(positions) {
+  const bytes = new Uint8Array(encodeStl(positions))
+  if (typeof Buffer === 'function') return Buffer.from(bytes).toString('base64')
+  if (typeof bytes.toBase64 === 'function') return bytes.toBase64()
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  }
+  return btoa(binary)
+}

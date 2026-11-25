@@ -1,6 +1,6 @@
 /** STL decoding rejects unbounded files, and the published encoding round-trips. */
-import { expect, it } from 'vitest'
-import { encodeStl, parseStl, STL_LIMITS } from '../viewer/stl.js'
+import { expect, it, vi } from 'vitest'
+import { encodeStl, encodeStlBase64, parseStl, STL_LIMITS } from '../viewer/stl.js'
 
 const ascii = `solid tile
 facet normal 0 0 1
@@ -78,4 +78,20 @@ it('honors byte offsets when decoding a view into a larger buffer', () => {
 it('refuses to encode anything that is not whole triangles', () => {
   expect(() => encodeStl([0, 0, 0])).toThrow(RangeError)
   expect(() => encodeStl(new Float32Array((STL_LIMITS.maxTriangles + 1) * 9))).toThrow(RangeError)
+})
+
+it('encodes base64 STL across Node and browser runtimes without Uint8Array.prototype.toBase64', () => {
+  const positions = parseStl(new TextEncoder().encode(ascii))
+  const expected = Buffer.from(encodeStl(positions)).toString('base64')
+  const proto = Uint8Array.prototype as Uint8Array & { toBase64?: () => string }
+  const originalToBase64 = proto.toBase64
+  try {
+    delete proto.toBase64
+    expect(encodeStlBase64(positions)).toBe(expected)
+    vi.stubGlobal('Buffer', undefined)
+    expect(encodeStlBase64(positions)).toBe(expected)
+  } finally {
+    vi.unstubAllGlobals()
+    if (originalToBase64) proto.toBase64 = originalToBase64
+  }
 })

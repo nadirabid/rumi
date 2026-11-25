@@ -1,6 +1,6 @@
 /** The same saved model features drive hit testing, highlights, and mesh export. */
 import * as THREE from 'three'
-import { encodeStl, STL_LIMITS } from '../stl.js'
+import { encodeStlBase64, STL_LIMITS } from '../stl.js'
 import { modelLocalPartMatrix, modelPartPath } from './cursor-geometry.js'
 import { createSurfaceIndex } from './surfaces.js'
 
@@ -226,7 +226,7 @@ export function namedRegionMesh(entry, placement) {
     positions.set(part, offset)
     offset += part.length
   }
-  return { meshStl: new Uint8Array(encodeStl(positions)).toBase64() }
+  return { meshStl: encodeStlBase64(positions) }
 }
 
 /**

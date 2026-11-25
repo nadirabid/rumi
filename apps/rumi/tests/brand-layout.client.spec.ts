@@ -3,11 +3,11 @@ import { readFileSync } from 'node:fs'
 import { afterEach, expect, it, vi } from 'vitest'
 
 let dispose: (() => void) | undefined
-function mount() {
+function mountEffect(effectLabel: string) {
   const source = readFileSync('apps/rumi/brand/client.js', 'utf8')
   const context = {
     effect(effect: () => (() => void), label: string) {
-      if (label === 'rumi-brand: responsive viewer layout') dispose = effect()
+      if (label === effectLabel) dispose = effect()
     },
     slots: { inject() {} },
     inject() {},
@@ -21,6 +21,10 @@ function mount() {
   host.addEventListener = window.addEventListener.bind(window)
   host.removeEventListener = window.removeEventListener.bind(window)
   new Function('window', source)(host)
+}
+
+function mountViewer() {
+  mountEffect('rumi-brand: responsive viewer layout')
   document.body.innerHTML = '<div data-sidebar-collapsed><div data-sidebar-right-panel="push" data-sidebar-right-open><section class="rumi-print-viewer"></section></div><div data-side="rightbar"></div></div>'
   const frame = document.body.firstElementChild as HTMLElement
   const handle = frame.lastElementChild as HTMLElement
@@ -36,10 +40,16 @@ function pointer(target: EventTarget, type: string, x: number, id = 1) {
   Object.defineProperty(event, 'pointerId', { value: id })
   target.dispatchEvent(event)
 }
-afterEach(() => { dispose?.(); dispose = undefined; document.body.replaceChildren(); vi.restoreAllMocks() })
+afterEach(() => {
+  dispose?.()
+  dispose = undefined
+  document.body.replaceChildren()
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+})
 
 it('drags from the rendered divider without jumping and retains a proportional override until reset', () => {
-  const { frame, handle } = mount()
+  const { frame, handle } = mountViewer()
   const upstream = vi.fn()
   handle.addEventListener('pointerdown', upstream)
   pointer(handle, 'pointerdown', 322)
@@ -55,7 +65,7 @@ it('drags from the rendered divider without jumping and retains a proportional o
 })
 
 it('protects both pane minima and stops dragging on cancellation, blur, and disposal', () => {
-  const { frame, handle } = mount()
+  const { frame, handle } = mountViewer()
   pointer(handle, 'pointerdown', 320)
   pointer(handle, 'pointermove', 0)
   expect(frame.style.getPropertyValue('--rumi-chat-share')).toBe('20%')
@@ -74,4 +84,42 @@ it('protects both pane minima and stops dragging on cancellation, blur, and disp
   expect(frame.style.getPropertyValue('--rumi-chat-share')).toBe('')
   pointer(handle, 'pointermove', 500)
   expect(frame.style.getPropertyValue('--rumi-chat-share')).toBe('')
+})
+
+it('reveals the transcript scrollbar only for its own scroll activity and clears it after a pause', () => {
+  vi.useFakeTimers()
+  mountEffect('rumi-brand: transient chat scrollbar')
+  document.body.innerHTML = `
+    <main data-conversation-region="chat">
+      <div data-conversation-scroll><div data-composer-seat></div></div>
+    </main>
+    <aside data-conversation-scroll></aside>
+  `
+  const transcript = document.querySelector('[data-conversation-scroll]')!
+  const composer = document.querySelector('[data-composer-seat]')!
+  const preview = document.querySelector('aside')!
+  const visible = () => transcript.hasAttribute('data-rumi-chat-scrolling')
+
+  composer.dispatchEvent(new Event('scroll'))
+  preview.dispatchEvent(new Event('scroll'))
+  expect(visible()).toBe(false)
+  expect(preview.hasAttribute('data-rumi-chat-scrolling')).toBe(false)
+
+  transcript.dispatchEvent(new Event('scroll'))
+  expect(visible()).toBe(true)
+  vi.advanceTimersByTime(400)
+  transcript.dispatchEvent(new Event('scroll'))
+  vi.advanceTimersByTime(499)
+  expect(visible()).toBe(true)
+  vi.advanceTimersByTime(1)
+  expect(visible()).toBe(false)
+
+  transcript.dispatchEvent(new Event('scroll'))
+  dispose?.()
+  dispose = undefined
+  expect(visible()).toBe(false)
+  expect(document.getElementById('rumi-chat-scrollbar')).toBeNull()
+  expect(vi.getTimerCount()).toBe(0)
+  transcript.dispatchEvent(new Event('scroll'))
+  expect(visible()).toBe(false)
 })

@@ -80,6 +80,67 @@ window.__ModuleLoader__.load({
       return () => { style.remove(); };
     }
 
+    /** Fade only the transcript thumb so the shared scrollbar gutter stays reserved. */
+    function styleChatScrollbar() {
+      const scrollport = '[data-conversation-scroll]';
+      const chat = `[data-conversation-region="chat"] ${scrollport}`;
+      const scrolling = 'data-rumi-chat-scrolling';
+      const style = document.createElement('style');
+      style.id = 'rumi-chat-scrollbar';
+      style.textContent = `
+@property --rumi-chat-scrollbar-visibility {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 0%;
+}
+${chat} {
+  transition: padding-inline-end var(--dsh-chat-end-reserve-transition, 0s),
+    --rumi-chat-scrollbar-visibility 200ms linear;
+}
+${chat}[${scrolling}] {
+  --rumi-chat-scrollbar-visibility: 100%;
+  transition: padding-inline-end var(--dsh-chat-end-reserve-transition, 0s);
+}
+${chat}::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--dsh-scrollbar-thumb) var(--rumi-chat-scrollbar-visibility), transparent);
+}
+${chat}::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--dsh-scrollbar-thumb-hover) var(--rumi-chat-scrollbar-visibility), transparent);
+}
+${chat}::-webkit-scrollbar-thumb:active {
+  background-color: var(--dsh-scrollbar-thumb-hover);
+}
+@media (prefers-reduced-motion: reduce) {
+  ${chat} {
+    transition: padding-inline-end var(--dsh-chat-end-reserve-transition, 0s);
+  }
+}
+`;
+      document.head.append(style);
+
+      const hideTimers = new Map();
+      function reveal(event) {
+        const target = event.target;
+        if (!(target instanceof Element) || !target.matches(chat)) return;
+        const pendingHide = hideTimers.get(target);
+        if (pendingHide === undefined) target.setAttribute(scrolling, '');
+        clearTimeout(pendingHide);
+        hideTimers.set(target, setTimeout(() => {
+          target.removeAttribute(scrolling);
+          hideTimers.delete(target);
+        }, 500));
+      }
+      document.addEventListener('scroll', reveal, { capture: true, passive: true });
+      return () => {
+        document.removeEventListener('scroll', reveal, true);
+        for (const [target, timer] of hideTimers) {
+          clearTimeout(timer);
+          target.removeAttribute(scrolling);
+        }
+        style.remove();
+      };
+    }
+
     /** Size chat automatically until a divider drag chooses a proportional split; double-click resets it. */
     function styleViewerLayout() {
       const style = document.createElement('style');
@@ -561,6 +622,7 @@ ${handleSelector}{left:var(--rumi-chat-width)!important}
         ctx.inject(['configForms', 'remote', 'remote.session', 'remote.credentials', 'remote.settings'], registerDefaultModel);
         ctx.effect(styleViewerLayout, 'rumi-brand: responsive viewer layout');
         ctx.effect(hideChrome, 'rumi-brand: hide developer chrome');
+        ctx.effect(styleChatScrollbar, 'rumi-brand: transient chat scrollbar');
         ctx.effect(styleDocumentTabs, 'rumi-brand: document tab glass');
         ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'rumi-brand: live voice copy');
         ctx.slots.inject('conversation.session.header.utilities', function* () {

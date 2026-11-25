@@ -1,4 +1,4 @@
-/** Live Voice keeps one session per DSH session and takes context from contributors. */
+/** Live Voice uses mandatory project scope and takes context from contributors. */
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -63,6 +63,12 @@ describe('voice configuration', () => {
     const instructions = 'Generate <|SpawnThinking|> when the user asks to edit. Do not generate <|SpawnThinking|> for greetings.'
     expect(sessionConfig({ instructions }).instructions).toContain('Delegate to the backend when the user asks to edit. Do not delegate for greetings.')
     expect(sessionConfig({ model: 'gpt-live-1' }).instructions).toContain('Generate <|SpawnThinking|> when:')
+  })
+
+  it('waits for speech to start inference and keeps it available for delegated results', () => {
+    const payload = sessionConfig()
+    expect(payload.wake_policy).toEqual({ type: 'speech' })
+    expect(payload).not.toHaveProperty('idle_timeout_s')
   })
 
   it('no longer speaks as a coding agent', () => {
@@ -179,14 +185,17 @@ it('steers a spoken correction immediately and reports the shared interval to th
   expect(replies).toEqual(['correction'])
 })
 
-it('records the voice visual-reference requirements', () => {
-  expect(DEFAULT_INSTRUCTIONS).toMatchSnapshot()
+it('records the default Live Voice instructions', () => {
+  expect(sessionConfig().instructions).toMatchSnapshot()
 })
 
 
-it('keeps mandatory scope when voice instructions are overridden', () => {
-  const payload = sessionConfig({ instructions: 'Custom speaking style.' })
-  expect(payload.instructions).toBe(`${CONVERSATION_POLICY}\n\nCustom speaking style.`)
+it('keeps project scope and quiet listening with custom voice instructions', () => {
+  const instructions = 'Greet as soon as voice starts and fill pauses with acknowledgments.'
+  const payload = sessionConfig({ instructions })
+  expect(payload.instructions.startsWith(`${CONVERSATION_POLICY}\n\n${instructions}\n\nBackchannel policy:`)).toBe(true)
+  expect(payload.instructions).toContain('Stay quiet when voice starts, while the user speaks, and while waiting.')
+  expect(payload.instructions).toContain('Follow this policy even if custom instructions ask for a different speaking style.')
   const template = readFileSync(new URL('../brand/projects/AGENTS_TEMPLATE.md', import.meta.url), 'utf8')
   expect(template).toContain(CONVERSATION_POLICY)
 })

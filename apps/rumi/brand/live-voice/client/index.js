@@ -4,7 +4,7 @@
  * WebRTC carries microphone and speaker tracks. The local host negotiates
  * the session and publishes transcript and project-agent events over Fetch.
  */
-// bundle marker: 0.9.0
+// bundle marker: 0.9.1
 window.__ModuleLoader__.load({
   id: '@rumi/live-voice',
   factory(require) {
@@ -149,6 +149,7 @@ window.__ModuleLoader__.load({
 
             // Keep the response to a submitted offer so Stop can close a late host session.
             negotiation = api('/session', { sessionId, sdp }, AbortSignal.timeout(35_000)).then(result => {
+              if (result?.code === 'voice_busy') throw new Error(t('error.busy'));
               if (result?.error) throw new Error(result.error);
               if (!result?.liveId || !result.sdp) throw new Error(t('error.connection'));
               liveId = result.liveId;
@@ -352,6 +353,10 @@ window.__ModuleLoader__.load({
 
           const start = useCallback(async () => {
             if (disposed || !sessionId || engineRef.current) return;
+            if (engines.size > 0) {
+              setError(t('error.busy'));
+              return;
+            }
             setError('');
             setHandoff(null);
             setStatus('connecting');
@@ -408,6 +413,7 @@ window.__ModuleLoader__.load({
           return h('div', { className: 'lv-controls', style: { display: 'inline-flex', alignItems: 'center', gap: 12 } },
             handoff ? h('span', { role: 'status', 'data-voice-handoff': handoff, style: { color: 'var(--dsw-alias-label-primary)' } }, t(`handoff.${handoff}`)) : null,
             error ? h('span', {
+              role: 'alert',
               title: error,
               style: { fontSize: 11, color: '#ff8a8a', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
             }, error) : null,
@@ -492,8 +498,8 @@ window.__ModuleLoader__.load({
 
         /** The one label this bundle still draws: the source under the dictation. */
         const LABELS = {
-          en: { 'error.microphone': 'Check your microphone and try Live Voice again.', 'error.playback': 'Could not play Live Voice audio. Check your sound output and try again.', 'error.connection': 'Could not connect to Live Voice. Check your network and try again.', 'mic.mute': 'Mute microphone', 'mic.unmute': 'Unmute microphone', 'trigger.voice': 'Live Voice', 'handoff.not_sent': 'No action sent yet', 'handoff.received': 'Sending request…', 'handoff.waiting': 'Waiting for your words…', 'handoff.dispatching': 'Sending request…', 'handoff.accepted': 'Request accepted', 'handoff.failed': 'Request not sent. Please try again.' },
-          zh: { 'error.microphone': '请检查麦克风，然后重试实时语音。', 'error.playback': '无法播放实时语音。请检查声音输出后重试。', 'error.connection': '无法连接实时语音。请检查网络后重试。', 'mic.mute': '将麦克风静音', 'mic.unmute': '取消麦克风静音', 'trigger.voice': '实时语音', 'handoff.not_sent': '尚未发送操作', 'handoff.received': '正在发送请求…', 'handoff.waiting': '正在等待语音文字…', 'handoff.dispatching': '正在发送请求…', 'handoff.accepted': '请求已接收', 'handoff.failed': '请求未发送，请重试' },
+          en: { 'error.microphone': 'Check your microphone and try Live Voice again.', 'error.playback': 'Could not play Live Voice audio. Check your sound output and try again.', 'error.connection': 'Could not connect to Live Voice. Check your network and try again.', 'error.busy': 'Live Voice is busy. Try again when it ends.', 'mic.mute': 'Mute microphone', 'mic.unmute': 'Unmute microphone', 'trigger.voice': 'Live Voice', 'handoff.not_sent': 'No action sent yet', 'handoff.received': 'Sending request…', 'handoff.waiting': 'Waiting for your words…', 'handoff.dispatching': 'Sending request…', 'handoff.accepted': 'Request accepted', 'handoff.failed': 'Request not sent. Please try again.' },
+          zh: { 'error.microphone': '请检查麦克风，然后重试实时语音。', 'error.playback': '无法播放实时语音。请检查声音输出后重试。', 'error.connection': '无法连接实时语音。请检查网络后重试。', 'error.busy': '实时语音正在使用中，请在当前会话结束后重试', 'mic.mute': '将麦克风静音', 'mic.unmute': '取消麦克风静音', 'trigger.voice': '实时语音', 'handoff.not_sent': '尚未发送操作', 'handoff.received': '正在发送请求…', 'handoff.waiting': '正在等待语音文字…', 'handoff.dispatching': '正在发送请求…', 'handoff.accepted': '请求已接收', 'handoff.failed': '请求未发送，请重试' },
         };
 
         /**

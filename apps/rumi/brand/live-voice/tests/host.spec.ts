@@ -27,8 +27,8 @@ async function fixture(acknowledge = true, config = {}, initiallyRunning = false
   const diagnosticsDirectory = await mkdtemp(join(tmpdir(), 'rumi-voice-journal-'))
   cleanups.push(() => rm(diagnosticsDirectory, { recursive: true, force: true }))
   const offered = deferred<undefined>()
-  const respond = deferred<undefined>()
-  if (acknowledge) respond.resolve(undefined)
+  const respond = deferred<number>()
+  if (acknowledge) respond.resolve(201)
   const offers: { session: { model: string; instructions: string }; transport: { type: string; sdp: string } }[] = []
   const authorizations: (string | undefined)[] = []
   const http = createServer(async (request, response) => {
@@ -37,14 +37,14 @@ async function fixture(acknowledge = true, config = {}, initiallyRunning = false
     for await (const chunk of request) body += chunk
     offers.push(JSON.parse(body))
     offered.resolve(undefined)
-    await respond.promise
-    response.writeHead(201, { 'content-type': 'application/json' })
+    const status = offers.length === 1 ? await respond.promise : 201
+    response.writeHead(status, { 'content-type': 'application/json' })
     response.end(JSON.stringify({ session: { id: 'live_test' }, transport: { type: 'webrtc', sdp: 'test answer' } }))
   })
   http.listen(0, '127.0.0.1')
   const server = new WebSocketServer({ server: http })
   cleanups.push(async () => {
-    respond.resolve(undefined)
+    respond.resolve(201)
     for (const client of server.clients) client.terminate()
     await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
     http.closeAllConnections()
@@ -54,16 +54,29 @@ async function fixture(acknowledge = true, config = {}, initiallyRunning = false
   const address = http.address()
   if (typeof address !== 'object' || address === null) throw new Error('Missing test address')
   const started = deferred<WebSocket>()
+  const closeRequested = deferred<undefined>()
+  let closeAcknowledgment: Promise<undefined> | undefined
+  const holdProviderClose = () => {
+    const acknowledgment = deferred<undefined>()
+    closeAcknowledgment = acknowledgment.promise
+    const release = () => acknowledgment.resolve(undefined)
+    cleanups.push(async () => { release() })
+    return { requested: closeRequested.promise, release }
+  }
   server.on('connection', (socket, request) => {
     authorizations.push(request.headers.authorization)
     expect(request.url).toBe('/v1/live/sessions/live_test/attach')
     started.resolve(socket)
-    socket.on('message', (raw) => {
+    socket.on('message', async (raw) => {
       if (!Buffer.isBuffer(raw)) throw new Error('Expected a text frame')
       const event: unknown = JSON.parse(raw.toString('utf8'))
       if (event === null || typeof event !== 'object' || !('type' in event)) return
       frames.push(event as { type: string; content?: string })
-      if (event.type === 'session.close') socket.send(JSON.stringify({ type: 'session.closed' }))
+      if (event.type === 'session.close') {
+        closeRequested.resolve(undefined)
+        await closeAcknowledgment
+        if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'session.closed' }))
+      }
     })
   })
   const owner = new Context()
@@ -103,7 +116,7 @@ async function fixture(acknowledge = true, config = {}, initiallyRunning = false
   const request = (path: string, body?: object) => routes.get(`/api/live-voice${path}`)!(new Request(`http://rumi${path}`, {
     method: body ? 'POST' : 'GET', body: body ? JSON.stringify(path === '/session' ? { sdp: 'v=0 test offer', ...body } : body) : undefined,
   }))
-  return { injected, steered, registry: owner.get('liveVoice'), diagnosticsDirectory, owner, session, other, frames, offers, authorizations, request, started, offered, respond, entered, idle, flushed: () => flushed, key: () => key }
+  return { injected, steered, registry: owner.get('liveVoice'), diagnosticsDirectory, owner, session, other, frames, offers, authorizations, request, started, offered, respond, holdProviderClose, entered, idle, flushed: () => flushed, key: () => key }
 }
 
 it('closes an established socket when its Cordis owner unloads', async () => {
@@ -124,14 +137,67 @@ it('closes an established socket when its Cordis owner unloads', async () => {
   expect(socket.readyState).toBe(3)
 })
 
-it('rejects an overlapping start and aborts a handshake on unload', async () => {
+it('reserves voice across conversations during startup and aborts a handshake on unload', async () => {
   const f = await fixture(false)
   const pending = f.request('/session', { sessionId: 's' })
   await f.offered.promise
-  expect((await f.request('/session', { sessionId: 's' })).status).toBe(409)
+  const overlapping = await Promise.all([f.request('/session', { sessionId: 's' }), f.request('/session', { sessionId: 'other' })])
+  for (const response of overlapping) {
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ code: 'voice_busy' })
+  }
   await f.owner.fiber.dispose()
   expect((await pending).status).not.toBe(200)
   expect(f.authorizations).toEqual(['Bearer test-secret-value'])
+})
+
+it('keeps voice exclusive until the provider closes and ignores stale close IDs', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  const f = await fixture()
+  const { liveId } = await (await f.request('/session', { sessionId: 's' })).json()
+  const socket = await f.started.promise
+  const closed = once(socket, 'close')
+
+  const duplicate = await f.request('/session', { sessionId: 's' })
+  expect(duplicate.status).toBe(409)
+  expect(await duplicate.json()).toMatchObject({ code: 'voice_busy' })
+  const other = await f.request('/session', { sessionId: 'other' })
+  expect(other.status).toBe(409)
+  expect(await other.json()).toMatchObject({ code: 'voice_busy' })
+
+  socket.send(JSON.stringify({ type: 'session.input_transcript.delta', delta: 'Make a cube' }))
+  socket.send(JSON.stringify({ type: 'session.delegation.created', delegation: { id: 'task' } }))
+  await f.entered.promise
+  const acknowledgment = f.holdProviderClose()
+  const closing = f.request('/close', { liveId })
+  await acknowledgment.requested
+  expect(socket.readyState).toBe(socket.OPEN)
+  const duringClose = await f.request('/session', { sessionId: 'other' })
+  expect(duringClose.status).toBe(409)
+  expect(await duringClose.json()).toMatchObject({ code: 'voice_busy' })
+  expect(f.offers).toHaveLength(1)
+  acknowledgment.release()
+  expect((await closing).status).toBe(204)
+  await closed
+
+  const next = await f.request('/session', { sessionId: 'other' })
+  expect(next.status).toBe(200)
+  const { liveId: nextId } = await next.json()
+  expect(nextId).not.toBe(liveId)
+  expect((await f.request('/close', { liveId })).status).toBe(204)
+  expect(await (await f.request('/poll', { liveId: nextId })).json()).toMatchObject({ closed: false })
+  expect(f.offers).toHaveLength(2)
+  expect(f.flushed()).toBe(false)
+  f.idle.resolve(undefined)
+})
+
+it('allows another conversation to start after the provider rejects an offer', async () => {
+  const f = await fixture(false)
+  const failed = f.request('/session', { sessionId: 's' })
+  await f.offered.promise
+  f.respond.resolve(503)
+  expect((await failed).status).toBe(502)
+  expect((await f.request('/session', { sessionId: 'other' })).status).toBe(200)
 })
 
 it('waits for admitted harness work to flush during unload without dispatching queued work', async () => {
@@ -166,9 +232,10 @@ it('stores replacement keys in credentials and returns only masked status', asyn
 
 it('sends only the selected session history in the WebRTC session configuration', async () => {
   const f = await fixture()
-  await f.request('/session', { sessionId: 's' })
+  const { liveId } = await (await f.request('/session', { sessionId: 's' })).json()
   expect(f.offers[0]?.session.instructions).toContain('Make the dragon red, with a handle.')
   expect(f.offers[0]?.session.instructions).not.toContain('blue car')
+  await f.request('/close', { liveId })
   await f.request('/session', { sessionId: 'other' })
   expect(f.offers[1]?.session.instructions).toContain('Other conversation: a blue car.')
   expect(f.offers[1]?.session.instructions).not.toContain('dragon')
@@ -184,7 +251,7 @@ it('retains context updates during the handshake and excludes events from other 
   }
   append(f.other, 'Keep the other car blue.')
   append(f.session, 'Actually make our dragon green.')
-  f.respond.resolve(undefined)
+  f.respond.resolve(201)
   await pending
   const socket = await f.started.promise
   await expect.poll(() => f.frames.find(frame => frame.type === 'session.thinking.append')?.content)

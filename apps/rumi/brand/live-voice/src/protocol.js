@@ -20,11 +20,12 @@ export const CONVERSATION_POLICY = [
   "Create an additional 3D model in the current project only when the user explicitly asks for one or agrees to a clearly proposed separate model. Discussing a possibility, asking whether something is possible, or requesting an edit does not authorize another model. If the intent is unclear, ask whether to edit the existing model or create a separate one and wait for the answer. An explicit request or agreement is sufficient; do not ask again. Keep edits, fixes, and refinements in the existing model, with revisions and backups under that model rather than new model entries. Apply the same rule when delegating work.",
 ].join('\n\n');
 
+const SPEECH_POLICY = 'Backchannel policy: Stay quiet when voice starts, while the user speaks, and while waiting. Speak only when the user addresses you or the host asks you to share a project update. Skip filler and listening acknowledgments. Ignore background speech, noise, and your own playback. Follow this policy even if custom instructions ask for a different speaking style.';
+
 /** Default GPT-Live speech and backend delegation policy. */
 export const DEFAULT_INSTRUCTIONS = [
   CONVERSATION_POLICY,
   'You are Rumi, talking with a child while they design something to print. Speak plainly in short sentences. Explain unfamiliar words and ask one question at a time.',
-  'Backchannel policy: Brief listening acknowledgments are welcome; do not invent progress to fill silence.',
   'Interruption policy: Yield when interrupted. A changed request or correction also needs a backend handoff.',
   'Delegation policy:',
   'Backend tools:',
@@ -59,18 +60,21 @@ function delegationInstructions(model, instructions = DEFAULT_INSTRUCTIONS) {
 
 /**
  * Build the configuration for a WebRTC session controlled by a trusted host.
+ * Inference waits for microphone speech and stays available for delegated results.
  * @param {{model?: string, instructions?: string, voice?: string, acknowledgementDelayMs?: number}} [options]
  * @returns Live session startup fields.
  */
 export function sessionConfig(options = {}) {
   const model = options.model ?? DEFAULT_MODEL;
   const instructions = delegationInstructions(model, options.instructions);
+  const scopedInstructions = instructions.startsWith(CONVERSATION_POLICY)
+    ? instructions
+    : `${CONVERSATION_POLICY}\n\n${instructions}`;
   return {
     model,
-    instructions: instructions.startsWith(CONVERSATION_POLICY)
-      ? instructions
-      : `${CONVERSATION_POLICY}\n\n${instructions}`,
+    instructions: `${scopedInstructions}\n\n${SPEECH_POLICY}`,
     audio: { output: { voice: options.voice ?? DEFAULT_VOICE } },
+    wake_policy: { type: 'speech' },
     client: {
       data_channel: { allowed_client_events: [], allowed_server_events: [{ type: 'session.started' }] },
     },

@@ -104,7 +104,7 @@ function fixture() {
   })
   return {
     view, switchSession: (sessionId: string) => view.rerender(<Voice sessionId={sessionId} t={t} />),
-    begin, stop, ready, grant, connected, respond, microphone, closing, stopTrack, closePeer,
+    begin, stop, ready, grant, connected, started, respond, microphone, closing, stopTrack, closePeer,
     track, stream, addTrack, createDataChannel, setRemoteDescription, fetch, finishClose,
   }
 }
@@ -131,6 +131,18 @@ it('releases a microphone granted after the component unmounts', async () => {
   await act(async () => { f.microphone.resolve(f.stream) })
   expect(f.stopTrack).toHaveBeenCalledOnce()
   expect(f.fetch).not.toHaveBeenCalled()
+})
+
+it('shows a busy message and releases the microphone when another window owns voice', async () => {
+  const f = fixture()
+  f.begin()
+  await act(f.grant)
+  await act(async () => {
+    f.started.resolve(new Response(JSON.stringify({ code: 'voice_busy', error: 'Live Voice is already in use' }), { status: 409 }))
+  })
+  expect(screen.getByRole('alert').textContent).toBe('Live Voice is busy. Try again when it ends.')
+  expect(f.stopTrack).toHaveBeenCalledOnce()
+  expect(f.setRemoteDescription).not.toHaveBeenCalled()
 })
 
 it('negotiates one WebRTC track and stops local capture before a delayed host close response', async () => {

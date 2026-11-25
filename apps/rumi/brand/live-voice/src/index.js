@@ -26,12 +26,14 @@ import { LiveClient } from './live-client.js';
 import { DEFAULT_INSTRUCTIONS, DEFAULT_MODEL, DEFAULT_VOICE, LIVE_ENDPOINT } from './protocol.js';
 
 export const name = 'live-voice';
-// bundle-rev: 4
+// bundle-rev: 5
 
 export const inject = ['connection', 'sessionController', 'sessions', 'credentials'];
 
 const ROUTE = '/api/live-voice';
 const DEFAULT_IDLE_TIMEOUT_MINUTES = 5;
+
+/** @typedef {{liveId: string, entry?: Awaited<ReturnType<typeof createEntry>>, stopping?: Promise<void>}} VoiceReservation */
 
 /** Configuration for one live-voice host row. */
 export const Config = z.object({
@@ -76,19 +78,16 @@ export function apply(ctx, config) {
     info: (message) => console.log(`[live-voice] ${message}`),
     warn: (message) => console.warn(`[live-voice] ${message}`),
   };
-  /** @type {Map<string, any>} */
-  const liveSessions = new Map();
-  /** @type {Map<string, string>} One live session per DSH session, at most. */
-  const liveIdBySession = new Map();
-  const starting = new Set();
+  /** @type {VoiceReservation | undefined} */
+  let reservation;
   const requests = new Set();
-  const closing = new Set();
+  const draining = new Set();
   const lifetime = new AbortController();
   ctx.effect(() => async () => {
     lifetime.abort();
-    await Promise.all([...liveSessions.keys()].map(stop));
+    await stop(reservation?.liveId);
     await Promise.allSettled([...requests]);
-    await Promise.allSettled([...closing]);
+    await Promise.allSettled([...draining]);
   }, 'live-voice sessions');
 
 
@@ -121,16 +120,16 @@ export function apply(ctx, config) {
   };
 
   const stop = (liveId) => {
-    const entry = liveSessions.get(liveId);
-    if (!entry) return;
-    // Drop the entry first: closing it reports back through `onClosed`, which
-    // calls this again, and a live entry here would recurse.
-    liveSessions.delete(liveId);
-    if (liveIdBySession.get(entry.sessionId) === liveId) liveIdBySession.delete(entry.sessionId);
-    const task = entry.close();
-    closing.add(task);
-    void task.then(() => closing.delete(task), () => closing.delete(task));
-    return task;
+    const current = reservation;
+    if (!current?.entry || current.liveId !== liveId) return;
+    if (current.stopping) return current.stopping;
+    // Keep the slot until the provider transport closes. Already-submitted
+    // project work can finish independently, and disposal still awaits it.
+    current.stopping = current.entry.closeTransport().finally(() => { reservation = undefined; });
+    const drained = current.entry.drain();
+    draining.add(drained);
+    void drained.then(() => draining.delete(drained));
+    return current.stopping;
   };
 
   register('/session', ['POST'], async (request) => {
@@ -141,45 +140,43 @@ export function apply(ctx, config) {
     if (typeof sdp !== 'string' || sdp.length > 65_536 || !sdp.startsWith('v=0')) {
       return json({ error: 'Live Voice requires a WebRTC offer.' }, 400);
     }
-    if (starting.has(sessionId)) return json({ error: 'live voice: session is starting' }, 409);
-    starting.add(sessionId);
+    if (reservation) {
+      return json({ code: 'voice_busy', error: 'Live Voice is already in use. End that session or wait for it to close, then try again.' }, 409);
+    }
+    /** @type {VoiceReservation} */
+    const current = { liveId: randomUUID() };
+    reservation = current;
     try {
+      lifetime.signal.throwIfAborted();
       const apiKey = await resolveApiKey(ctx, config);
       debugLog(config, `start session=${sessionId} key=${apiKey ? 'yes' : 'no'}`);
       if (!apiKey) return json({ error: `live voice: no OpenAI API key in ${config.apiKeyEnv ?? 'OPENAI_API_KEY'}` }, 503);
-      // One live session per Session: a second start replaces the first rather
-      // than leaving two sockets appending into the same conversation.
-      const existing = liveIdBySession.get(sessionId);
-      if (existing !== undefined) {
-        debugLog(config, `replacing live session ${existing} for session=${sessionId}`);
-        await stop(existing);
-      }
       const resolved = await ctx.sessionController.resolveAgent(SessionId(sessionId));
       if ('error' in resolved) return json({ error: resolved.error.message }, 404);
       const session = resolved.agent.session;
       const instructions = await compose(sessionId);
       lifetime.signal.throwIfAborted();
-      const liveId = randomUUID();
+      const { liveId } = current;
       const entry = await createEntry({ ctx, registry, config, logger, apiKey, sdp, sessionId, liveId, instructions, session, agent: resolved.agent, signal: lifetime.signal, onClosed: () => stop(liveId) });
       if (lifetime.signal.aborted || entry.closed) {
-        await entry.close();
+        await Promise.all([entry.closeTransport(), entry.drain()]);
         return json({ error: 'live voice: stopped' }, 503);
       }
-      liveSessions.set(liveId, entry);
-      liveIdBySession.set(sessionId, liveId);
+      current.entry = entry;
       return json({ liveId, sdp: entry.answer });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       debugLog(config, `start-failed session=${sessionId} ${message}`);
       return json({ error: message }, 502);
     } finally {
-      starting.delete(sessionId);
+      if (!current.entry) reservation = undefined;
     }
   });
 
   register('/poll', ['POST'], async (request) => {
     const body = await readJson(request);
-    const entry = liveSessions.get(body?.liveId);
+    const current = reservation;
+    const entry = current && current.liveId === body?.liveId ? current.entry : undefined;
     if (!entry) return json({ error: 'live voice: unknown session', closed: true }, 404);
     return json(await entry.poll(5_000));
   });
@@ -417,7 +414,7 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sdp, session
     onError: (error) => { journal.record('transport.error', { message: error.message }); push({ type: 'error', message: error.message }); },
   });
 
-  const end = (reason) => {
+  const end = (reason, notifyHost = true) => {
     if (isClosed) return;
     isClosed = true;
     journal.record('closed', { reason });
@@ -433,7 +430,7 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sdp, session
     signal.removeEventListener('abort', abort);
     void live.close();
     push({ type: 'closed', reason });
-    onClosed?.();
+    if (notifyHost) onClosed();
   };
   const abort = () => end('plugin_disposed');
   // Subscribe in the same synchronous acquisition as the history snapshot so no
@@ -494,14 +491,14 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sdp, session
   noteUserActivity();
 
   return {
-    sessionId,
-    liveId,
     get closed() { return isClosed; },
     answer,
-    async close() {
-      end('close_requested');
-      await live.close();
-      await Promise.allSettled([...turns]);
+    closeTransport() {
+      end('close_requested', false);
+      return live.close();
+    },
+    drain() {
+      return Promise.allSettled([...turns]);
     },
     /** Return everything queued, waiting up to `timeoutMs` for the first item. */
     async poll(timeoutMs) {

@@ -95,7 +95,7 @@ Configure these repository Actions secrets before enabling release builds: `RUMI
 
 After installation is confirmed, Rumi cancels renderer reads, including viewer long polls, before draining the Host’s admitted writes and rechecking active work. Failed installation resumes reads; it does not discard an in-flight write to meet the shutdown deadline.
 
-Every push to `main` starts **Release Rumi**. A push is available to installed apps only after that workflow publishes its signed release and update feed. Check the run for the exact commit before reporting delivery. Print Studio release checks use `apps/rumi/tests/print-studio.spec.ts` and `apps/rumi/tests/print-studio-viewer.client.spec.tsx`; their snapshots live beside those entry points. Focused plugin-file runs use separate snapshots and do not substitute for these release checks.
+Every push to `main` starts **Release Rumi**. A push is available to installed apps only after that workflow publishes its signed release and update feed. Check the run for the exact commit before reporting delivery. Print Studio release checks use `apps/rumi/tests/print-studio.spec.ts` and `apps/rumi/tests/print-studio-viewer.client.spec.tsx`; their snapshots live beside those entry points. Focused plugin-file runs use separate snapshots and do not substitute for these release checks. The workflow runs them through `apps/rumi/vitest.release.config.mts`, which extends the shared configuration so the brand plugins' `.js` files resolve workspace packages from source the way TypeScript suites do. Without that mapping their imports resolve only through the `node_modules` directories a full install happens to populate.
 
 ## Install and run
 

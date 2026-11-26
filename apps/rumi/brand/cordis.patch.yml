@@ -5,6 +5,12 @@
       name: '@rumi/brand'
       config: {}
 
+# Office conversion and authoring are outside the Rumi project profile.
+- id: office-kit
+  disabled: true
+- id: skill-office
+  disabled: true
+
 # Replace preset declarations while retaining their identities for resumed chats.
 - id: preset-standard
   disabled: true

@@ -1,5 +1,6 @@
 /** Select and copy the local npm tarball closures that supply Desktop dsh and its private Host. */
 
+import { omittedRuntimeDependencies } from '../src/bundled-dependencies.ts'
 import { createHash } from 'node:crypto'
 import {
   constants,
@@ -58,7 +59,7 @@ function dependencyNames(manifest: Readonly<Record<string, unknown>>, section: s
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`desktop package set: ${String(manifest.name)} has invalid ${section}`)
   }
-  return Object.keys(value).sort()
+  return Object.keys(value).filter(name => !omittedRuntimeDependencies.has(name)).sort()
 }
 
 /**

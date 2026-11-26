@@ -38,7 +38,7 @@ it('retains shared resources and question dependencies for existing sessions', (
     for (const id of ['standard', 'ptc', 'minimal', 'cordis']) {
       expect(rows.find(row => row.id === `preset-${id}`)?.disabled).toBe(true)
     }
-    for (const id of ['harness-dev-context', 'action-cards', 'client-ui-action-cards', 'creation-recommendations',
+    for (const id of ['office-kit', 'skill-office', 'harness-dev-context', 'action-cards', 'client-ui-action-cards', 'creation-recommendations',
       'client-ui-creation-recommendations', 'plugin-recommendations', 'client-ui-plugin-recommendations', 'remote-connection']) {
       expect(rows.find(row => row.id === id)?.disabled).toBe(true)
     }

@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/rumi/packaging/upgrade-guide/bundled-office/README.md
+/:
+  en: 7f97cf90b206d2fc
+  zh: b922846761c7b2b2
+/opening-office-files:
+  en: 53098410b68483e4
+  zh: 8445135895ba57c5
+/opening-office-files/change:
+  en: bfb0489b67fa17c4
+  zh: e7a23ac0b450936e
+/opening-office-files/migration:
+  en: 8a28c7f6a3606969
+  zh: e7525217588f8940

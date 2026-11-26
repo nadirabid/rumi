@@ -6,11 +6,11 @@
  * node_modules tree, including nested package containers.
  * @param path - Path relative to the production node_modules directory.
  * @param target - Platform and architecture of the Electron Node runtime.
- * @param officeEngine - Engine selected from the installed kit manifest.
+ * @param officeEngine - Engine to retain when packaging a runtime with Office support.
  * @returns Omission reason, or undefined when the entry must be copied.
  */
 export function desktopRuntimeFileExclusion(
-  path: string, target: { platform: NodeJS.Platform; arch: string }, officeEngine: string,
+  path: string, target: { platform: NodeJS.Platform; arch: string }, officeEngine?: string,
 ): string | undefined {
   const parts = path.split(/[\\/]/u)
   if (parts.some(part => ['.bin', '.pnpm', '.modules.yaml', '.pnpm-workspace-state-v1.json'].includes(part))) {

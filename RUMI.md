@@ -58,6 +58,8 @@ Electron archives, including cached copies, are verified against the checksums s
 
 macOS packaging prepares the bundled runtimes while packing the workspace dependencies. Electron, the primary runtime, and Blender prepare concurrently. Bullet uses Electron’s minimum macOS version. Assembly waits for all runtimes and workspace packages. The full package runs the primary runtime’s execution check after runtime preparation and any native signing.
 
+Rumi omits the LibreOffice engine, developer Inspector, and local SenseVoice dictation from its packaged runtime. The [packaging policy](apps/rumi/packaging/README.md#runtime-file-selection) applies during dependency selection and installation. Rumi live voice uses its own bundle.
+
 For signed macOS releases, each notarization task prepares and verifies its own copy of the signed app. The packaged runtime check runs on the original app while notarization runs on the copies. Packaging moves the verified artifacts into the release directory after both artifact tasks and the runtime check succeed. A configured system notarization proxy is applied after the runtime check. The log reports copy preparation, app notarization, and update ZIP creation separately.
 
 The macOS update ZIP uses Electron Builder compression level 3 by default and produces a blockmap from the finished archive. Packaging accepts an explicit `ELECTRON_BUILDER_COMPRESSION_LEVEL` override.

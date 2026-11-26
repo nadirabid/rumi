@@ -69,18 +69,19 @@ describe('desktop package-set selection', () => {
     ]), { platform: 'win32', arch: 'x64' })).toThrow(/omit @deepseek-ai\/dsh-desktop-host/u)
   })
 
-  it('leaves independently published Office packages to npm resolution', () => {
+  it('omits optional Rumi profile roots without dropping dependencies used by retained packages', () => {
+    const inspector = '@deepseek-ai/dsh-experimental-inspector-profile'
+    const voice = '@deepseek-ai/dsh-experimental-voice-input-bundle'
     const available = new Map<string, PackedDesktopPackage>([
-      ['@deepseek-ai/dsh', packed('@deepseek-ai/dsh', {
-        dependencies: {
-          '@deepseek-ai/libreoffice-kit': '0.0.1',
-          '@deepseek-ai/libreoffice-kit-wasm': '0.0.1',
-        },
-      })],
+      ['@deepseek-ai/dsh', packed('@deepseek-ai/dsh', { dependencies: { [voice]: '1', shared: '1' }, optionalDependencies: { [inspector]: '1' } })],
       ['@deepseek-ai/dsh-desktop-host', packed('@deepseek-ai/dsh-desktop-host')],
+      [voice, packed(voice, { dependencies: { shared: '1', 'voice-engine': '1' } })],
+      [inspector, packed(inspector)],
+      ['voice-engine', packed('voice-engine')],
+      ['shared', packed('shared')],
     ])
-    expect(selectDesktopPackageClosure(available, { platform: 'win32', arch: 'x64' }).map(entry => entry.manifest.name)).toEqual([
-      '@deepseek-ai/dsh', '@deepseek-ai/dsh-desktop-host',
+    expect(selectDesktopPackageClosure(available, { platform: 'darwin', arch: 'arm64' }).map(entry => entry.manifest.name)).toEqual([
+      '@deepseek-ai/dsh', '@deepseek-ai/dsh-desktop-host', 'shared',
     ])
   })
 

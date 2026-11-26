@@ -27,6 +27,7 @@ import {
   sanitizeProfile, writeProfileBundles,
 } from '@deepseek-ai/dsh-app-boot'
 import { PROFILE_TEMPLATES, type ProfileTemplate } from '@deepseek-ai/dsh-official-bundles'
+import { omittedRuntimeDependencies } from './bundled-dependencies.ts'
 import { RUMI_APP_BUNDLE_NAMES, RUMI_RETIRED_BUNDLES } from './app-bundles.ts'
 
 const PROJECT_NAME = '@deepseek-ai/dsh-desktop-runtime'
@@ -165,7 +166,10 @@ export function createRuntimeProjectMetadata(
   writeJson(join(projectDir, 'package.json'), manifest)
   writeFileSync(
     join(projectDir, 'pnpm-workspace.yaml'),
-    workspaceFile(desktopCorePackageOverrides(packageSet)),
+    workspaceFile({
+      ...desktopCorePackageOverrides(packageSet),
+      ...Object.fromEntries([...omittedRuntimeDependencies].map(name => [name, '-'])),
+    }),
     { mode: 0o600 },
   )
 }

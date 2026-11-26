@@ -25,8 +25,8 @@ vi.mock('../scripts/windows-runtime-signature.mjs', async importOriginal => ({
   signWindowsCode: async () => {},
 }))
 // Vite's root-relative IDs also resolve mocked build outputs on a clean checkout.
-vi.mock('/apps/desktop/lib/types/runtime-tree.js', () => ({ verifyDesktopRuntime: async () => {} }))
-vi.mock('/apps/desktop/lib/types/mandatory-update-policy.js', async () => import('../src/mandatory-update-policy.ts'))
+vi.mock('../lib/types/runtime-tree.js', () => ({ verifyDesktopRuntime: async () => {} }))
+vi.mock('../lib/types/mandatory-update-policy.js', async () => import('../src/mandatory-update-policy.ts'))
 vi.mock('node:crypto', async importOriginal => ({
   ...await importOriginal<typeof import('node:crypto')>(),
   X509Certificate: class { fingerprint = 'AA:BB' },
@@ -183,6 +183,7 @@ it('registers external staging cleanup before a configuration rewrite fails', as
 
 it.each([true, false])('validates the real builder hook for unsigned=%s', async (unsigned) => {
   const input = await fixture(true)
+  await rm(join(input.source, 'node_modules/@deepseek-ai/libreoffice-kit'), { recursive: true })
   const certificate = join(input.root, 'certificate.cer')
   await writeFile(certificate, 'fixture public certificate')
   const config = createElectronBuilderConfig({

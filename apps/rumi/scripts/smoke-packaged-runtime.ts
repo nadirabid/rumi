@@ -1,4 +1,4 @@
-/** Validate the assembled application, including native Office conversion outside ASAR. */
+/** Validate the assembled application, including bundled modeling and mechanical checks. */
 import { execFileSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'

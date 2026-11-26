@@ -7,7 +7,7 @@ import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { encodeStl, parseStl, STL_LIMITS } from './stl.js'
 import { MAX_CURSOR_IMAGE_CHARS } from './image-limits.js'
 
-const rendererUnavailableReasons = new Set(['viewer_not_open', 'viewer_closed', 'viewer_hidden', 'temporary_edit', 'movement_preview', 'print_layout'])
+const rendererUnavailableReasons = new Set(['viewer_not_open', 'viewer_closed', 'viewer_hidden', 'temporary_edit', 'movement_preview', 'print_layout', 'named_regions'])
 const meshUnavailableReasons = new Set(['unsupported_model', 'empty_selection', 'geometry_unavailable'])
 const maxMeshBase64 = 4 * Math.ceil((84 + 50 * STL_LIMITS.maxTriangles) / 3)
 
@@ -124,25 +124,17 @@ export function validateCursorSnapshot(value) {
   const vector = x => Array.isArray(x) && x.length === 3 && x.every(n => Number.isFinite(n) && Math.abs(n) <= 1e9)
   const region = value.region
   if (typeof value.capturedAt !== 'string' || value.capturedAt.length > 40 || !Number.isFinite(Date.parse(value.capturedAt)) || !value.identity || !Number.isInteger(value.identity.sceneRevision)
-    || (!region && !(region === null && value.namedRegion))) throw new Error('Invalid cursor region')
-  let namedRegion
-  if (value.namedRegion !== undefined) {
-    const feature = value.namedRegion
-    if (!value.identity.design || !feature || typeof feature.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,47}$/u.test(feature.id)
-      || typeof feature.name !== 'string' || !feature.name.trim() || feature.name.length > 64
-      || typeof feature.regionMapKey !== 'string' || !/^[a-f0-9]{64}$/u.test(feature.regionMapKey)) throw new Error('Invalid named cursor region')
-    namedRegion = { id: feature.id, name: feature.name, regionMapKey: feature.regionMapKey }
-  }
-  if (region && (!(region.objectId === null || typeof region.objectId === 'string')
+    || !region) throw new Error('Invalid cursor region')
+  if (!(region.objectId === null || typeof region.objectId === 'string')
     || !Array.isArray(region.partPath) || region.partPath.length > 128 || !region.partPath.every(s => typeof s === 'string' && s.length <= 1000)
     || !Number.isInteger(region.faceIndex) || region.faceIndex < 0 || !vector(region.worldPoint)
-    || !Number.isFinite(region.worldRadius) || region.worldRadius <= 0 || region.worldRadius > 1e9)) throw new Error('Invalid cursor region')
-  const blob = region ? region.modelLocalBlob : null
+    || !Number.isFinite(region.worldRadius) || region.worldRadius <= 0 || region.worldRadius > 1e9) throw new Error('Invalid cursor region')
+  const blob = region.modelLocalBlob
   if (blob !== null && (!blob || !vector(blob.center) || !vector(blob.radii) || blob.radii.some(n => n <= 0) || !vector(blob.rotationDegrees))) throw new Error('Invalid model-local region')
-  const modelLocalPoint = region?.modelLocalPoint === undefined ? blob?.center ?? null : region.modelLocalPoint
+  const modelLocalPoint = region.modelLocalPoint === undefined ? blob?.center ?? null : region.modelLocalPoint
   if (modelLocalPoint !== null && !vector(modelLocalPoint)) throw new Error('Invalid saved model point')
-  const selection = region?.selection === undefined ? undefined : normalizeSelection(region.selection)
-  const mesh = readMesh(value, Boolean(namedRegion || (selection && modelLocalPoint)))
+  const selection = region.selection === undefined ? undefined : normalizeSelection(region.selection)
+  const mesh = readMesh(value, Boolean(selection && modelLocalPoint))
   const camera = value.camera
   if (!camera || !vector(camera.position) || !vector(camera.target) || !vector(camera.up)
     || !Number.isFinite(camera.fov) || camera.fov <= 0 || camera.fov >= 180
@@ -151,9 +143,9 @@ export function validateCursorSnapshot(value) {
     || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value.image)) throw new Error('Invalid cursor image')
   return {
     status: 'captured', capturedAt: value.capturedAt, identity: value.identity,
-    ...mesh, ...(namedRegion ? { namedRegion } : {}),
-    region: region ? { ...(selection ? { selection } : {}), objectId: region.objectId, partPath: region.partPath, faceIndex: region.faceIndex,
-      worldPoint: region.worldPoint, worldRadius: region.worldRadius, modelLocalPoint, modelLocalBlob: blob === null ? null : { center: blob.center, radii: blob.radii, rotationDegrees: blob.rotationDegrees } } : null,
+    ...mesh,
+    region: { ...(selection ? { selection } : {}), objectId: region.objectId, partPath: region.partPath, faceIndex: region.faceIndex,
+      worldPoint: region.worldPoint, worldRadius: region.worldRadius, modelLocalPoint, modelLocalBlob: blob === null ? null : { center: blob.center, radii: blob.radii, rotationDegrees: blob.rotationDegrees } },
     camera: { position: camera.position, target: camera.target, up: camera.up, fov: camera.fov, aspect: camera.aspect },
     image: value.image,
   }

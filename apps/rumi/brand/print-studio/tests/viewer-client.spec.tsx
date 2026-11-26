@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
-import { Button, Menu, IconChevronDownOutlineRegular, IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Menu, IconChevronDownOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { printLayoutIdentity } from '../viewer/print-layout/state.js'
 import { installViewer } from '../viewer/client.js'
 import { en, zh } from '../viewer/locales.js'
@@ -118,9 +118,10 @@ function fixture(host: { scene?: object | null; modelOk?: boolean; locale?: 'en'
         return () => { entries.delete(options.name) }
       },
     },
-  }, React, { Menu, IconChevronDownOutlineRegular, IconCloseOutlineRegular, PluginArtworkDefault: () => null, Button })
+  }, React, { Menu, IconChevronDownOutlineRegular, PluginArtworkDefault: () => null, Button })
   return {
     opened, fetch,
+    hasSlot: (name: string) => entries.has(name),
     mount: (id: string | undefined) => { mounted = id; for (const listener of mountedListeners) listener() },
     requestCursor: (id: string) => { state.cursorRequest = { id } },
     setScene: (next: object | null) => { state.scene = next },
@@ -141,35 +142,23 @@ async function settle(ms = 0) {
   await act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 }
 
-type RegionMarkerPosition = { id: string; name: string; description?: string; x: number; y: number; interactive: boolean }
+type RegionMarkerPosition = { id: string; name: string; description?: string; x: number; y: number }
 
-it('shows the projected name and lets the chat chip reopen or remove its reference', async () => {
+it('displays a projected highlight name without a chat attachment action', async () => {
   const design = { url: '/source/model.js', revision: 1, error: null, highlight: { id: 'tail', regionName: 'Tail tip', meshPath: 'tail.stl' } }
-  const base = { ...scene([]), design }
-  const view = fixture({ scene: base })
-  render(<>{view.view('sidebar.right.pane.tab')}{view.view('conversation.input.dock')}</>)
+  const view = fixture({ scene: { ...scene([]), design } })
+  render(view.view('sidebar.right.pane.tab'))
   await settle()
-  expect(screen.queryByRole('button', { name: 'Use Tail tip in chat' })).toBeNull()
   const position = viewport.create.mock.calls[0]![5] as (input: RegionMarkerPosition | null) => void
-  act(() => position({ id: 'tail', name: 'Tail tip', x: 55, y: 40, interactive: false }))
-  expect(screen.getByRole('button', { name: 'Use Tail tip in chat' }).tabIndex).toBe(-1)
-  act(() => position({ id: 'tail', name: 'Tail tip', x: 55, y: 40, interactive: true }))
-  expect(screen.getByRole('button', { name: 'Use Tail tip in chat' }).tabIndex).toBe(0)
-  view.setScene({ ...base, regionReference: { id: 'tail', name: 'Tail tip' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Use Tail tip in chat' }))
+  act(() => position({ id: 'tail', name: 'Tail tip', x: 55, y: 40 }))
+  const label = screen.getByText('Tail tip')
+  expect(label.tabIndex).toBe(-1)
+  expect(screen.queryByRole('button', { name: /Tail tip/ })).toBeNull()
+  expect(view.hasSlot('conversation.input.dock')).toBe(false)
+  view.fetch.mockClear()
+  fireEvent.click(label)
   await settle()
-  const route = '/api/print-studio/viewer/region-reference?sessionId=session-a'
-  expect(view.fetch).toHaveBeenCalledWith(route, expect.objectContaining({ body: JSON.stringify({ id: 'tail', attach: true }) }))
-  const chip = screen.getByRole('button', { name: 'Show Tail tip in the preview' })
-  view.opened.mockClear()
-  fireEvent.click(chip)
-  expect(view.opened).toHaveBeenCalledWith('session-a', 'print-studio')
-  act(() => position(null))
-  view.setScene(base)
-  fireEvent.click(screen.getByRole('button', { name: 'Remove Tail tip from chat' }))
-  await settle()
-  expect(view.fetch).toHaveBeenCalledWith(route, expect.objectContaining({ body: JSON.stringify({ id: 'tail', attach: false }) }))
-  expect(screen.queryByRole('button', { name: 'Show Tail tip in the preview' })).toBeNull()
+  expect(view.fetch).not.toHaveBeenCalled()
 })
 
 it('updates the label with only the feature name as the pointer moves in Named regions', async () => {
@@ -180,16 +169,16 @@ it('updates the label with only the feature name as the pointer moves in Named r
   expect(viewport.setCursorMode).toHaveBeenLastCalledWith('named')
   expect(mode.getAttribute('aria-pressed')).toBe('true')
   const position = viewport.create.mock.calls[0]![5] as (input: RegionMarkerPosition | null) => void
-  act(() => position({ id: 'ear', name: 'Right ear', description: 'The small point above the cheek.', x: 68, y: 25, interactive: false }))
-  const ear = screen.getByRole('button', { name: 'Use Right ear in chat' })
+  act(() => position({ id: 'ear', name: 'Right ear', description: 'The small point above the cheek.', x: 68, y: 25 }))
+  const ear = screen.getByText('Right ear')
   expect(ear.textContent).toBe('Right ear')
   expect(ear.hasAttribute('aria-describedby')).toBe(false)
   expect(screen.queryByText('The small point above the cheek.')).toBeNull()
-  act(() => position({ id: 'cheek', name: 'Right cheek', x: 70, y: 45, interactive: false }))
-  expect(screen.queryByRole('button', { name: 'Use Right ear in chat' })).toBeNull()
-  expect(screen.getByRole('button', { name: 'Use Right cheek in chat' })).toBeTruthy()
+  act(() => position({ id: 'cheek', name: 'Right cheek', x: 70, y: 45 }))
+  expect(screen.queryByText('Right ear')).toBeNull()
+  expect(screen.getByText('Right cheek')).toBeTruthy()
   act(() => position(null))
-  expect(screen.queryByRole('button', { name: 'Use Right cheek in chat' })).toBeNull()
+  expect(screen.queryByText('Right cheek')).toBeNull()
 })
 
 it('uses Local patch until named regions arrive and keeps an explicit mode through later map changes', async () => {

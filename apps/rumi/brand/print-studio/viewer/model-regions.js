@@ -233,7 +233,7 @@ export function modelRegionAt(map, point) {
  * Identify a feature on one displayed source and one edition of its region map.
  * @param {object} design Current design, including its region map.
  * @param {string} id Feature ID from that map.
- * @returns {string} Reference for use by the browser and host.
+ * @returns {string} Key for the projected label in the viewer.
  */
 export function modelRegionReference(design, id) {
   return `${design.url}#${design.regionMap.key}/${id}`

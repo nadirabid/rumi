@@ -60,7 +60,7 @@ export function installViewer(ctx, React, primitives) {
   const h = React.createElement
   const AnalogPanel = createAnalogPanel(React)
   const MovementControls = createMovementControls(React, AnalogPanel)
-  const { PluginArtworkDefault, Button, IconCloseOutlineRegular } = primitives
+  const { PluginArtworkDefault, Button } = primitives
   const ModelSelector = createModelSelector(React, Button)
   const PrintLayoutPanel = createPrintLayoutPanel(React, primitives)
   const t = ctx.locale.bind(NS)
@@ -91,49 +91,6 @@ export function installViewer(ctx, React, primitives) {
   const subscribe = (listener) => { listeners.add(listener); return () => listeners.delete(listener) }
 
   let refreshScene
-  function useRegionAction(sessionId, regionId) {
-    const request = React.useRef(null)
-    const [busy, setBusy] = React.useState(false)
-    const [failed, setFailed] = React.useState(false)
-    React.useEffect(() => {
-      setBusy(false); setFailed(false)
-      return () => { request.current?.abort(); request.current = null }
-    }, [sessionId, regionId])
-    async function change(attach) {
-      if (request.current || !regionId) return
-      const controller = new AbortController()
-      request.current = controller
-      setBusy(true); setFailed(false)
-      try {
-        const response = await fetch(`${ROUTE}/region-reference?sessionId=${encodeURIComponent(sessionId)}`, {
-          method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
-          body: JSON.stringify({ id: regionId, attach }),
-        })
-        if (controller.signal.aborted) return
-        await refreshScene(sessionId)
-        if (!response.ok) throw new Error('Region reference could not change')
-      } catch (_error) {
-        if (!controller.signal.aborted) setFailed(true)
-      } finally {
-        if (!controller.signal.aborted) { request.current = null; setBusy(false) }
-      }
-    }
-    return { busy, failed, change }
-  }
-
-  function RegionDock({ useScene, reveal, t }) {
-    const region = useScene(value => value.scene?.regionReference ?? null)
-    const sessionId = useScene(value => value.view?.sessionId)
-    const action = useRegionAction(sessionId, region?.id)
-    if (!region) return null
-    return h('div', { className: 'rumi-region-dock' },
-      h('div', { className: 'rumi-region-glass rumi-region-chip', role: 'group', 'aria-label': t('regionReference') },
-        h(Button, { variant: 'ghost', size: 'sm', onClick: reveal, 'aria-label': t('regionReveal', { name: region.name }) }, region.name),
-        h(Button, { variant: 'ghost', size: 'sm', 'aria-label': t('regionRemove', { name: region.name }), 'aria-disabled': action.busy,
-          onClick: () => { void action.change(false) } }, h(IconCloseOutlineRegular, { size: 14 }))),
-      action.failed && h('span', { role: 'alert' }, t('regionRemoveFailed')))
-  }
-
   ctx.effect(() => {
     const controller = new AbortController()
     let timer
@@ -156,7 +113,6 @@ export function installViewer(ctx, React, primitives) {
       revision: scene.revision,
       design: scene.design ?? null,
       sessionId,
-      regionReference: scene.regionReference ?? null,
       volume: scene.volume,
       objects: scene.objects.map(object => ({
         id: object.id,
@@ -215,7 +171,6 @@ export function installViewer(ctx, React, primitives) {
         && JSON.stringify(current.scene.validation) === JSON.stringify(scene.validation)
         && JSON.stringify(current.scene.models) === JSON.stringify(scene.models)
         && JSON.stringify(current.scene.workingModels) === JSON.stringify(scene.workingModels)
-        && current.scene.regionReference?.id === scene.regionReference?.id
         && current.scene.agentRunning === scene.agentRunning
         && current.scene.selectedModel === scene.selectedModel
         && current.scene.catalogFailed === scene.catalogFailed
@@ -293,14 +248,10 @@ export function installViewer(ctx, React, primitives) {
     const canUseNamedRegions = hasNamedRegions && !view.design.analog
     const defaultCursor = canUseNamedRegions && view.design.regionStatus !== 'invalid' ? 'named' : 'patch'
     const cursorMode = cursorPreference === 'named' && !canUseNamedRegions ? defaultCursor : cursorPreference ?? defaultCursor
-    const attached = Boolean(region && view?.regionReference?.id === region.id)
-    const regionAction = useRegionAction(view?.sessionId, region?.id)
     function drawRegionLabel(element, position) {
       if (!element) return
       element.hidden = position?.id !== element.dataset.regionId
       if (element.hidden) return
-      element.toggleAttribute('data-interactive', position.interactive)
-      element.firstElementChild.tabIndex = position.interactive ? 0 : -1
       element.style.setProperty('--pv-region-x', `${position.x.toFixed(2)}%`)
       element.style.setProperty('--pv-region-y', `${position.y.toFixed(2)}%`)
     }
@@ -620,17 +571,12 @@ export function installViewer(ctx, React, primitives) {
       h('div', { className: 'pv-stage', ref: holder, role: 'img', 'aria-label': t(working ? activity === 'checking' ? 'activityChecking' : 'activityBuilding' : 'view'), 'aria-busy': working, 'data-activity': activity, 'data-testid': 'print-viewport',
         tabIndex: highlight?.regionName && !printState?.active && !failed ? 0 : -1,
         onFocus: event => { if (event.currentTarget.matches(':focus-visible')) viewport.current?.setRegionFocused(true) },
-        onBlur: event => { if (!regionMarker.current?.contains(event.relatedTarget)) viewport.current?.setRegionFocused(false) },
+        onBlur: () => viewport.current?.setRegionFocused(false),
       }),
       region?.name && !failed && view?.design && !view.design.error && h('div', {
         key: region.id, className: 'rumi-region-glass pv-region-marker', ref: bindRegionMarker,
         'data-region-id': region.id, hidden: true,
-        onBlur: () => viewport.current?.setRegionFocused(false),
-      }, h(Button, { variant: 'ghost', size: 'sm', tabIndex: -1, 'aria-pressed': attached, 'aria-disabled': regionAction.busy,
-        'aria-label': t(attached ? 'regionRemove' : 'regionUse', { name: region.name }),
-        onClick: () => { void regionAction.change(!attached) },
-      }, region.name)),
-      regionAction.failed && h('p', { role: 'alert', className: 'pv-error' }, t(attached ? 'regionRemoveFailed' : 'regionUseFailed')),
+      }, region.name),
       buildError && !failed && view?.design?.error?.kind !== 'source'
         ? h('p', { role: 'alert', className: view?.design?.analog ? 'pv-error av-error' : 'pv-error' }, t(buildError)) : null)
   }
@@ -774,13 +720,6 @@ export function installViewer(ctx, React, primitives) {
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
     name: 'sidebar.right.pane.tab.title', key: ID,
   }, Title)), 'print viewer: tab title')
-  ctx.effect(() => ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
-    name: 'conversation.input.dock', id: 'rumi-mesh-region', order: 20, locale: NS,
-    inject: sessionId => ({
-      hooks: { scene: { subscribe, getSnapshot: () => read(sessionId) } },
-      reveal: () => ctx.sidebarRight.openTabIn(sessionId, KIND),
-    }),
-  }, RegionDock)), 'print viewer: chat region reference')
   ctx.effect(() => ctx.documentPreviews.register({
     id: ID, extensions: ['stl'], binaryExtensions: ['stl'], priority: 'extension',
     title: () => t('title'), loading: 'bytes-complete', wrap: false,

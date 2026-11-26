@@ -16,15 +16,12 @@ async function fixture(regionMap?: NonNullable<ReturnType<typeof readModelRegion
   const record = { selectedModel: 'models/cup/model.glb', models: [{ name: 'cup', path: 'models/cup/model.glb' }],
     source: { state: () => ({ revision: 2, path: 'models/cup/model.glb', url: '/cup', regionMap }) } }
   const notices: string[] = []
-  let region: { name: string; path: string; revision: number } | null = null
   const focus = createModelFocus({ effect: owner.effect.bind(owner), inject: owner.inject.bind(owner),
     on: (name: string, listener: (event: any) => void) => { listeners.set(name, listener) },
-  }, { read: (id: string) => id === 'one' ? record : undefined, notify: (id: string) => notices.push(id),
-    readRegion: (id: string) => id === 'one' ? region : null })
+  }, { read: (id: string) => id === 'one' ? record : undefined, notify: (id: string) => notices.push(id) })
   const agent = { session: { id: 'one' }, status: 'running' } as Agent
   const message = (id: string, text = '') => ({ id, source: { kind: 'user' }, content: [{ type: 'text', text }] })
   return { owner, record, focus, agent, notices, message,
-    setRegion: (next: typeof region) => { region = next },
     emit: (name: string, payload: object) => listeners.get(name)!({ agent, ...payload }),
     context: async (target = agent) => renderContextSections(await owner.systemPrompt.assemble({ agent: target })),
   }
@@ -34,9 +31,7 @@ it('keeps admitted references while browsing changes, with separate agent work a
   const f = await fixture()
   try {
     const message = f.message('request-one')
-    f.setRegion({ name: 'Cup rim', path: 'models/cup/model.glb', revision: 2 })
     f.emit('agent/inbox/inserted', { message })
-    f.setRegion(null)
     f.record.selectedModel = 'models/dragon/model.glb'
     f.emit('agent/inbox/claimed', { message, turn: 1 })
     f.focus.set(f.agent, 'models/cup/model.glb')
@@ -47,21 +42,23 @@ it('keeps admitted references while browsing changes, with separate agent work a
     const data = JSON.parse(context.find(section => section.name === 'rumi:model-focus')!.text).modelFocus
     expect(data.currentSelection.path).toBe('models/dragon/model.glb')
     expect(data.requests[0].selectionAtAdmission.path).toBe('models/cup/model.glb')
-    expect(data.requests[0].regionAtAdmission).toEqual({ name: 'Cup rim', path: 'models/cup/model.glb', revision: 2 })
     expect(data.workingModel).toBe('models/cup/model.glb')
     f.focus.set(f.agent, null)
     expect(f.focus.paths('one')).toEqual([])
   } finally { await f.owner.fiber.dispose() }
 })
 
-it('keeps named features mentioned in a typed request bound to the admitted model', async () => {
+it.each([
+  'Highlight the spout so I can see it.',
+  'Highlight the pouring lip',
+])('binds the explicitly named feature in %j to the admitted model', async (text) => {
   const sourceHash = '1'.repeat(64), key = '2'.repeat(64)
   const regionMap = readModelRegions({ sourceHash, regions: [
     { id: 'pouring-lip', name: 'Pouring lip', aliases: ['Spout'], location: { kind: 'point', point: [0, 2, 4] } },
   ] }, sourceHash)!
   const f = await fixture({ ...regionMap, key })
   try {
-    const message = f.message('request-one', 'Highlight the spout so I can see it.')
+    const message = f.message('request-one', text)
     f.emit('agent/inbox/inserted', { message })
     f.record.selectedModel = 'models/dragon/model.glb'
     f.emit('agent/inbox/claimed', { message, turn: 1 })

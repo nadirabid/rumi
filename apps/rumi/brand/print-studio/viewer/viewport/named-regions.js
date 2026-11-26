@@ -1,7 +1,6 @@
-/** The same saved model features drive hit testing, highlights, and mesh export. */
+/** The same saved model features drive hit testing and highlights. */
 import * as THREE from 'three'
-import { encodeStlBase64, STL_LIMITS } from '../stl.js'
-import { modelLocalPartMatrix, modelPartPath } from './cursor-geometry.js'
+import { modelPartPath } from './cursor-geometry.js'
 import { createSurfaceIndex } from './surfaces.js'
 
 const MIN_DETAIL_PIXELS = 36
@@ -200,33 +199,6 @@ function surfacePositions(node, faces, matrix) {
     }
   }
   return values
-}
-
-/**
- * Encode the named source triangles before viewer placement in model-local millimetres.
- * @param {object} entry One resolved named feature.
- * @param {THREE.Object3D} placement Viewer placement group.
- * @returns {{meshStl?:string,meshUnavailable?:string}} Optional STL for surface geometry.
- */
-export function namedRegionMesh(entry, placement) {
-  if (!entry.selectors) return {}
-  const parts = []
-  let length = 0
-  for (const [node, faces] of entry.selectors) {
-    const matrix = modelLocalPartMatrix(node, placement)
-    if (!matrix) return { meshUnavailable: 'geometry_unavailable' }
-    const positions = surfacePositions(node, faces, matrix)
-    parts.push(positions)
-    length += positions.length
-  }
-  if (length > STL_LIMITS.maxTriangles * 9) return { meshUnavailable: 'geometry_unavailable' }
-  const positions = new Float32Array(length)
-  let offset = 0
-  for (const part of parts) {
-    positions.set(part, offset)
-    offset += part.length
-  }
-  return { meshStl: encodeStlBase64(positions) }
 }
 
 /**

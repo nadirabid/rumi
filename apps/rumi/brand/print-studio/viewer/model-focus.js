@@ -1,15 +1,15 @@
 /** Request-time model references and agent-declared work, independent of viewer selection. */
 import { mentionedModelRegions } from './model-regions.js'
 
-export const MODEL_FOCUS_GUIDANCE = 'Resolve model references before editing. Explicit model names and captured pointing references take precedence over the selected model. Use an attached named region from that message’s regionAtAdmission. A typed feature name can match a saved region or alias in the current design.regionMap. namedRegionsMentioned lists exact name matches detected at admission, even in questions or corrections. Interpret the action and intended model from the message and verify the saved revision. For an otherwise unqualified request, use the selection captured when that request entered the inbox, not a later selection. Voice references include the selection at speech capture; prefer that over inbox-time selection. Continued work stays on its established model. If a new selection conflicts with ongoing work and intent is ambiguous, ask which model the person means. Browsing alone never retargets work. Call viewer_working_model with the discovered model entry before inspecting or editing that model; change it when your work changes targets. Clear it before asking a clarification or when no model is being worked on. The green dot reports your declared work, not a lock, proof of an edit, or the user selection. If the model does not exist yet, create its entry first. Use viewer_load only when you intend to change what the person sees.'
+export const MODEL_FOCUS_GUIDANCE = 'Resolve model references before editing. Explicit model names and captured pointing references take precedence over the selected model. Resolve named regions from a feature name or alias the person says or types. namedRegionsMentioned lists exact name matches detected at admission, even in questions or corrections. Interpret the action and intended model from the message and verify the saved revision. For an otherwise unqualified request, use the selection captured when that request entered the inbox, not a later selection. Voice references include the selection at speech capture; prefer that over inbox-time selection. Continued work stays on its established model. If a new selection conflicts with ongoing work and intent is ambiguous, ask which model the person means. Browsing alone never retargets work. Call viewer_working_model with the discovered model entry before inspecting or editing that model; change it when your work changes targets. Clear it before asking a clarification or when no model is being worked on. The green dot reports your declared work, not a lock, proof of an edit, or the user selection. If the model does not exist yet, create its entry first. Use viewer_load only when you intend to change what the person sees.'
 
 /**
  * Bind transient focus to each agent and capture selection when human input enters its inbox.
  * @param {object} ctx Host plugin context.
- * @param {{read: Function, notify: Function, readRegion?: Function}} options Viewer lookup, invalidation and attached region lookup.
+ * @param {{read: Function, notify: Function}} options Viewer lookup and invalidation.
  * @returns {object} Work declaration and session-level work paths.
  */
-export function createModelFocus(ctx, { read, notify, readRegion = () => null }) {
+export function createModelFocus(ctx, { read, notify }) {
   const agents = new Map(), running = new Set()
   function state(agent) {
     let value = agents.get(agent)
@@ -30,7 +30,7 @@ export function createModelFocus(ctx, { read, notify, readRegion = () => null })
   }
   ctx.on('agent/inbox/inserted', ({ agent, message }) => {
     if (message.source.kind !== 'user') return
-    const sessionId = agent.session.id, region = readRegion(sessionId)
+    const sessionId = agent.session.id
     const design = read(sessionId)?.source?.state()
     const text = message.content?.filter(block => block.type === 'text').map(block => block.text).join('\n') ?? ''
     const mentions = mentionedModelRegions(design?.regionMap, text)
@@ -38,7 +38,7 @@ export function createModelFocus(ctx, { read, notify, readRegion = () => null })
       regionId: id, name, path: design.path, revision: design.revision, url: design.url, regionMapKey: design.regionMap.key,
     }))
     state(agent).pending.set(message.id, {
-      selectionAtAdmission: selection(sessionId), ...(region ? { regionAtAdmission: region } : {}),
+      selectionAtAdmission: selection(sessionId),
       ...(namedRegionsMentioned.length ? { namedRegionsMentioned } : {}),
     })
   })

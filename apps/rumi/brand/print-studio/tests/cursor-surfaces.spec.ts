@@ -6,7 +6,7 @@ import { createSurfaceIndex } from '../viewer/viewport/surfaces.js'
 import { normalizeSelection } from '../viewer/highlight.js'
 import { cursorMeshSnapshot } from '../viewer/viewport/cursor-geometry.js'
 import { parseStl } from '../viewer/stl.js'
-import { createNamedRegionIndex, createNamedRegionVisual, namedRegionMesh } from '../viewer/viewport/named-regions.js'
+import { createNamedRegionIndex, createNamedRegionVisual } from '../viewer/viewport/named-regions.js'
 
 it('joins coplanar triangles, stops at creases, and preserves triangle identity when picking', () => {
   const geometry = new THREE.BoxGeometry(2, 2, 2).toNonIndexed()
@@ -75,7 +75,7 @@ it('retains a captured selection in a cursor snapshot and rejects malformed refe
   expect(() => normalizeSelection({ ...selection, surfaceId: -1 })).toThrow()
 })
 
-it('picks, draws, and exports the same named faces before viewer placement', () => {
+it('picks and draws the same named faces with viewer placement', () => {
   const geometry = new THREE.PlaneGeometry(2, 2)
   const material = new THREE.MeshBasicMaterial()
   const mesh = new THREE.Mesh(geometry, material)
@@ -99,8 +99,6 @@ it('picks, draws, and exports the same named faces before viewer placement', () 
     const preview = createNamedRegionVisual(entry, viewer, placement, 0x9ab9e1, (node: THREE.Mesh) => node, 0.5)
     try {
       preview.update()
-      const saved = parseStl(Buffer.from(namedRegionMesh(entry, placement).meshStl!, 'base64'))
-      expect([...saved]).toEqual([1,4,4, 1,2,4, 3,4,4])
       const child = preview.root.children[0] as THREE.Mesh
       expect([...child.geometry.getAttribute('position').array]).toEqual([-1,1,0, -1,-1,0, 1,1,0])
       expect(child.matrix.equals(mesh.matrixWorld)).toBe(true)
@@ -120,7 +118,6 @@ it('picks named curves and volumes in empty space without claiming hidden geomet
   expect(index.pick(null, null, ray(-2, 0), 0.001)?.named.region.id).toBe('clearance')
   expect(index.pick(null, null, ray(2, 2), 0.001)?.named.region.id).toBe('pivot')
   expect(index.pick({ point: new THREE.Vector3(2, 0, 5) }, null, ray(2, 0), 0.001)).toBeNull()
-  expect(namedRegionMesh(index.get('opening'), placement)).toEqual({})
 })
 
 it('picks progressively narrower named surfaces as they become large enough to target', () => {

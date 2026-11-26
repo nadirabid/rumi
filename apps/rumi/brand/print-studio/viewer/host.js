@@ -32,7 +32,7 @@ import { registerSurfaceAnalysis } from './surface-analysis-tool.js'
 import { summarizeValidationState } from './validation-summary.js'
 import { createSource } from './source.js'
 import { discoverModels, readSelection, saveSelection } from './catalog.js'
-import { findModelRegion, modelRegionReference } from './model-regions.js'
+import { findModelRegion } from './model-regions.js'
 
 const ROUTE = '/api/print-studio/viewer'
 const JSON_HEADERS = { 'cache-control': 'private, no-store', 'content-type': 'application/json', 'x-content-type-options': 'nosniff' }
@@ -226,21 +226,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   const events = createViewerEvents()
   const focus = createModelFocus(ctx, {
     read: id => sessions.get(id), notify: id => events.notify(id),
-    readRegion: id => attachedRegion(sessions.get(id)),
   })
-  function referenceRegion(record, id) {
-    const design = record?.source?.state(), highlight = design?.highlight
-    if (!id || !design || design.error) return null
-    const source = { id, path: design.path, revision: design.revision, url: design.url }
-    if (highlight?.meshPath && highlight.regionName && highlight.id === id) return { ...source, name: highlight.regionName, meshPath: highlight.meshPath }
-    if (!design.regionMap) return null
-    const region = design.regionMap.regions.find(item => modelRegionReference(design, item.id) === id
-      || (highlight?.id === id && highlight.regionMapKey === design.regionMap.key && item.id === highlight.regionId))
-    return region ? { ...source, name: region.name, regionId: region.id, regionMapKey: design.regionMap.key, description: region.description } : null
-  }
-  function attachedRegion(record) {
-    return referenceRegion(record, record?.regionReference)
-  }
   const validation = validationConfig ? createValidation(ctx, validationConfig, {
     notify: id => events.notify(id),
     view: id => {
@@ -443,7 +429,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       ...displayed, design: record.source?.state() ?? null,
       models: record.models ?? [], selectedModel: record.selectedModel ?? null,
       workingModels: focus.paths(sessionId), agentRunning: focus.running(sessionId),
-      catalogFailed: Boolean(record.catalogError), regionReference: attachedRegion(record),
+      catalogFailed: Boolean(record.catalogError),
     } })
   })
 
@@ -590,8 +576,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         await record.source?.poll()
         try {
           const design = displaySource(record)?.state()
-          const staleFeature = value.snapshot?.namedRegion && value.snapshot.namedRegion.regionMapKey !== design?.regionMap?.key
-          const snapshot = design?.error || staleFeature ? { status: 'stale_view' } : value.snapshot
+          const snapshot = design?.error ? { status: 'stale_view' } : value.snapshot
           const accepted = cursors.deliver(sessionId, value.requestId, snapshot, displayIdentity(record))
           return json({ accepted }, accepted ? 200 : 409)
         } catch (_error) { return json({ error: 'invalid_snapshot' }, 400) }
@@ -599,33 +584,10 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
     },
   }), 'print viewer: cursor response')
 
-  ctx.effect(() => ctx.connection.fetch.register({
-    path: `${ROUTE}/region-reference`, methods: ['POST'], requestBody: 'buffered',
-    fetch: async request => {
-      const sessionId = new URL(request.url).searchParams.get('sessionId')
-      const record = sessions.get(sessionId)
-      if (!record) return json({ error: 'preview_not_found' }, 404)
-      const body = await request.text()
-      if (body.length > 2048) return json({ error: 'invalid_region_reference' }, 400)
-      let value
-      try { value = JSON.parse(body) } catch (_error) { return json({ error: 'invalid_region_reference' }, 400) }
-      if (typeof value?.id !== 'string' || typeof value.attach !== 'boolean') return json({ error: 'invalid_region_reference' }, 400)
-      return serialize(record, async () => {
-        if (value.attach) {
-          await record.source?.poll()
-          if (!referenceRegion(record, value.id)) return json({ error: 'stale_region' }, 409)
-          record.regionReference = value.id
-        } else if (record.regionReference === value.id) delete record.regionReference
-        events.notify(sessionId)
-        return json({ regionReference: attachedRegion(record) })
-      })
-    },
-  }), 'print viewer: attach named region to chat')
-
   ctx.inject(['liveVoice'], scoped => {
     scoped.effect(() => scoped.liveVoice.register({
       id: 'print-studio-pointing',
-      instructions: () => 'Delegate all requests about what to highlight or change in the model, including ambiguous requests. The modeling assistant interprets the spoken request with the captured cursor reference, asks for any needed clarification, and confirms the requested highlight using viewer_highlight. Wait for the rendered result before describing a visible highlight. When mesh shaping controls are active, delegate satisfaction, completion, cancellation, and changes of topic so the modeling assistant can resolve the current edit and clear its controls and highlight before proceeding. Do not merely acknowledge that it is done.',
+      instructions: () => 'Delegate all requests about what to highlight or change in the model, including ambiguous requests. Pass spoken feature names through as said. The modeling assistant can use a captured geometry reference for pointing, ask for clarification, and confirm the requested highlight using viewer_highlight. Wait for the rendered result before describing a visible highlight. When mesh shaping controls are active, delegate satisfaction, completion, cancellation, and changes of topic so the modeling assistant can resolve the current edit and clear its controls and highlight before proceeding. Do not merely acknowledge that it is done.',
       captureRequest: async ({ sessionId, requestedAt, signal }) => {
         if (!sessions.has(sessionId)) return []
         const record = sessions.get(sessionId)
@@ -634,7 +596,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         const { image, ...snapshot } = JSON.parse(await captureReference(sessionId, signal))
         return [{ type: 'text', text: JSON.stringify({
           reference: 'cursor-at-start-of-spoken-request', requestedAt, selectionAtSpeech, snapshot,
-          instruction: 'Use this reference for pointing in this request, not a later live cursor position. Highlight the intended area to establish a visual reference. Follow the user’s requested action; ask for clarification when their intent is ambiguous.',
+          instruction: 'Use the captured geometry for pointing in this request. Resolve named regions from the person’s words. Highlight the intended area and ask for clarification when needed.',
         }) }, ...(image ? [{ type: 'image', attachment: image }] : [])]
       },
     }), 'print viewer: spoken pointing references')
@@ -651,13 +613,6 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         signal.throwIfAborted()
         if (capture.status !== 'captured') return JSON.stringify(capture)
         const { image: imageData, meshBytes, ...snapshot } = capture
-        if (snapshot.namedRegion) {
-          const map = displaySource(record)?.state().regionMap
-          const region = map?.key === snapshot.namedRegion.regionMapKey
-            ? map.regions.find(item => item.id === snapshot.namedRegion.id) : null
-          if (!region) return JSON.stringify({ status: 'stale_view' })
-          snapshot.namedRegion = { ...region, regionMapKey: map.key }
-        }
         let image
         try {
           image = await ctx.attachments.saveImage({
@@ -685,7 +640,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'viewer_cursor_snapshot',
-    description: 'Capture the pinned blue region or fresh hover hit with a PNG and model identity. Named regions include their name and saved location. For a mesh selection, mesh.path is a project-relative STL in model-local millimetres, Z up, before placement. Pass mesh.path to viewer_highlight to repeat the triangle selection. For each new pointing request use its own voice capture or call this tool. See clarify-mesh-changes.',
+    description: 'Capture the pinned blue region or fresh hover hit with a PNG and model identity. Use a geometry cursor mode for pointing. In Named regions, ask the person to say or type the feature name. For a mesh selection, mesh.path is a project-relative STL in model-local millimetres, Z up, before placement. Pass mesh.path to viewer_highlight to repeat the triangle selection. For each new pointing request use its own voice capture or call this tool. See clarify-mesh-changes.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => {
       const { image, ...snapshot } = JSON.parse(value)
@@ -803,7 +758,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       url: { type: 'string', required: true, description: 'Exact design.url from the current meshState context; identifies the loaded instance.' },
       label: { type: 'string', required: true, description: 'Short label up to 200 characters. For a saved region use its name. May be empty when clearing.' },
       region: { type: 'string', description: 'Saved feature name, alias or ID from the current model’s region map. Supply this or meshPath.' },
-      regionMapKey: { type: 'string', description: 'Region map key from a captured or attached named reference. Supply with region to require that edition of the map.' },
+      regionMapKey: { type: 'string', description: 'Region map key from the resolved named feature. Supply with region to require that edition of the map.' },
       regionName: { type: 'string', description: 'Optional name shown on an STL overlay, up to 64 characters. Use a unique meshPath for each named overlay.' },
       meshPath: { type: 'string', description: 'Project-relative ASCII or binary STL outside the watched model directory. Use model-local millimetres, Z up, including part transforms before placement. Empty string clears the highlight.' },
     },

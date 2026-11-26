@@ -354,20 +354,7 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
     const highlighted = await highlighting
     expect({ status: highlighted.status, reason: highlighted.reason, message: highlighted.message }).toMatchSnapshot('acknowledged highlight result')
     expect(highlighted.status).toBe('rendered')
-    const regionRoute = f.routes.get('/api/print-studio/viewer/region-reference')!
-    const updateRegion = (id: string, attach: boolean, session = 'session-a') =>
-      regionRoute(new Request(`http://rumi/api/print-studio/viewer/region-reference?sessionId=${session}`, {
-        method: 'POST', body: JSON.stringify({ id, attach }),
-      }))
-    expect((await updateRegion(design.highlight.id, true, 'session-b')).status).toBe(404)
-    expect((await updateRegion('earlier-highlight', true)).status).toBe(409)
-    expect((await updateRegion(design.highlight.id, true)).status).toBe(200)
-    expect((await f.state()).regionReference).toMatchObject({
-      id: design.highlight.id, name: 'Top edge', path: design.path, revision: design.revision, meshPath: 'overlay.stl',
-    })
-    expect((await updateRegion(design.highlight.id, false)).status).toBe(200)
-    expect((await f.state()).regionReference).toBeNull()
-    expect((await updateRegion(design.highlight.id, true)).status).toBe(200)
+    expect(f.routes.has('/api/print-studio/viewer/region-reference')).toBe(false)
     const journal = join(f.diagnosticsDirectory, (await readdir(f.diagnosticsDirectory))[0])
     const trace = (await readFile(journal, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     expect(trace.map(row => row.type)).toEqual(expect.arrayContaining(['highlight.requested', 'viewer.state_delivered', 'viewer.feedback_received', 'highlight.acknowledged', 'highlight.settled']))
@@ -384,7 +371,6 @@ it('loads editable source and exposes placement, camera and revision-scoped erro
       return scene.design.highlight?.id !== design.highlight.id && Boolean(scene.design.highlight?.id)
     }).toBe(true)
     const hiddenDesign = scene.design
-    expect(scene.regionReference).toBeNull()
     await f.routes.get('/api/print-studio/viewer/feedback')!(new Request('http://rumi/api/print-studio/viewer/feedback?sessionId=session-a', {
       method: 'POST', body: JSON.stringify({ revision: hiddenDesign.revision, url: hiddenDesign.url, transform: hiddenDesign.transform,
         requestedHighlightId: hiddenDesign.highlight.id, highlightStatus: 'highlight_hidden' }),
@@ -458,7 +444,7 @@ it('returns a durable cursor image with its region through the tool output', asy
   expect(await f.run('viewer_cursor_snapshot', {}, 'other-session')).toEqual({ status: 'viewer_unavailable', reason: 'viewer_not_open' })
 })
 
-it('shows an exact named feature and settles only its matching renderer feedback', async () => {
+it('highlights a feature by name when the named cursor supplies no pointing reference', async () => {
   const root = await mkdtemp(join(tmpdir(), 'rumi-named-feature-'))
   const f = fixture(undefined, root)
   try {
@@ -481,22 +467,15 @@ it('shows an exact named feature and settles only its matching renderer feedback
       expect(value.cursorRequest).toEqual({ id: expect.any(String) })
       return value
     })
-    const { path, revision, url, transform } = design
+    const noPointing = { status: 'viewer_unavailable', reason: 'named_regions' }
     const cursor = await f.routes.get('/api/print-studio/viewer/cursor')!(new Request(
       'http://rumi/api/print-studio/viewer/cursor?sessionId=session-a', {
         method: 'POST',
-        body: JSON.stringify({ requestId: request.cursorRequest.id, snapshot: {
-          status: 'captured', capturedAt: '2026-11-03T20:00:00.000Z',
-          identity: { sceneRevision: request.scene.revision, design: { path, revision, url, transform } },
-          namedRegion: { id: feature.id, name: feature.name, regionMapKey: design.regionMap.key },
-          region: null,
-          camera: { position: [0, 0, 10], target: [0, 0, 0], up: [0, 1, 0], fov: 40, aspect: 1 },
-          image: 'data:image/png;base64,cG5n',
-        } }),
+        body: JSON.stringify({ requestId: request.cursorRequest.id, snapshot: noPointing }),
       },
     ))
     expect(cursor.status).toBe(200)
-    expect(await capture).toMatchObject({ status: 'captured', region: null, namedRegion: feature })
+    expect(await capture).toEqual(noPointing)
     await expect(f.run('viewer_highlight', { ...args, region: 'missing' })).resolves.toMatchObject({ status: 'unknown_region' })
     await expect(f.run('viewer_highlight', { ...args, region: 'pin gap', regionMapKey: 'stale' })).resolves.toMatchObject({ status: 'stale_region' })
     const highlighting = f.run('viewer_highlight', { ...args, region: 'PIN GAP' })
@@ -1152,16 +1131,31 @@ it('discovers a saved part’s selectable surfaces and exports the viewer triang
     expect(features.surfaces).toContainEqual({ surfaceId: 1, triangles: 2, areaMm2: 400, centerMm: [15, 0, 0],
       boundsMm: [15, -10, -10, 15, 10, 10], meanNormal: [-1, 0, 0] })
     const { parseUsdModel } = await import('../viewer/viewport/usd.js')
-    const { createNamedRegionIndex, namedRegionMesh } = await import('../viewer/viewport/named-regions.js')
-    const { Group } = await import('three')
+    const { createNamedRegionIndex, createNamedRegionVisual } = await import('../viewer/viewport/named-regions.js')
+    const { Group, Scene, Vector3 } = await import('three')
     const { root } = await parseUsdModel(Uint8Array.from(bytes).buffer)
     const placement = new Group().add(root)
     const region = (id: string, selector: object) => ({ id, location: { kind: 'surface', parts: [{ partPath, ...selector }] } })
     const regions = createNamedRegionIndex(root, placement, [region('ordered', { faceRanges: [[2, 5]] }), region('panel', { surfaceIds: [1] })])
     const whole = parseStl(await readFile(join(cwd, features.mesh.path)))
-    const exported = (id: string) => parseStl(Buffer.from(namedRegionMesh(regions.get(id), placement).meshStl!, 'base64'))
-    expect(exported('ordered')).toEqual(whole.slice(2 * 9, 5 * 9))
-    expect(exported('panel')).toHaveLength(2 * 9)
+    const scene = new Scene().add(placement)
+    function displayedTriangles(id: string) {
+      const preview = createNamedRegionVisual(regions.get(id), scene, placement, 0x9ab9e1, (node: import('three').Mesh) => node, 0.5)
+      try {
+        preview.update()
+        preview.root.updateMatrixWorld(true)
+        const overlay = preview.root.children[0] as import('three').Mesh
+        const positions = overlay.geometry.getAttribute('position')
+        const point = new Vector3()
+        const triangles = new Float32Array(positions.count * 3)
+        for (let i = 0; i < positions.count; i++) {
+          point.fromBufferAttribute(positions, i).applyMatrix4(overlay.matrixWorld).toArray(triangles, i * 3)
+        }
+        return triangles
+      } finally { preview.dispose() }
+    }
+    expect(displayedTriangles('ordered')).toEqual(whole.slice(2 * 9, 5 * 9))
+    expect(displayedTriangles('panel')).toHaveLength(2 * 9)
     expect(await f.run('viewer_analyze_surfaces', { path, sourceHash: '0'.repeat(64), partPath })).toMatchObject({ status: 'stale_model', sourceHash })
     await expect(f.run('viewer_analyze_surfaces', { path, partPath: ['missing'] })).rejects.toThrow(/Copy the array/)
     const outside = new URL('./fixtures/robot.usda', import.meta.url)

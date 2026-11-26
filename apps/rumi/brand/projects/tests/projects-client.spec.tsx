@@ -399,7 +399,7 @@ it('keeps sidebar controls before New and reopens the collapsed sidebar', async 
   expect(view.sidebar.toggleExpanded).toHaveBeenCalledTimes(2)
 })
 
-it('shows background update progress and requests confirmation only after verification', async () => {
+it('shows background update progress and restarts directly only after verification', async () => {
   let publish: (value: DesktopUpdatePresentation) => void = () => {}
   let initial: (value: DesktopUpdatePresentation) => void = () => {}
   const restart = vi.fn(async () => {})

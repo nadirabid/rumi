@@ -61,7 +61,7 @@ export type DesktopUpdateFailureKind =
   | 'tasks-changed'
   | 'tasks-unavailable'
 
-/** Semantic status content; actions open main-process confirmation dialogs only. */
+/** Semantic status content; actions invoke main-process update flows without renderer-selected targets. */
 export interface DesktopUpdatePresentation {
   readonly phase: DesktopUpdateState['phase']
   readonly version?: string
@@ -69,7 +69,7 @@ export interface DesktopUpdatePresentation {
   readonly failure?: DesktopUpdateFailureKind
 }
 
-/** Product documents cannot supply update versions, package URLs, or installation authorization. */
+/** Product documents cannot supply update versions or package URLs. */
 export interface DshDesktopProductApi {
   readonly protocolVersion: 1
   readonly browser: DesktopBrowserBridge
@@ -83,7 +83,7 @@ export interface DshDesktopProductApi {
   readonly updates: {
     status(): Promise<DesktopUpdatePresentation>
     open(): Promise<void>
-    /** Requests confirmation only for a verified release. */
+    /** Installs a verified release and restarts immediately without a confirmation dialog. */
     restart(): Promise<void>
     subscribe(listener: (state: DesktopUpdatePresentation) => void): () => void
   }

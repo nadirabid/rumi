@@ -60,7 +60,7 @@ function fixture(channel: 'nightly' | 'latest' = 'nightly', version = '1.1.0-alp
     return ['verified-package']
   })
   const quitAndInstall = vi.fn()
-  const beforeRestart = vi.fn(async () => true)
+  const beforeRestart = vi.fn(async (_options?: { readonly skipConfirmation?: boolean }) => true)
   const downloadResult = vi.fn()
   const states: DesktopUpdateState[] = []
   const updater = Object.assign(events, { checkForUpdates, downloadUpdate, quitAndInstall }) as unknown as AppUpdater
@@ -148,6 +148,15 @@ describe('desktop update coordinator', () => {
       autoDownload: false, autoInstallOnAppQuit: false, channel: 'nightly',
       allowPrerelease: true, allowDowngrade: false,
     })
+  })
+
+  it('forwards skipConfirmation to beforeRestart when installing directly', async () => {
+    const f = fixture()
+    await f.coordinator.check()
+    await f.coordinator.download('1.1.0-rc.2')
+    await f.coordinator.install('1.1.0-rc.2', { skipConfirmation: true })
+    expect(f.beforeRestart).toHaveBeenCalledExactlyOnceWith({ skipConfirmation: true })
+    expect(f.quitAndInstall).toHaveBeenCalledWith(true, true)
   })
 
   it('joins checks and downloads without retargeting a prepared release', async () => {

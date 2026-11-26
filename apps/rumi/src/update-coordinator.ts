@@ -11,6 +11,12 @@ import { DesktopUpdatePreparationError } from './update-error.ts'
 
 const { autoUpdater } = electronUpdater
 
+/** Main-process options for one prepared update installation. */
+export interface DesktopUpdateInstallOptions {
+  /** Skip the interactive confirmation dialog and proceed directly to restart preparation. */
+  readonly skipConfirmation?: boolean
+}
+
 /** Owns one updater target until its download and installation settle. */
 export class DesktopUpdateCoordinator {
   private current: DesktopUpdateState = { phase: 'idle' }
@@ -50,7 +56,7 @@ export class DesktopUpdateCoordinator {
    */
   constructor(
     private readonly publish: (state: DesktopUpdateState) => DesktopUpdateState,
-    private readonly beforeRestart: () => Promise<boolean>,
+    private readonly beforeRestart: (options?: DesktopUpdateInstallOptions) => Promise<boolean>,
     private readonly updater: AppUpdater = autoUpdater,
     private readonly enabled: () => boolean = () => app.isPackaged && existsSync(join(process.resourcesPath, 'app-update.yml')),
     private readonly currentVersion: () => string = () => app.getVersion(),
@@ -123,17 +129,18 @@ export class DesktopUpdateCoordinator {
   }
 
   /**
-   * Install a prepared target after a separate user confirmation.
-   * @param version - Exact version displayed in the confirmation, never a renderer-selected URL.
+   * Install a prepared target.
+   * @param version - Exact prepared version owned by the main process, never a renderer-selected URL.
+   * @param options - Controls whether restart preparation skips its interactive confirmation dialog.
    * @returns Installation handoff or a recoverable preparation error.
    */
-  async install(version: string): Promise<DesktopUpdateState> {
+  async install(version: string, options?: DesktopUpdateInstallOptions): Promise<DesktopUpdateState> {
     this.assertLive()
     if (!this.downloaded || this.downloadOperation !== undefined || version !== this.candidate) throw new Error('desktop update: confirmed target is not ready')
     this.installOperation ??= Promise.resolve().then(async () => {
       this.setState({ phase: 'installing', version })
       try {
-        if (!await this.beforeRestart()) return this.setState({ phase: 'ready', version })
+        if (!await this.beforeRestart(options)) return this.setState({ phase: 'ready', version })
         this.assertLive()
         this.updater.quitAndInstall(true, true)
         return this.current

@@ -278,7 +278,7 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
       const common = { className: 'rumi-glass rumi-update-badge', 'aria-label': label };
       return ready
         ? h('button', { ...common, type: 'button', onClick: () => {
-          void updates.restart().catch(error => { console.error('Rumi could not open the update confirmation', error); });
+          void updates.restart().catch(error => { console.error('Rumi could not restart to update', error); });
         } }, t('updateRestart'))
         : h('span', { ...common, ...(downloading
           ? { role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': percent }

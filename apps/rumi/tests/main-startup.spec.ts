@@ -39,7 +39,7 @@ const harness = await vi.hoisted(async () => {
   const hosts: FakeHost[] = []
   const handlers = new Map<string, InvokeHandler>()
   let pluginsEnabled = false
-  let prepareUpdate: (() => Promise<boolean>) | undefined
+  let prepareUpdate: ((options?: { readonly skipConfirmation?: boolean }) => Promise<boolean>) | undefined
   let publishUpdate: ((state: DesktopUpdateState) => DesktopUpdateState) | undefined
   let preparing = deferred()
   let prepared = deferred()
@@ -63,7 +63,9 @@ const harness = await vi.hoisted(async () => {
   const loginShell = vi.fn((base: NodeJS.ProcessEnv, _config: unknown, _options: { signal?: AbortSignal }) => readLoginShell(base))
   const updateCheck = vi.fn(async (_manual?: boolean): Promise<DesktopUpdateState> => updateState)
   const updateDownload = vi.fn(async (_version: string): Promise<DesktopUpdateState> => updateState)
-  const updateInstall = vi.fn(async (_version: string): Promise<DesktopUpdateState> => updateState)
+  const updateInstall = vi.fn(
+    async (_version: string, _options?: { readonly skipConfirmation?: boolean }): Promise<DesktopUpdateState> => updateState,
+  )
   const popup = vi.fn<(options: { window: FakeWindow; x?: number; y?: number; callback?: () => void }) => void>()
   const menuBuilder = vi.fn<(template: MenuItemConstructorOptions[]) => { popup: typeof popup }>(() => ({ popup }))
   const menu = Object.assign(menuBuilder, { buildFromTemplate: menuBuilder, setApplicationMenu: vi.fn() })
@@ -212,7 +214,7 @@ const harness = await vi.hoisted(async () => {
     get updateState() { return updateState },
     set updateState(value: DesktopUpdateState) { updateState = value },
     get prepareUpdate() { return prepareUpdate! },
-    set prepareUpdate(value: () => Promise<boolean>) { prepareUpdate = value },
+    set prepareUpdate(value: (options?: { readonly skipConfirmation?: boolean }) => Promise<boolean>) { prepareUpdate = value },
     get publishUpdate() { return publishUpdate! },
     set publishUpdate(value: (state: DesktopUpdateState) => DesktopUpdateState) { publishUpdate = value },
     dialog: { showOpenDialog: vi.fn(), showErrorBox: vi.fn(), showMessageBox: vi.fn() },
@@ -339,7 +341,10 @@ vi.mock('../src/update-dialog.ts', () => ({ DesktopUpdateDialog: class {
   dispose() {}
 } }))
 vi.mock('../src/update-coordinator.ts', () => ({ DesktopUpdateCoordinator: class {
-  constructor(publish: (state: DesktopUpdateState) => DesktopUpdateState, beforeRestart: () => Promise<boolean>) {
+  constructor(
+    publish: (state: DesktopUpdateState) => DesktopUpdateState,
+    beforeRestart: (options?: { readonly skipConfirmation?: boolean }) => Promise<boolean>,
+  ) {
     harness.prepareUpdate = beforeRestart
     harness.publishUpdate = publish
   }
@@ -1768,6 +1773,28 @@ describe('desktop main startup', () => {
     expect(harness.updateInstall).toHaveBeenCalledExactlyOnceWith('1.0.1-nightly.1')
     await harness.updateCheck()
     expect(harness.updateInstall).toHaveBeenCalledOnce()
+  })
+
+  it('restarts immediately from the header badge without showing a confirmation dialog even when tasks are active', async () => {
+    const host = await readyForUpdate()
+    harness.updateState = { phase: 'downloading', version: '1.0.1-nightly.1', percent: 50 }
+    harness.publishUpdate(harness.updateState)
+    await invoke(DESKTOP_IPC.updatesRestart, 'app')
+    expect(harness.updateInstall).not.toHaveBeenCalled()
+
+    harness.updateState = { phase: 'ready', version: '1.0.1-nightly.1' }
+    harness.publishUpdate(harness.updateState)
+    await invoke(DESKTOP_IPC.updatesRestart, 'app')
+    expect(harness.updateInstall).toHaveBeenCalledExactlyOnceWith('1.0.1-nightly.1', { skipConfirmation: true })
+
+    host.updateTasks.mockResolvedValue(true)
+    const preparing = harness.prepareUpdate({ skipConfirmation: true })
+    await host.stopping.promise
+    expect(harness.dialog.showMessageBox).not.toHaveBeenCalled()
+    expect(host.updateTasks.mock.calls).toEqual([['lock']])
+    expect(host.stop).toHaveBeenCalledWith(true)
+    host.exited.resolve()
+    await expect(preparing).resolves.toBe(true)
   })
 
   it('does not lock or stop tasks when restart confirmation is dismissed', async () => {

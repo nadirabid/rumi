@@ -36,7 +36,7 @@ import { readDeviceInfo } from './device-info.ts'
 import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
 import { claimDesktopSingleInstance } from './single-instance.ts'
 import { desktopUpdateChannel } from './update-channel.ts'
-import { DesktopUpdateCoordinator } from './update-coordinator.ts'
+import { DesktopUpdateCoordinator, type DesktopUpdateInstallOptions } from './update-coordinator.ts'
 import { DesktopCommandManager } from './command-management.ts'
 import { serveWebDocument, DesktopUpdateReadGate } from './web-document.ts'
 import { DesktopFatalRecovery } from './fatal-recovery.ts'
@@ -384,7 +384,7 @@ async function main(): Promise<void> {
   const restartFromHeader = (window: BrowserWindow): Promise<void> => {
     if (window !== mainWindow || quitting || isMandatory() || updateOverlays.input(window).blocked
       || updateState.phase !== 'ready') return Promise.resolve()
-    return openUpdatePrompt()
+    return openUpdatePrompt(false, { skipConfirmation: true })
   }
   const ordinaryMessageBox = async (options: UpdateDialogOptions): Promise<Electron.MessageBoxReturnValue> => {
     const controller = new AbortController()
@@ -612,37 +612,42 @@ async function main(): Promise<void> {
   const updateChannel = desktopUpdateChannel(manifest)
   const updates = new DesktopUpdateCoordinator(
     publishUpdate,
-    async () => {
+    async (options) => {
       await commandManager.idle()
       await workspaceRecovery
       await startup?.catch(() => undefined)
       const host = backend.host
       if (host === undefined) throw new DesktopUpdatePreparationError('tasks-unavailable', locale.messages.updateTasksUnavailable)
-      const active = await host.updateTasks('inspect')
-      const ready = desktopUpdateReadyConfirmation(locale.messages, updates.state.version ?? '', process.platform)
-      const confirmation: Electron.MessageBoxOptions = {
-        type: active ? 'warning' : 'info', title: locale.messages.updateTitle,
-        message: active ? locale.messages.updateActiveTasks : ready.message,
-        detail: active ? locale.messages.updateActiveTasksDetail : ready.detail,
-        buttons: active ? [locale.messages.updateStopTasks, locale.messages.updateLater] : [locale.messages.installAndRestart],
-        defaultId: 1, cancelId: 1,
-      }
-      if (isMandatory()) {
-        if (!await mandatoryUI?.confirm(updates.state.version ?? '', active)) return false
-      } else {
-        const parent = currentDialogWindow()
-        if (parent === undefined) return false
-        const result = await updateDialog.show(parent, confirmation)
-        if (result.response !== 0 || isMandatory()) return false
+      const skipConfirmation = options?.skipConfirmation === true && !isMandatory()
+      let active = false
+      if (!skipConfirmation) {
+        active = await host.updateTasks('inspect')
+        const ready = desktopUpdateReadyConfirmation(locale.messages, updates.state.version ?? '', process.platform)
+        const confirmation: Electron.MessageBoxOptions = {
+          type: active ? 'warning' : 'info', title: locale.messages.updateTitle,
+          message: active ? locale.messages.updateActiveTasks : ready.message,
+          detail: active ? locale.messages.updateActiveTasksDetail : ready.detail,
+          buttons: active ? [locale.messages.updateStopTasks, locale.messages.updateLater] : [locale.messages.installAndRestart],
+          defaultId: 1, cancelId: 1,
+        }
+        if (isMandatory()) {
+          if (!await mandatoryUI?.confirm(updates.state.version ?? '', active)) return false
+        } else {
+          const parent = currentDialogWindow()
+          if (parent === undefined) return false
+          const result = await updateDialog.show(parent, confirmation)
+          if (result.response !== 0 || isMandatory()) return false
+        }
       }
       // The update lock rejects new HTTP requests, including analytics intake.
       await track('desktop_upgrade_install_restart_click', {})
+      if (skipConfirmation && isMandatory()) return false
       if (backend.host !== host) throw new DesktopUpdatePreparationError('tasks-unavailable', locale.messages.updateTasksUnavailable)
       try {
         // Viewer long polls can outlive the Host's admission deadline; writes still drain under its lock.
         updateReads.pause()
         const stillActive = await host.updateTasks('lock')
-        if (stillActive && !active) throw new DesktopUpdatePreparationError('tasks-changed', locale.messages.updateTasksChanged)
+        if (!skipConfirmation && stillActive && !active) throw new DesktopUpdatePreparationError('tasks-changed', locale.messages.updateTasksChanged)
         mandatoryUI?.preparingRestart(stillActive)
         // The embedded Platform document holds credentials issued by the Host that is about to stop.
         await platformView.closeAndWait()
@@ -829,7 +834,7 @@ async function main(): Promise<void> {
 
   let promptOperation: Promise<void> | undefined
   let policyAuthenticationQueued = false
-  const openUpdatePrompt = (manual = false): Promise<void> => {
+  const openUpdatePrompt = (manual = false, options?: DesktopUpdateInstallOptions): Promise<void> => {
     if (authenticationOperation !== undefined) {
       policyAuth?.focus(); updateDialog.focus()
     }
@@ -878,7 +883,10 @@ async function main(): Promise<void> {
         if (state.phase === 'ready' || (state.phase === 'error' && state.failedOperation === 'install')) {
           if (state.version !== undefined) {
             failedOperation = 'install'
-            await showUpdateFailure(await updates.install(state.version))
+            const installed = options === undefined
+              ? updates.install(state.version)
+              : updates.install(state.version, options)
+            await showUpdateFailure(await installed)
           }
           return
         }

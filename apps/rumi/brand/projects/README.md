@@ -42,7 +42,7 @@ Settings, plugins, and automation lose their sidebar home with the navigation co
 
 ## Project isolation
 
-Agent file operations are limited to the directory registered for their session in `project.json`. Canonical path checks cover reads and writes, including absolute paths, parent traversal and existing symlinks. Shell and search subprocesses run under macOS Seatbelt with the same limits inherited by child processes. Saved full-access modes and escalation requests cannot widen access. Denials are recorded as tool results in the session.
+Agent file operations are limited to the directory registered for their session in `project.json`. The agent can read project metadata and `.rumi-diagnostics/`. The app owns writes to both. Canonical path checks cover reads and writes, including absolute paths, parent traversal and existing symlinks. Shell and search subprocesses run under macOS Seatbelt with the same limits inherited by child processes. Saved full-access modes and escalation requests cannot widen access. Denials are recorded as tool results in the session.
 
 The gallery uses the project scope's workspace root by default. Setting `DSH_RUMI_HOME` moves both together to `workspace/` under that home.
 

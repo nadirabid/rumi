@@ -1,9 +1,11 @@
 /** Review Print Studio steps through one shared Bison request slot. */
-import { createHash } from 'node:crypto'
+import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
+import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { open, lstat, realpath } from 'node:fs/promises'
+import { open, lstat, mkdir, realpath, rename, unlink } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { z } from 'zod'
 import { discoverModels } from './viewer/catalog.js'
 import { MAX_REGION_MAP_BYTES, needsSurfaceRegions, readModelRegions } from './viewer/model-regions.js'
 import { USD_MAX_BYTES } from './viewer/usd.js'
@@ -19,6 +21,93 @@ const questions = {
     type: 'noul',
     instructions: 'Would reminding the agent to follow Rumi reply guidance help at this point in the turn? Judge the visible draft in the context of the current request and work. An empty draft warrants no reminder. For a child asking to make, check, or fix something, aim for under 35 words and at most two short sentences. Preserve requested detail and safety information.',
   },
+}
+
+/** Legacy host-only review outcomes keyed by Session and turn. */
+export const skillReviewDomain = defineDomain({
+  name: 'rumi_skill_reviews',
+  version: 1,
+  layout: 'per-record',
+  invalidRecords: 'backup-and-skip',
+  tables: {
+    turns: domainTable(z.object({
+      sessionId: z.string(),
+      turn: z.number().int().positive(),
+      status: z.enum(['pending', 'finished', 'skipped', 'failed', 'cancelled']),
+      reason: z.enum(['disabled', 'missing-credential', 'no-user-request', 'admission']).optional(),
+      outcome: z.string().optional(),
+      attempts: z.number().int().nonnegative().optional(),
+      completed: z.number().int().nonnegative().optional(),
+      failed: z.number().int().nonnegative().optional(),
+      lastFailure: z.object({ stage: z.enum(['prepare', 'provider', 'apply']), reason: z.enum(['timeout', 'error']) }).optional(),
+      reminders: z.array(z.enum(['namedRegions', 'conciseReply'])).optional(),
+    })),
+  },
+})
+
+async function ensureDirectory(path) {
+  try { await mkdir(path, { mode: 0o700 }) }
+  catch (error) { if (error.code !== 'EEXIST') throw error }
+  if (!(await lstat(path)).isDirectory()) throw new Error('The review directory is not a real directory')
+}
+
+/** Store Bison outcomes inside their project and import any records from the prior storage domain.
+ * @param {Function} diagnosticsDirectory Locate host-owned diagnostics under a canonical project root.
+ * @param {object | undefined} legacyStore Open legacy domain to read, if available.
+ * @returns {object} Project writer and asynchronous legacy-store cleanup.
+ */
+export function createProjectSkillReviewStore(diagnosticsDirectory, legacyStore) {
+  const migrations = new Map()
+  async function save(root, record, preserve) {
+    const base = diagnosticsDirectory(root)
+    await ensureDirectory(base)
+    const directory = join(base, 'skill-reviews')
+    await ensureDirectory(directory)
+    const key = `${createHash('sha256').update(record.sessionId).digest('hex')}-${record.turn}`
+    const path = join(directory, `${key}.json`)
+    if (preserve) {
+      const existing = await lstat(path).catch(error => {
+        if (error.code !== 'ENOENT') throw error
+        return null
+      })
+      if (existing) return
+    }
+    const temporary = join(directory, `.${randomUUID()}.tmp`)
+    try {
+      const file = await open(temporary, 'wx', 0o600)
+      try {
+        await file.writeFile(`${JSON.stringify({ version: skillReviewDomain.version, record })}\n`)
+        await file.sync()
+      } finally { await file.close() }
+      await rename(temporary, path)
+      const parent = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+      try { await parent.sync() }
+      finally { await parent.close() }
+    } finally {
+      await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error })
+    }
+  }
+  return {
+    put(root, record) { return save(root, record, false) },
+    migrate(root, sessionIds) {
+      if (!legacyStore) return
+      const previous = migrations.get(root)
+      if (previous) return previous
+      const ids = new Set(sessionIds)
+      const operation = (async () => {
+        for (const [, record] of legacyStore.table('turns').entries()) {
+          if (ids.has(record.sessionId)) await save(root, record, true)
+        }
+      })()
+      migrations.set(root, operation)
+      void operation.catch(() => migrations.delete(root))
+      return operation
+    },
+    async close() {
+      await Promise.allSettled(migrations.values())
+      await legacyStore?.close()
+    },
+  }
 }
 
 const MAX_ACTIONS = 16
@@ -195,29 +284,46 @@ function emptyProgress() {
 
 /**
  * Review completed steps in registered Print Studio conversations, one active review per project.
+ * Store a per-turn outcome with counts and reminder kinds in the user's project.
  * @param {object} ctx Host context.
  * @param {object} config Review cadence, limits and decision threshold.
  * @param {Function} resolveKey Resolve the Baseten credential at turn admission.
  * @param {Function} createUserMessage Create a durable steering message.
+ * @param {object} reviewStore Project review writer owned by the reviewer.
  * @param {typeof fetch} [transport=fetch] HTTP transport for the Bison decision API.
  */
-export function applySkillReminders(ctx, config, resolveKey, createUserMessage, transport = fetch) {
-  if (!config.enabled) return
+export function applySkillReminders(ctx, config, resolveKey, createUserMessage, reviewStore, transport = fetch) {
   const turns = new WeakMap()
   const projects = new Map()
+  const writes = new Map()
   const lifetime = new AbortController()
 
+  function save(session, cwd, data) {
+    const previous = writes.get(session) ?? Promise.resolve()
+    const writing = previous.then(() => reviewStore.put(cwd, { sessionId: session.id, ...data })).catch(() => {
+      ctx.logger.warn('Print Studio could not record the Bison skill review status. Work will continue.')
+    })
+    writes.set(session, writing)
+    void writing.then(() => { if (writes.get(session) === writing) writes.delete(session) })
+  }
+
   async function evaluate(state, { textStep, draft }, request) {
-    const { step, actions, plan } = state
+    const { step, actions, plan, agent, reviewStats } = state
     const signal = AbortSignal.any([state.signal, AbortSignal.timeout(config.timeoutMs)])
+    let stage = 'prepare'
     try {
       const changes = await changedModels(state, config.maxModels, signal)
       signal.throwIfAborted()
       if (state.request !== request) return
+      stage = 'provider'
+      reviewStats.attempts++
       const flags = await review(transport, state.key, {
         request: request.text, draft, completedStep: step, recentActions: actions, plan,
         changedModels: changes.map(({ change, status }) => ({ change, regionMap: status })),
       }, signal, config.threshold)
+      reviewStats.completed++
+      stage = 'apply'
+      const remindersSent = []
       const unresolved = []
       if (flags.namedRegions && !state.sent.has('namedRegions')) {
         for (const { path, signature, hash, status } of changes) {
@@ -229,15 +335,14 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
           }
         }
       }
-      const { agent } = state
       if (signal.aborted || state.request !== request || agent.inbox.nextStep.length || agent.status !== 'running') return
       const reminders = []
       if (unresolved.length) {
-        state.sent.add('namedRegions')
+        remindersSent.push('namedRegions')
         reminders.push(`Before ending this turn, follow name-model-regions and save maps that match the final revisions you keep. Use viewer_analyze_surfaces to identify physical features and audit each saved map for unnamed triangles. Finish any edits and validation first.\nCurrent region map findings\n${JSON.stringify(unresolved)}`)
       }
       if (flags.conciseReply && draft && textStep === state.textStep && !state.sent.has('conciseReply')) {
-        state.sent.add('conciseReply')
+        remindersSent.push('conciseReply')
         reminders.push('Reread the project reply guidance. Keep the reply short while preserving requested detail and safety information.')
       }
       if (reminders.length) {
@@ -246,9 +351,12 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
           source: { kind: 'rumi-skill-reminder' },
           content: [{ type: 'text', text: [guidance, ...reminders].join('\n\n') }],
         }))
+        for (const kind of remindersSent) state.sent.add(kind)
       }
     } catch (_error) {
       if (!state.signal.aborted) {
+        reviewStats.failed++
+        reviewStats.lastFailure = { stage, reason: signal.aborted ? 'timeout' : 'error' }
         ctx.logger.warn('Print Studio could not complete a Bison skill review. Work will continue.')
       }
     }
@@ -261,6 +369,7 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
       const progress = state.progress
       state.progress = emptyProgress()
       if (!state.signal.aborted && state.sent.size < checkCount) {
+        state.firstReview.resolve(true)
         await evaluate(state, progress, state.request)
       }
       if (!pending.has(state)) {
@@ -284,13 +393,65 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
     projects.set(state.cwd, { pending, drain: Promise.resolve().then(() => drainReviews(state.cwd, pending)) })
   }
 
-  function closeTurn(session) {
+  function closeTurn(session, outcome) {
     const state = turns.get(session)
     if (!state) return
     turns.delete(session)
     projects.get(state.cwd)?.pending.delete(state)
     state.controller.abort()
     state.settled?.resolve()
+    save(session, state.cwd, { turn: state.turn, status: 'finished', outcome, ...state.reviewStats, reminders: [...state.sent] })
+  }
+
+  async function admitTurn(agent, turn, request, signal) {
+    const { session } = agent
+    if (!session.header.cwd || signal.aborted || lifetime.signal.aborted) return
+    const cwd = await realpath(session.header.cwd)
+    const metadata = await readBounded(join(cwd, 'project.json'), 65_536).catch(error => {
+      if (error.code !== 'ENOENT') throw error
+      return null
+    })
+    const project = metadata && JSON.parse(metadata.toString('utf8'))
+    if (project?.type !== 'print' || project.id !== basename(cwd) || !Array.isArray(project.sessionIds) || !project.sessionIds.includes(session.id)) return
+    try { await reviewStore.migrate(cwd, project.sessionIds) }
+    catch (_error) { ctx.logger.warn('Print Studio could not import the earlier Bison review records into this project.') }
+    if (lifetime.signal.aborted) return
+    const reason = !request ? 'no-user-request' : !config.enabled ? 'disabled' : null
+    if (reason) {
+      save(session, cwd, { turn, status: 'skipped', reason })
+      return
+    }
+    try {
+      const reviewSignal = AbortSignal.any([signal, lifetime.signal])
+      const key = await resolveKey()
+      reviewSignal.throwIfAborted()
+      if (!key) {
+        save(session, cwd, { turn, status: 'skipped', reason: 'missing-credential' })
+        return
+      }
+      const baseline = await modelSignatures(cwd)
+      reviewSignal.throwIfAborted()
+      const controller = new AbortController()
+      const signalForTurn = AbortSignal.any([reviewSignal, controller.signal])
+      const firstReview = Promise.withResolvers()
+      signalForTurn.addEventListener('abort', () => firstReview.resolve(false), { once: true })
+      turns.set(session, {
+        agent, turn, key, cwd, baseline, controller, signal: signalForTurn, firstReview,
+        reviewStats: { attempts: 0, completed: 0, failed: 0 },
+        request: { text: text(request, config.maxTextChars) }, digests: new Map(), sent: new Set(),
+        step: 0, scheduledStep: 0, textStep: 0, progress: emptyProgress(), stepProgress: emptyProgress(), settled: null,
+        actions: [], stepActions: new Map(), plan: [],
+      })
+      save(session, cwd, { turn, status: 'pending' })
+    } catch (error) {
+      if (lifetime.signal.aborted) return
+      if (signal.aborted) {
+        save(session, cwd, { turn, status: 'cancelled', reason: 'admission' })
+      } else {
+        save(session, cwd, { turn, status: 'failed', reason: 'admission' })
+        throw error
+      }
+    }
   }
 
   ctx.effect(() => async () => {
@@ -302,32 +463,16 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
       drains.push(drain)
     }
     await Promise.all(drains)
+    await Promise.all(writes.values())
+    await reviewStore.close()
   }, 'print-studio: skill reminder lifetime')
+  ctx.on('session/flush', (session) => writes.get(session))
   ctx.on('agent/pre-step', async ({ agent, messages, turn, step, signal }, next) => {
     const request = messages.filter(message => message.source.kind === 'user').at(-1)
     const session = agent.session
     try {
-      if (step === 1 && request && !signal.aborted) {
-        const cwd = await realpath(session.header.cwd)
-        const metadata = await readBounded(join(cwd, 'project.json'), 65_536).catch(error => {
-          if (error.code !== 'ENOENT') throw error
-          return null
-        })
-        const project = metadata && JSON.parse(metadata.toString('utf8'))
-        if (project?.type === 'print' && project.id === basename(cwd) && Array.isArray(project.sessionIds) && project.sessionIds.includes(session.id)) {
-          const key = await resolveKey()
-          if (key && !signal.aborted && !lifetime.signal.aborted) {
-            const baseline = await modelSignatures(cwd)
-            const controller = new AbortController()
-            const reviewSignal = AbortSignal.any([signal, controller.signal, lifetime.signal])
-            if (!reviewSignal.aborted) turns.set(session, {
-              agent, turn, key, cwd, baseline, controller, signal: reviewSignal,
-              request: { text: text(request, config.maxTextChars) }, digests: new Map(), sent: new Set(),
-              step: 0, scheduledStep: 0, textStep: 0, progress: emptyProgress(), stepProgress: emptyProgress(), settled: null,
-              actions: [], stepActions: new Map(), plan: [],
-            })
-          }
-        }
+      if (step === 1) {
+        await admitTurn(agent, turn, request, signal)
       } else {
         const state = turns.get(session)
         if (request && state?.turn === turn) {
@@ -340,7 +485,7 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
     }
     return next()
   })
-  ctx.on('agent/disposed', ({ agent }) => closeTurn(agent.session))
+  ctx.on('agent/disposed', ({ agent }) => closeTurn(agent.session, 'disposed'))
   ctx.on('session/event', (session, { type, data }) => {
     const state = turns.get(session)
     if (!state) return
@@ -350,7 +495,7 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
     }
     if (data.turn !== state.turn) return
     if (type === 'turn/end') {
-      closeTurn(session)
+      closeTurn(session, data.reason.kind)
       return
     }
     if (state.signal.aborted || state.sent.size === checkCount) return
@@ -386,6 +531,9 @@ export function applySkillReminders(ctx, config, resolveKey, createUserMessage, 
     if (state?.turn !== turn || state.signal.aborted) return
     schedule(state)
     if (!state.settled) return
+    // Queue time belongs to the first review's admission, not its execution budget.
+    if (!await state.firstReview.promise) return
+    if (state.signal.aborted || !state.settled) return
     const timer = new AbortController()
     const signal = AbortSignal.any([state.signal, timer.signal])
     try {

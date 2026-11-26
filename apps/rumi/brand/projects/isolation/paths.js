@@ -2,6 +2,9 @@
 import { realpathSync, readFileSync } from 'node:fs'
 import { dirname, basename, isAbsolute, relative, resolve, sep } from 'node:path'
 
+/** Project-owned diagnostics written by the host. */
+export const PROJECT_DIAGNOSTICS_DIRECTORY = '.rumi-diagnostics'
+
 /** Resolve links through the deepest existing ancestor, including targets not created yet.
  * @param {string} path Absolute candidate.
  * @returns {string} Canonical target spelling.
@@ -51,7 +54,8 @@ export function projectRoot(workspace, session) {
  */
 export function checkedPath(root, path, write, runtimeRoots) {
   const target = canonical(resolve(root, path))
-  if (contains(root, target) && (!write || target !== resolve(root, 'project.json'))) return target
+  const owned = target === resolve(root, 'project.json') || contains(resolve(root, PROJECT_DIAGNOSTICS_DIRECTORY), target)
+  if (contains(root, target) && (!write || !owned)) return target
   if (!write && runtimeRoots.some(runtime => contains(runtime, target))) return target
   const error = new Error('Project isolation denied access outside this project. Import the required file into this project first.')
   error.code = 'RUMI_PROJECT_ACCESS_DENIED'
@@ -75,6 +79,7 @@ export function seatbeltProfile(root, runtimeRoots) {
     `(allow file-read* ${[root, ...runtimeRoots].map(path => `(subpath ${quote(path)})`).join(' ')})`,
     `(allow file-write* (subpath ${quote(root)}))`,
     `(deny file-write* (literal ${quote(resolve(root, 'project.json'))}))`,
+    `(deny file-write* (subpath ${quote(resolve(root, PROJECT_DIAGNOSTICS_DIRECTORY))}))`,
     '(allow file-read* file-write* (literal "/dev/null") (literal "/dev/zero") (literal "/dev/random") (literal "/dev/urandom"))',
   ].join('\n')
 }

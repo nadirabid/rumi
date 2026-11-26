@@ -4,15 +4,33 @@ import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deep
 import { createUserMessage, LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId, type Session } from '@deepseek-ai/dsh-session'
+import Storage from '@deepseek-ai/dsh-storage'
+import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
+import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { expect, it, vi } from 'vitest'
-import { applySkillReminders } from '../skill-reminders.js'
+import { applySkillReminders, createProjectSkillReviewStore, skillReviewDomain } from '../skill-reminders.js'
+import { PROJECT_DIAGNOSTICS_DIRECTORY } from '../../projects/isolation/paths.js'
 
 const config = { enabled: true, everySteps: 1, maxTextChars: 4000, maxModels: 16, timeoutMs: 2000, threshold: 0.8 }
+
+const diagnosticsDirectory = (root: string) => join(root, PROJECT_DIAGNOSTICS_DIRECTORY)
+
+async function savedReviews(ctx: Context, root: string, session: Session) {
+  await ctx.sessions.flush(session)
+  const directory = join(diagnosticsDirectory(root), 'skill-reviews')
+  const files = await readdir(directory)
+  const records = await Promise.all(files.map(async (file) => {
+    const value = JSON.parse(await readFile(join(directory, file), 'utf8')) as { version: number; record: unknown }
+    expect(value.version).toBe(skillReviewDomain.version)
+    return skillReviewDomain.tables.turns.valueSchema.parse(value.record)
+  }))
+  return records.filter(value => value.sessionId === session.id).sort((left, right) => left.turn - right.turn)
+}
 
 function decision(namedRegions = 0.01, conciseReply = 0.01) {
   return Response.json({ answers: {
@@ -50,8 +68,9 @@ it.each([
   { scenario: 'the changed mesh has a matching map', status: 'ready', score: 0.99, malformed: false, expected: ['project reply guidance'] },
   { scenario: 'only the map changed and it still uses legacy boxes', status: 'needs_surface_regions', score: 0.99, malformed: false, expected: ['name-model-regions', 'project reply guidance'] },
   { scenario: 'the region decision is negative', status: 'missing', score: 0.01, malformed: false, expected: ['project reply guidance'] },
+  { scenario: 'both decisions are negative', status: 'missing', score: 0.01, conciseScore: 0.01, malformed: false, expected: [] },
   { scenario: 'the decision response is malformed', status: 'missing', score: 0.99, malformed: true, expected: [] },
-])('reviews one closing draft when $scenario', async ({ status, score, malformed, expected }) => {
+])('reviews one closing draft when $scenario', async ({ status, score, conciseScore, malformed, expected }) => {
   const root = await mkdtemp(join(tmpdir(), 'rumi-review-'))
   const ctx = new Context()
   try {
@@ -91,14 +110,23 @@ it.each([
       })
       return Response.json({ answers: {
         namedRegions: { type: 'noul', noul: malformed ? null : score },
-        conciseReply: { type: 'noul', noul: 0.95 },
+        conciseReply: { type: 'noul', noul: conciseScore ?? 0.95 },
       } })
     })
-    applySkillReminders(ctx, config, async () => 'fixture-key', createUserMessage, fetchDecision)
+    const store = createProjectSkillReviewStore(diagnosticsDirectory)
+    applySkillReminders(ctx, config, async () => 'fixture-key', createUserMessage, store, fetchDecision)
     const agent = await harness.create(sessionId, { provider: 'fixture', model: 'fixture' }, { cwd: root })
     agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: request }] }))
     await agent.whenIdle()
     expect(fetchDecision).toHaveBeenCalledTimes(expected.length === 1 ? 2 : 1)
+    const attempts = expected.length === 1 ? 2 : 1
+    expect(await savedReviews(ctx, root, agent.session)).toEqual([{
+      sessionId, turn: 1, status: 'finished', outcome: 'completed', attempts,
+      completed: malformed ? 0 : attempts,
+      failed: malformed ? 1 : 0,
+      ...malformed ? { lastFailure: { stage: 'provider', reason: 'error' } } : {},
+      reminders: expected.map(text => text === 'name-model-regions' ? 'namedRegions' : 'conciseReply'),
+    }])
     const events = agent.session.snapshotEvents()
     const reminders = events.flatMap(event => event.type === 'user/message' && String(event.data.source.kind) === 'rumi-skill-reminder'
       ? event.data.content.flatMap(block => block.type === 'text' ? [block.text] : []) : [])
@@ -123,6 +151,85 @@ it.each([
     await ctx.fiber.dispose()
     await rm(root, { recursive: true, force: true })
   }
+})
+
+it.each([
+  { enabled: true, key: undefined, reason: 'missing-credential' },
+  { enabled: false, key: 'fixture-key', reason: 'disabled' },
+])('records a separate $reason skip for each turn', async ({ enabled, key, reason }) => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-review-skip-'))
+  const ctx = new Context()
+  try {
+    const sessionId = SessionId('print-skill-review-skip')
+    await identifyProject(root, sessionId)
+    await mountAgentLoopTestDependencies(ctx)
+    const harness = await mountAgentLoopTestHarness(ctx)
+    ctx.effect(() => ctx.llm.registerAdapter(['fixture'], new ReviewReplay(async () => {})))
+    const fetchDecision = vi.fn<typeof fetch>(async () => decision())
+    const store = createProjectSkillReviewStore(diagnosticsDirectory)
+    applySkillReminders(ctx, { ...config, enabled }, async () => key, createUserMessage, store, fetchDecision)
+    const agent = await harness.create(sessionId, { provider: 'fixture', model: 'fixture' }, { cwd: root })
+    for (const text of ['Make a box.', 'Make it wider.']) {
+      agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] }))
+      await agent.whenIdle()
+    }
+    expect(fetchDecision).not.toHaveBeenCalled()
+    expect(await savedReviews(ctx, root, agent.session)).toEqual([
+      { sessionId, turn: 1, status: 'skipped', reason },
+      { sessionId, turn: 2, status: 'skipped', reason },
+    ])
+  } finally {
+    await ctx.fiber.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('imports only a project’s legacy diagnostics and carries them in a plain folder copy', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-project-review-import-'))
+  const ctx = new Context()
+  try {
+    const project = join(root, 'project')
+    const exported = join(root, 'exported')
+    const sessionId = SessionId('print-review-active')
+    const otherSession = SessionId('print-review-other-session')
+    await mkdir(project)
+    await identifyProject(project, sessionId, otherSession)
+    await ctx.plugin(Storage)
+    await ctx.plugin(StorageJson, { root: join(root, 'legacy') })
+    await ctx.plugin(StorageDomain, { backend: 'json' })
+    const legacy = await ctx.storageDomain.open(skillReviewDomain)
+    await legacy.table('turns').put('one', { sessionId, turn: 4, status: 'skipped', reason: 'disabled' })
+    await legacy.table('turns').put('two', { sessionId: otherSession, turn: 5, status: 'skipped', reason: 'disabled' })
+    await legacy.table('turns').put('foreign', { sessionId: 'other-project', turn: 6, status: 'skipped', reason: 'disabled' })
+    const store = createProjectSkillReviewStore(diagnosticsDirectory, legacy)
+    try {
+      await store.put(project, { sessionId, turn: 4, status: 'skipped', reason: 'missing-credential' })
+      await store.migrate(project, [sessionId, otherSession])
+      await cp(project, exported, { recursive: true })
+      const directory = join(diagnosticsDirectory(exported), 'skill-reviews')
+      const records = await Promise.all((await readdir(directory)).map(async (file) => {
+        const value = JSON.parse(await readFile(join(directory, file), 'utf8')) as { record: unknown }
+        return skillReviewDomain.tables.turns.valueSchema.parse(value.record)
+      }))
+      expect(records.sort((a, b) => a.turn - b.turn)).toEqual([
+        { sessionId, turn: 4, status: 'skipped', reason: 'missing-credential' },
+        { sessionId: otherSession, turn: 5, status: 'skipped', reason: 'disabled' },
+      ])
+    } finally { await store.close() }
+  } finally {
+    await ctx.fiber.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('refuses a link in place of the project diagnostics directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-project-review-link-'))
+  try {
+    await symlink(root, diagnosticsDirectory(root), 'dir')
+    const store = createProjectSkillReviewStore(diagnosticsDirectory)
+    await expect(store.put(root, { sessionId: 'fixture', turn: 1, status: 'pending' })).rejects.toThrow('real directory')
+    expect(await readdir(root)).toEqual([PROJECT_DIAGNOSTICS_DIRECTORY])
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 class StepReplay extends LlmAdapter {
@@ -157,9 +264,10 @@ class StepReplay extends LlmAdapter {
 }
 
 it.each([
-  { scope: 'the same project', sharedProject: true },
-  { scope: 'another project', sharedProject: false },
-])('coalesces completed steps while another chat runs in $scope', async ({ sharedProject }) => {
+  { scope: 'the same project', sharedProject: true, cancelOther: false },
+  { scope: 'the same project and is cancelled', sharedProject: true, cancelOther: true },
+  { scope: 'another project', sharedProject: false, cancelOther: false },
+])('coalesces completed steps while another chat runs in $scope', async ({ sharedProject, cancelOther }) => {
   const root = await mkdtemp(join(tmpdir(), 'rumi-review-queue-'))
   const owner = new Context()
   const firstRequest = Promise.withResolvers<void>()
@@ -214,7 +322,8 @@ it.each([
       }
       return decision()
     })
-    applySkillReminders(owner, { ...config, timeoutMs: 10_000 }, async () => 'fixture-key', createUserMessage, fetchDecision)
+    const store = createProjectSkillReviewStore(diagnosticsDirectory)
+    applySkillReminders(owner, { ...config, timeoutMs: 10_000 }, async () => 'fixture-key', createUserMessage, store, fetchDecision)
     const primary = await harness.create(primaryId, { provider: 'primary', model: 'fixture' }, { cwd: primaryRoot })
     const other = await harness.create(otherId, { provider: 'other', model: 'fixture' }, { cwd: otherRoot })
     const prompt = (value: string) => createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: value }] })
@@ -222,12 +331,12 @@ it.each([
     await firstRequest.promise
     other.followup(prompt('Inspect the other model.'))
     await Promise.all([thirdStep.promise, otherStopping.promise])
-    if (sharedProject) other.cancel({ kind: 'user' })
-    await other.whenIdle()
+    if (cancelOther) other.cancel({ kind: 'user' })
+    if (!sharedProject || cancelOther) await other.whenIdle()
     expect(fetchDecision).toHaveBeenCalledTimes(sharedProject ? 1 : 2)
     releaseFirstRequest.resolve()
-    await primary.whenIdle()
-    expect(fetchDecision).toHaveBeenCalledTimes(sharedProject ? 3 : 4)
+    await Promise.all([primary.whenIdle(), other.whenIdle()])
+    expect(fetchDecision).toHaveBeenCalledTimes(cancelOther ? 3 : 4)
     const requests = fetchDecision.mock.calls.map(([, options]) => JSON.parse(String(options?.body)).state)
     const states = requests.filter(state => state.request === 'Inspect the primary model.')
     const publish = { step: 1, tool: 'bash', description: 'Publish the box model', outcome: 'completed', geometryCheck: 'needs_repair' }
@@ -242,7 +351,11 @@ it.each([
     const bodies = fetchDecision.mock.calls.map(([, options]) => String(options?.body)).join('')
     expect(bodies).not.toContain('Raw tool output')
     expect(bodies).not.toContain('local-script-with-private-content')
-    expect(requests.filter(state => state.request === 'Inspect the other model.')).toHaveLength(sharedProject ? 0 : 1)
+    expect(requests.filter(state => state.request === 'Inspect the other model.')).toHaveLength(cancelOther ? 0 : 1)
+    expect(await savedReviews(owner, otherRoot, other.session)).toEqual([{
+      sessionId: otherId, turn: 1, status: 'finished', outcome: cancelOther ? 'aborted' : 'completed',
+      attempts: cancelOther ? 0 : 1, completed: cancelOther ? 0 : 1, failed: 0, reminders: [],
+    }])
   } finally {
     firstRequest.resolve()
     releaseFirstRequest.resolve()
@@ -280,7 +393,8 @@ it('steers at the next step when the every-other-step review flags a missing reg
       }
     })
     const fetchDecision = vi.fn<typeof fetch>(async () => decision(0.99, 0.01))
-    applySkillReminders(owner, { ...config, everySteps: 2 }, async () => 'fixture-key', createUserMessage, fetchDecision)
+    const store = createProjectSkillReviewStore(diagnosticsDirectory)
+    applySkillReminders(owner, { ...config, everySteps: 2 }, async () => 'fixture-key', createUserMessage, store, fetchDecision)
     const agent = await harness.create(sessionId, { provider: 'fixture', model: 'fixture' }, { cwd: root })
     agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Inspect the box.' }] }))
     await agent.whenIdle()

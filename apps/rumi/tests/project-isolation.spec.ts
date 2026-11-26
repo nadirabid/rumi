@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { canonical, checkedPath, contains, projectRoot, seatbeltProfile } from '../brand/projects/isolation/paths.js'
+import { canonical, checkedPath, contains, PROJECT_DIAGNOSTICS_DIRECTORY, projectRoot, seatbeltProfile } from '../brand/projects/isolation/paths.js'
 const execute = promisify(execFile)
 const directories: string[] = []
 afterEach(async () => { for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true }) })
@@ -34,6 +34,9 @@ it('denies absolute, traversal, sibling-prefix and symlink escapes for reads and
   expect(contains(f.root, f.root+'-sibling/file')).toBe(false)
   expect(checkedPath(f.root, 'new/file.txt', true, [])).toBe(join(f.root, 'new/file.txt'))
   expect(() => checkedPath(f.root, 'project.json', true, [])).toThrow('isolation denied')
+  const review = join(PROJECT_DIAGNOSTICS_DIRECTORY, 'skill-reviews', 'turn.json')
+  expect(checkedPath(f.root, review, false, [])).toBe(join(f.root, review))
+  expect(() => checkedPath(f.root, review, true, [])).toThrow('isolation denied')
 })
 it('allows shared runtime reads but never runtime writes', async () => {
   const f = await fixture()
@@ -42,13 +45,24 @@ it('allows shared runtime reads but never runtime writes', async () => {
 })
 it.skipIf(process.platform !== 'darwin')('enforces reads and writes in the kernel for shell children, including symlinks and scratch files', async () => {
   const f = await fixture()
-  const script = 'cat "$1/own.txt"; printf changed > "$1/own.txt"; cat "$2/secret.txt"; cat "$1/escape/secret.txt"; printf stolen > "$2/new.txt"; printf replaced > "$1/project.json"; exit 0'
-  const result = await execute('/usr/bin/sandbox-exec', ['-p', seatbeltProfile(f.root, ['/bin', '/usr', '/System']), '/bin/sh', '-c', script, 'test', f.root, f.other], { timeout: 30000 })
+  const diagnostics = join(f.root, PROJECT_DIAGNOSTICS_DIRECTORY)
+  await mkdir(diagnostics)
+  const review = join(diagnostics, 'review.json')
+  await writeFile(review, 'original review')
+  const script = [
+    'cat "$1/own.txt"; printf changed > "$1/own.txt"; cat "$2/secret.txt"; cat "$1/escape/secret.txt"',
+    'printf stolen > "$2/new.txt"; printf replaced > "$1/project.json"',
+    'printf replaced > "$3"; printf added > "$4"; exit 0',
+  ].join('\n')
+  const result = await execute('/usr/bin/sandbox-exec', ['-p', seatbeltProfile(f.root, ['/bin', '/usr', '/System']),
+    '/bin/sh', '-c', script, 'test', f.root, f.other, review, join(diagnostics, 'added.json')], { timeout: 30000 })
   expect(result.stdout).toBe('own')
   expect(result.stderr).toContain('Operation not permitted')
   expect(await readFile(join(f.root, 'own.txt'), 'utf8')).toBe('changed')
   expect(await readFile(join(f.other, 'secret.txt'), 'utf8')).toBe('other project')
   await expect(readFile(join(f.other, 'new.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await readFile(review, 'utf8')).toBe('original review')
+  await expect(readFile(join(diagnostics, 'added.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   expect(projectRoot(f.workspace, f.session)).toBe(f.root)
 })
 

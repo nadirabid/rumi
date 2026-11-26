@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { openSync, readSync, closeSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve, join } from 'node:path'
-import { canonical, checkedPath, projectRoot } from './paths.js'
+import { canonical, checkedPath, projectRoot, PROJECT_DIAGNOSTICS_DIRECTORY } from './paths.js'
 
 const TOOLS = new Set(['bash', 'read', 'write', 'edit', 'str_replace_editor', 'glob', 'grep', 'read_image', 'skill',
   'web_search', 'web_fetch', 'todo_write',
@@ -71,6 +71,8 @@ export function createProjectScope({ Service, z }) {
     }
     /** Resolve a session's owning project. @param {object} session Calling session. @returns {string} Project directory. */
     rootFor(session) { return projectRoot(this.workspaceRoot, session) }
+    /** Locate host-owned diagnostics. @param {string} root Canonical project directory. @returns {string} Diagnostics directory. */
+    diagnosticsDirectory(root) { return join(root, PROJECT_DIAGNOSTICS_DIRECTORY) }
     /** Read the active tool's root; absence means trusted host work, never an agent fallback. @returns {string|undefined} Active project. */
     activeRoot() { return this.storage.getStore()?.root }
     /** Check a path for the active operation. @param {string} path Target. @param {boolean} write Mutation flag. @returns {string} Canonical path. */

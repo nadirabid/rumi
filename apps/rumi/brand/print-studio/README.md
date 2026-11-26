@@ -32,9 +32,11 @@ Rumi stores awards, pending reviews, and a private record of evaluator requests 
 
 ## Skill reminders
 
-Baseten Bison independently reviews completed steps while the primary agent continues working. It can remind the agent to update the region map for the revision it will leave saved at the end of the turn, or to shorten a reply. The primary agent owns the edit and the response to the user. Chats in a project share a reminder queue that runs independently of its badge reviews and other projects. Print Studio combines queued steps from the same turn and delivers each kind of reminder at most once per turn. At turn end it waits briefly, then discards any unfinished review for that turn.
+Baseten Bison reviews completed steps on each eligible user turn while the primary agent continues working. It can remind the agent to update the region map for the final saved revision or to shorten a reply. Chats in a project share a review queue. Print Studio combines queued steps from the same turn and sends each kind of reminder at most once per turn. A finishing turn waits for its first review to start and allows a bounded time for unfinished review work.
 
 Reviews use the configured Baseten credential with any primary model. Bison receives bounded excerpts of the request and visible reply, the task plan, recent tool actions and outcomes, and the region-map status when a model or its map changes. Shell commands, raw tool output, attachments and model files stay local. The [reviewer](skill-reminders.js) owns the questions and delivery rules. The [plugin configuration](index.js) defines the credential, cadence, threshold, timeout and limits under `skillReminders`.
+
+Each print project stores one JSON diagnostic per session turn in its `.rumi-diagnostics/skill-reviews/` directory, so a project folder copy includes the records for every session. The record identifies a skip reason or counts attempts, completed decisions, and failures. It lists the reminder kinds sent and the last failure stage when applicable. The first turn for a project imports its earlier Cordis storage records and preserves any project-local copy. The standard `/export` ZIP includes delivered reminders in the session log.
 
 ## Build and test
 

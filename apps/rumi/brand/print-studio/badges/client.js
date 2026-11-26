@@ -16,7 +16,6 @@ const en = {
   loadError: 'Your badges couldn’t be loaded.', retryError: 'The badge check couldn’t be restarted.',
   retry: 'Try again', oneProject: '1 project', projects: '{count} projects',
   movementChecked: 'Movement checked',
-  earned: 'Badge earned',
   earnedAnnouncement: 'You earned the {badge} badge in {project}.',
   dismissReveal: 'Dismiss badge reveal',
   'barrel-hinge': 'Barrel hinge', 'living-hinge': 'Living hinge', 'wheel-and-axle': 'Wheel and axle',
@@ -29,23 +28,44 @@ const zh = {
   loadError: '徽章未能加载', retryError: '未能重新开始徽章检查',
   retry: '再试一次', oneProject: '1 个项目', projects: '{count} 个项目',
   movementChecked: '已检查活动情况',
-  earned: '获得徽章',
   earnedAnnouncement: '你在{project}项目中获得了{badge}徽章。',
   dismissReveal: '关闭徽章提示',
   'barrel-hinge': '圆筒铰链', 'living-hinge': '柔性铰链', 'wheel-and-axle': '车轮与轮轴',
   'dovetail-slide': '燕尾导轨', 'gear-pair': '齿轮组', 'rack-and-pinion': '齿轮齿条',
 }
 
-// Each medallion depicts the feature named on its card.
-const glyphs = {
-  'barrel-hinge': 'M4 6h6v4H8v4h2v4H4z M20 6h-6v4h2v4h-2v4h6z M12 4v16 M10 6h4v4h-4z M10 14h4v4h-4z',
-  'living-hinge': 'M3 6.5l6 3.2v9L3 15.5z M21 6.5l-6 3.2v9l6-3.2z M9 10q3 3 6 0 M9 18q3 3 6 0',
-  'wheel-and-axle': 'M16 12a6.5 8 0 1 1-13 0 6.5 8 0 1 1 13 0z M11.5 12a2 2.5 0 1 1-4 0 2 2.5 0 1 1 4 0z M11.5 10.8l8.4-2.5q2 0 1.2 2.1l-9.8 3',
-  'dovetail-slide': 'M3 10l6-3h3l-1.5 3h4L13 7h3l5 2.5v4L9 20l-6-3z M3 10l6 3 12-6 M9 13v7 M6 9l3 1.5 8-4',
-  'gear-pair': 'M8 4l1 2 2 .5 2-.5 1.2 2-1.3 1.8.1 2 1 1.7-1.5 1.8-2-.4-1.8 1L8 18H6l-.8-2.1-2-.9-1.7.4-.8-2 1.2-1.6v-2L1 8.3 2.5 6.5l2 .4 1.8-1L6.6 4z M9.3 11a2.1 2.1 0 1 1-4.2 0 2.1 2.1 0 1 1 4.2 0z M16.8 12.7l.5-1.2h1.6l.5 1.2 1.4.7 1.1-.2.8 1.4-.8 1.1v1.5l.8 1.1-.8 1.4-1.1-.2-1.4.7-.5 1.2h-1.6l-.5-1.2-1.4-.7-1.1.2-.8-1.4.8-1.1v-1.5l-.8-1.1.8-1.4 1.1.2z M19.2 16.5a1.1 1.1 0 1 1-2.2 0 1.1 1.1 0 1 1 2.2 0z',
-  'rack-and-pinion': 'M10 3h3l.7 1.9 1.3.8 2-.4 1.3 2.3-1.3 1.6v1.6l1.3 1.6-1.3 2.3-2-.4-1.3.8L13 17h-3l-.7-1.9-1.3-.8-2 .4-1.3-2.3L6 10.8V9.2L4.7 7.6 6 5.3l2 .4 1.3-.8z M13.5 10a2 2 0 1 1-4 0 2 2 0 1 1 4 0z M2 20v-3h2l1 1.5h2L8 17h2l1 1.5h2l1-1.5h2l1 1.5h2l1-1.5h2v3z',
+/** Unified 48x48 dual-layer emblems shared by every earned badge, unearned badge, and reveal. */
+const emblems = {
+  'barrel-hinge': {
+    fill: 'M8 10h11a1.5 1.5 0 0 1 1.5 1.5v25A1.5 1.5 0 0 1 19 38H8a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2z M29 10h11a2 2 0 0 1 2 2v24a2 2 0 0 1-2 2H29a1.5 1.5 0 0 1-1.5-1.5v-25A1.5 1.5 0 0 1 29 10z M20.5 9h7v8h-7z M20.5 20h7v8h-7z M20.5 31h7v8h-7z',
+    stroke: 'M8 10h12.5v7H18v3h2.5v8H18v3h2.5v7H8a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2z M40 10H27.5v7H30v3h-2.5v8H30v3h-2.5v7H40a2 2 0 0 0 2-2V12a2 2 0 0 0-2-2z M20.5 9h7v8h-7z M20.5 20h7v8h-7z M20.5 31h7v8h-7z M24 5.5V9 M24 39v3.5 M11.5 16a1 1 0 1 0 0 .01 M11.5 32a1 1 0 1 0 0 .01 M36.5 16a1 1 0 1 0 0 .01 M36.5 32a1 1 0 1 0 0 .01',
+  },
+  'living-hinge': {
+    fill: 'M7 13.5 19.5 19v16.5L7 30a1.5 1.5 0 0 1-.9-1.4V14.8a1.3 1.3 0 0 1 1.8-1.2z M41 13.5 28.5 19v16.5L41 30a1.5 1.5 0 0 0 .9-1.4V14.8a1.3 1.3 0 0 0-1.8-1.2z M19.5 19q4.5-2.6 9 0v16.5q-4.5-2.6-9 0z',
+    stroke: 'M6.5 14.5 19.5 19v16.5L6.5 30a1.4 1.4 0 0 1-.9-1.3V15.7a1.2 1.2 0 0 1 .9-1.2z M41.5 14.5 28.5 19v16.5L41.5 30a1.4 1.4 0 0 0 .9-1.3V15.7a1.2 1.2 0 0 0-.9-1.2z M19.5 19q4.5-2.8 9 0 M19.5 35.5q4.5-2.8 9 0 M22.5 20.5v11.5 M25.5 20.5v11.5',
+  },
+  'wheel-and-axle': {
+    fill: 'M29.5 24a11 13.5 0 1 1-22 0 11 13.5 0 1 1 22 0z M21.5 24a3 3.7 0 1 1-6 0 3 3.7 0 1 1 6 0z M21.3 21.6l16.8-3.4a2.4 2.4 0 0 1 1 4.7l-17.8 3.6z',
+    stroke: 'M29.5 24a11 13.5 0 1 1-22 0 11 13.5 0 1 1 22 0z M25.5 24a7 8.8 0 1 1-14 0 7 8.8 0 1 1 14 0z M21.5 24a3 3.7 0 1 1-6 0 3 3.7 0 1 1 6 0z M18.5 15.2v5.1 M18.5 27.7v5.1 M11.7 21.8l4 1.2 M11.7 26.2l4-1.2 M21.3 21.6l16.8-3.4a2.4 2.4 0 0 1 1 4.7l-17.8 3.6',
+  },
+  'dovetail-slide': {
+    fill: 'M17.5 9h13l4.2 17.5H13.3z M6.5 23h9.2l-2.9 11.5h22.4L32.3 23h9.2a1.5 1.5 0 0 1 1.5 1.5v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-12A1.5 1.5 0 0 1 6.5 23z',
+    stroke: 'M17.5 9h13l4.2 17.5H13.3z M6.5 23h9.2l-2.9 11.5h22.4L32.3 23h9.2a1.5 1.5 0 0 1 1.5 1.5v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-12A1.5 1.5 0 0 1 6.5 23z M21 15h6',
+  },
+  'gear-pair': {
+    fill: 'M16 7h4l1 3.2 2.4 1 3-1.4 2.8 2.8-1.4 3 1 2.4 3.2 1v4l-3.2 1-1 2.4 1.4 3-2.8 2.8-3-1.4-2.4 1L20 35h-4l-1-3.2-2.4-1-3 1.4-2.8-2.8 1.4-3-1-2.4L4 23v-4l3.2-1 1-2.4-1.4-3 2.8-2.8 3 1.4 2.4-1z M33.5 24.5h3l.7 2.2 1.7.7 2.1-1 2 2-1 2.1.7 1.7 2.2.7v3l-2.2.7-.7 1.7 1 2.1-2 2-2.1-1-1.7.7-.7 2.2h-3l-.7-2.2-1.7-.7-2.1 1-2-2 1-2.1-.7-1.7-2.2-.7v-3l2.2-.7.7-1.7-1-2.1 2-2 2.1 1 1.7-.7z',
+    stroke: 'M16 7h4l1 3.2 2.4 1 3-1.4 2.8 2.8-1.4 3 1 2.4 3.2 1v4l-3.2 1-1 2.4 1.4 3-2.8 2.8-3-1.4-2.4 1L20 35h-4l-1-3.2-2.4-1-3 1.4-2.8-2.8 1.4-3-1-2.4L4 23v-4l3.2-1 1-2.4-1.4-3 2.8-2.8 3 1.4 2.4-1z M22.5 21a4.5 4.5 0 1 1-9 0 4.5 4.5 0 1 1 9 0z M33.5 24.5h3l.7 2.2 1.7.7 2.1-1 2 2-1 2.1.7 1.7 2.2.7v3l-2.2.7-.7 1.7 1 2.1-2 2-2.1-1-1.7.7-.7 2.2h-3l-.7-2.2-1.7-.7-2.1 1-2-2 1-2.1-.7-1.7-2.2-.7v-3l2.2-.7.7-1.7-1-2.1 2-2 2.1 1 1.7-.7z M37.6 34.4a2.6 2.6 0 1 1-5.2 0 2.6 2.6 0 1 1 5.2 0z',
+  },
+  'rack-and-pinion': {
+    fill: 'M21.8 6h4.4l.9 2.9 2.2.9 2.7-1.3 3.1 3.1-1.3 2.7.9 2.2 2.9.9v4.4l-2.9.9-.9 2.2 1.3 2.7-3.1 3.1-2.7-1.3-2.2.9-.9 2.9h-4.4l-.9-2.9-2.2-.9-2.7 1.3-3.1-3.1 1.3-2.7-.9-2.2-2.9-.9v-4.4l2.9-.9.9-2.2-1.3-2.7 3.1-3.1 2.7 1.3 2.2-.9z M6 40.5v-5h3.5l1.5 2.5h3.5l1.5-2.5h3.5l1.5 2.5h3.5l1.5-2.5h3.5l1.5 2.5h3.5l1.5-2.5H42v5a1.5 1.5 0 0 1-1.5 1.5h-33A1.5 1.5 0 0 1 6 40.5z',
+    stroke: 'M21.8 6h4.4l.9 2.9 2.2.9 2.7-1.3 3.1 3.1-1.3 2.7.9 2.2 2.9.9v4.4l-2.9.9-.9 2.2 1.3 2.7-3.1 3.1-2.7-1.3-2.2.9-.9 2.9h-4.4l-.9-2.9-2.2-.9-2.7 1.3-3.1-3.1 1.3-2.7-.9-2.2-2.9-.9v-4.4l2.9-.9.9-2.2-1.3-2.7 3.1-3.1 2.7 1.3 2.2-.9z M28.2 19.6a4.2 4.2 0 1 1-8.4 0 4.2 4.2 0 1 1 8.4 0z M6 40.5v-5h3.5l1.5 2.5h3.5l1.5-2.5h3.5l1.5 2.5h3.5l1.5-2.5h3.5l1.5 2.5h3.5l1.5-2.5H42v5a1.5 1.5 0 0 1-1.5 1.5h-33A1.5 1.5 0 0 1 6 40.5z',
+  },
+  medal: {
+    fill: 'M37 19a13 13 0 1 1-26 0 13 13 0 1 1 26 0z M16 29.5 13 42l8.5-4.8L25.5 42l1.2-11.5 M32 29.5 36.2 42l-8.8-4.8',
+    stroke: 'M37 19a13 13 0 1 1-26 0 13 13 0 1 1 26 0z M16 29.5 13 42l8.5-4.8L25.5 42l1.2-11.5 M32 29.5 36.2 42l-8.8-4.8 M18.8 19.2l3.4 3.4 7-7.2',
+  },
 }
-const medal = 'M8 13.5 6.5 21 11 18.5 13.5 21l.6-6.5 M16 13.5l2.2 7.5-4.6-2.5 M18.5 9a6.5 6.5 0 1 1-13 0 6.5 6.5 0 1 1 13 0z M9.4 9.1l1.7 1.7 3.5-3.6'
+const toolbarMedal = 'M8 13.5 6.5 21 11 18.5 13.5 21l.6-6.5 M16 13.5l2.2 7.5-4.6-2.5 M18.5 9a6.5 6.5 0 1 1-13 0 6.5 6.5 0 1 1 13 0z M9.4 9.1l1.7 1.7 3.5-3.6'
 
 /**
  * Mount the badge collection and its project-toolbar action.
@@ -66,25 +86,45 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
     return () => style.remove()
   }, 'print badges: material')
 
-  function Glyph({ kind, size }) {
-    return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
-      'aria-hidden': true, stroke: 'currentColor', strokeWidth: kind ? 1.2 : 1.7,
-      strokeLinejoin: 'round', strokeLinecap: 'round' }, h('path', { d: kind ? glyphs[kind] : medal }))
+  function ToolbarGlyph() {
+    return h('svg', { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none',
+      'aria-hidden': true, stroke: 'currentColor', strokeWidth: 1.7,
+      strokeLinejoin: 'round', strokeLinecap: 'round' }, h('path', { d: toolbarMedal }))
+  }
+
+  function Emblem({ kind }) {
+    const art = emblems[kind] ?? emblems.medal
+    return h('svg', { className: 'rumi-badge-emblem', viewBox: '0 0 48 48', fill: 'none',
+      'aria-hidden': true, strokeLinejoin: 'round', strokeLinecap: 'round' },
+      h('path', { className: 'rumi-badge-emblem-fill', d: art.fill }),
+      h('path', { className: 'rumi-badge-emblem-stroke', d: art.stroke }))
   }
 
   function Toolbar({ activePanel, openPage, t }) {
     const label = t('title')
     return h(Tooltip, { label, side: 'bottom', portal: true, delayMs: 500 },
       h('button', { className: 'rumi-glass rumi-badges-button', type: 'button', 'aria-label': label,
-        'aria-pressed': activePanel === PANEL, onClick: () => openPage(PANEL, label) }, h(Glyph, { size: 18 })))
+        'aria-pressed': activePanel === PANEL, onClick: () => openPage(PANEL, label) }, h(ToolbarGlyph)))
+  }
+
+  function BadgeFace({ kind, award, t }) {
+    return h('div', {
+      className: 'rumi-badge-surface rumi-badge-face',
+      'data-kind': kind,
+      'data-locked': !award || undefined,
+    },
+      h('div', { className: 'rumi-badge-art', 'data-kind': kind, 'aria-hidden': true },
+        h('div', { className: 'rumi-badge-medallion' },
+          h(Emblem, { kind }))),
+      h('div', { className: 'rumi-badge-caption' },
+        h('h2', { className: 'rumi-badge-title' }, t(kind)),
+        award && h('p', { className: 'rumi-badge-project' }, h('bdi', null, award.projectName))))
   }
 
   function Card({ kind, awards, t }) {
     const earned = awards.length > 0
-    return h('article', { className: 'rumi-badge-card rumi-lq', 'data-earned': earned || undefined },
-      h('div', { className: 'rumi-badge-face' },
-        h('div', { className: 'rumi-badge-medallion' }, h(Glyph, { kind, size: 54 })),
-        h('h2', null, t(kind))),
+    return h('article', { className: 'rumi-badge-card', 'data-earned': earned || undefined },
+      h(BadgeFace, { kind, award: awards[0], t }),
       earned && h('details', { className: 'rumi-badge-projects' },
         h('summary', null, t(awards.length === 1 ? 'oneProject' : 'projects', { count: awards.length }),
           h(IconChevronRightOutlineRegular, { size: 12, 'aria-hidden': true })),
@@ -114,6 +154,7 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
     const dismiss = () => feed.dismiss(award.id)
     return h('aside', {
       className: 'rumi-badge-reveal', hidden: !visible,
+      'data-kind': award.kind,
       'data-leaving': leaving || undefined,
       style: { '--badge-fade': REVEAL_FADE_MS + 'ms' },
       onPointerEnter: event => { if (event.pointerType !== 'touch') setHovered(true) },
@@ -129,17 +170,10 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
     h('div', { className: 'rumi-badge-reveal-scene' },
       h('div', { className: 'rumi-badge-reveal-flight' },
         h('div', { className: 'rumi-badge-reveal-plate' },
-          h('div', { className: 'rumi-badge-reveal-side rumi-badge-reveal-front' },
-            h('p', { className: 'rumi-badge-reveal-label' }, t('earned')),
-            h('div', { className: 'rumi-badge-reveal-art', 'data-kind': award.kind, 'aria-hidden': true },
-              award.kind === 'living-hinge'
-                ? h('div', { className: 'rumi-badge-reveal-hinge' }, h('span'))
-                : h(Glyph, { kind: award.kind, size: 96 })),
-            h('div', { className: 'rumi-badge-reveal-content' },
-              h('p', { className: 'rumi-badge-reveal-title' }, t(award.kind)),
-              h('p', { className: 'rumi-badge-reveal-project' }, h('bdi', null, award.projectName)))),
-          h('div', { className: 'rumi-badge-reveal-side rumi-badge-reveal-back', 'aria-hidden': true },
-            h(Glyph, { size: 85 }))))),
+          h(BadgeFace, { kind: award.kind, award, t }),
+          h('div', { className: 'rumi-badge-surface rumi-badge-reveal-back', 'data-kind': award.kind, 'aria-hidden': true },
+            h('div', { className: 'rumi-badge-medallion' },
+              h(Emblem, { kind: 'medal' })))))),
     h(Button, { className: 'rumi-badge-reveal-dismiss', size: 'sm', variant: 'ghost',
       'aria-label': t('dismissReveal'), onClick: dismiss }, h(IconCloseOutlineRegular, { size: 16, 'aria-hidden': 'true' })))
   }
@@ -223,19 +257,27 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
         return Number.isFinite(earnedAt) ? Math.min(first, earnedAt) : first
       }, Number.MAX_SAFE_INTEGER)
       return { kind, awards, earned: awards.length > 0, firstEarnedAt }
-    }).sort((left, right) => Number(right.earned) - Number(left.earned) || left.firstEarnedAt - right.firstEarnedAt)
-    const earnedCount = cards.filter(card => card.earned).length
+    })
+    const earnedCards = cards.filter(card => card.earned)
+      .sort((left, right) => left.firstEarnedAt - right.firstEarnedAt)
+    const unearnedCards = cards.filter(card => !card.earned)
     const notice = error || (data?.failed ? 'failed' : null)
     return h('section', { className: 'rumi-badges', 'aria-label': t('title') },
       h('header', { className: 'rumi-badges-heading' }, h('h1', null, t('title')),
-        data && h('p', null, earnedCount ? t('progress', { count: earnedCount, total: kinds.length }) : t('empty'))),
+        data && h('p', null, earnedCards.length ? t('progress', { count: earnedCards.length, total: kinds.length }) : t('empty'))),
       notice && h('div', { className: 'rumi-badges-notice', role: 'alert' }, t(notice),
         h(Button, { variant: 'outline', size: 'sm', disabled: retrying, onClick: retry }, t('retry'))),
       data?.pending > 0 && h('p', { className: 'rumi-badges-pending', role: 'status' }, t('pending')),
-      data ? h('div', { className: 'rumi-badges-grid' }, cards.map(({ kind, awards }) => h(Card, {
-        key: kind, kind, awards, t,
-      }))) : !error && h('div', { className: 'rumi-badges-grid', 'aria-busy': true },
-        kinds.map(kind => h('div', { key: kind, className: 'rumi-badges-skeleton' }))))
+      data ? h('div', { className: 'rumi-badges-groups' },
+        earnedCards.length > 0 && h('div', { className: 'rumi-badges-grid rumi-badges-earned' },
+          earnedCards.map(({ kind, awards }) => h(Card, { key: kind, kind, awards, t }))),
+        earnedCards.length > 0 && unearnedCards.length > 0 && h('div', {
+          className: 'rumi-badges-divider', role: 'separator', 'aria-hidden': true,
+        }),
+        unearnedCards.length > 0 && h('div', { className: 'rumi-badges-grid rumi-badges-unearned' },
+          unearnedCards.map(({ kind, awards }) => h(Card, { key: kind, kind, awards, t }))))
+        : !error && h('div', { className: 'rumi-badges-grid rumi-badges-earned', 'aria-busy': true },
+          kinds.map(kind => h('div', { key: kind, className: 'rumi-badges-skeleton' }))))
   }
 
   ctx.slots.inject('rumi.projects.toolbar', () => ctx.slots.register({

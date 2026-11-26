@@ -75,7 +75,7 @@ it('opens the badge page from the medal and communicates the current selection',
 it('updates the empty collection with earned badges and shows all contributing projects', async () => {
   const { page, service } = fixture()
   service.mockResolvedValueOnce(Response.json(empty)).mockResolvedValueOnce(Response.json({
-    awards: [award, { ...award, id: 'two', projectName: 'Trolley' }], pending: 0, failed: 0,
+    awards: [{ ...award, id: 'two', projectName: 'Trolley', earnedAt: '2026-11-23T12:00:00.000Z' }, award], pending: 0, failed: 0,
   }))
   render(page)
   await act(async () => {})
@@ -83,19 +83,53 @@ it('updates the empty collection with earned badges and shows all contributing p
   const cards = screen.getAllByRole('article')
   expect(cards).toHaveLength(6)
   expect(within(cards[0]!).getByRole('heading', { name: 'Barrel hinge' })).toBeTruthy()
+  expect(document.querySelector('.rumi-badges-earned')).toBeNull()
+  expect(document.querySelector('.rumi-badges-divider')).toBeNull()
+  expect(document.querySelectorAll('.rumi-badges-unearned article')).toHaveLength(6)
   for (const card of cards) {
-    expect(card.textContent).toBe(within(card).getByRole('heading').textContent)
-    expect(card.querySelector('.rumi-badge-medallion svg')?.getAttribute('width')).toBe('54')
+    expect(within(card).queryByText('Not yet earned')).toBeNull()
+    expect(card.querySelector('.rumi-badge-face[data-locked]')).toBeTruthy()
+    expect(card.querySelector('details')).toBeNull()
   }
   await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
   expect(screen.getByText('1 of 6 mechanical badges earned')).toBeTruthy()
+  const earnedGroup = document.querySelector('.rumi-badges-earned')!
+  const unearnedGroup = document.querySelector('.rumi-badges-unearned')!
+  expect(document.querySelector('.rumi-badges-divider')).toBeTruthy()
+  expect(within(earnedGroup).getAllByRole('article')).toHaveLength(1)
+  expect(within(unearnedGroup).getAllByRole('article')).toHaveLength(5)
   const card = screen.getByRole('heading', { name: 'Wheel and axle' }).closest('article')!
-  expect(screen.getAllByRole('article')[0]).toBe(card)
+  expect(earnedGroup.contains(card)).toBe(true)
+  expect(within(card).queryByText('Badge earned')).toBeNull()
+  expect(card.querySelector('.rumi-badge-project')?.textContent).toBe('Trolley')
   fireEvent.click(within(card).getByText('2 projects'))
   expect(card.querySelector('details')?.open).toBe(true)
   expect(within(card).getByRole('heading', { name: 'Cart' })).toBeTruthy()
   expect(within(card).getByRole('heading', { name: 'Trolley' })).toBeTruthy()
   expect(within(card).getAllByText(award.evidence)).toHaveLength(2)
+})
+
+it.each([
+  { kind: 'living-hinge', name: '柔性铰链' },
+  { kind: 'wheel-and-axle', name: '车轮与轮轴' },
+])('displays the earned $kind face identically in the collection and the celebration', async ({ kind, name }) => {
+  const { page, reveal, service, stream } = fixture('zh')
+  const earned = { ...award, kind, working: true }
+  service.mockImplementation(async () => Response.json({ ...empty, awards: [earned] }))
+  render(<>{page}{reveal}</>)
+  await act(async () => { stream.earned(earned) })
+
+  const collection = screen.getByRole('region', { name: '徽章' })
+  const card = within(collection).getByRole('heading', { name }).closest('article')!
+  const face = card.querySelector<HTMLElement>('.rumi-badge-face')!
+  expect(within(face).getByText('Cart')).toBeTruthy()
+  expect(face.querySelector(`[data-kind="${kind}"] .rumi-badge-medallion .rumi-badge-emblem`)).toBeTruthy()
+  const plate = screen.getByRole('complementary').querySelector('.rumi-badge-reveal-plate')!
+  expect(face.isEqualNode(plate.querySelector('.rumi-badge-face'))).toBe(true)
+
+  fireEvent.click(within(card).getByText('1 个项目'))
+  expect(card.querySelector('details')?.open).toBe(true)
+  expect(within(card).getByText('已检查活动情况')).toBeTruthy()
 })
 
 it('lists earned badges by their first award across projects before the unearned catalog', async () => {
@@ -148,8 +182,8 @@ it('announces each new award once, keeps project focus, and advances after dismi
   expect(connect).toHaveBeenCalledExactlyOnceWith('/api/print-studio/badges/events')
   act(() => stream.earned(award, { id: 'two', kind: 'barrel-hinge' }, award))
   expect(status.textContent).toBe('You earned the Wheel and axle badge in Cart.')
-  expect(screen.getByText('Badge earned')).toBeTruthy()
   expect(screen.getByRole('complementary').parentElement).toBe(document.body)
+  expect(within(screen.getByRole('complementary')).getByText('Wheel and axle')).toBeTruthy()
   expect(document.activeElement).toBe(project)
   fireEvent.click(screen.getByRole('button', { name: 'Dismiss badge reveal' }))
   expect(status.textContent).toBe('You earned the Barrel hinge badge in Cart.')
@@ -157,7 +191,7 @@ it('announces each new award once, keeps project focus, and advances after dismi
   fireEvent.click(screen.getByRole('button', { name: 'Dismiss badge reveal' }))
   act(() => stream.earned(award))
   expect(status.textContent).toBe('')
-  expect(screen.queryByText('Badge earned')).toBeNull()
+  expect(screen.queryByRole('complementary')).toBeNull()
 
   act(() => { for (const dispose of disposers.splice(0).reverse()) dispose() })
   expect(stream.close).toHaveBeenCalledOnce()
@@ -172,10 +206,10 @@ it('presents queued awards one at a time, with the emblem and name on the same r
 
   const first = screen.getByRole('complementary')
   const plate = first.querySelector('.rumi-badge-reveal-plate')!
-  const front = plate.querySelector<HTMLElement>('.rumi-badge-reveal-front')!
+  const front = plate.querySelector<HTMLElement>('.rumi-badge-face')!
   expect(within(front).getByText('Living hinge')).toBeTruthy()
   expect(within(front).getByText('Cart')).toBeTruthy()
-  expect(front.querySelector('[data-kind="living-hinge"] .rumi-badge-reveal-hinge')).toBeTruthy()
+  expect(front.querySelector('[data-kind="living-hinge"] .rumi-badge-medallion .rumi-badge-emblem')).toBeTruthy()
   expect(plate.querySelector('.rumi-badge-reveal-back')?.getAttribute('aria-hidden')).toBe('true')
   expect(screen.queryByText('Wheel and axle')).toBeNull()
 

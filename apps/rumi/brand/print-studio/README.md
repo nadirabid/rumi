@@ -18,7 +18,7 @@ To change what the modeling agent knows, start with the [print project instructi
 
 ## Mechanical badges
 
-Open **Badges** beside **Plugins** to see the six mechanical badges. Earned badges appear first, ordered by the first time you earned each one across all projects. Open a badge’s project count to see which projects earned it and what the reviewer recognized. Each project earns a given badge once. A later passing movement check for the same mechanism can add movement evidence.
+Open **Badges** beside **Plugins** to see the six mechanical badges. Earned badges appear in their own section at the top, ordered by the first time you earned each one across all projects, while unearned badges sit in a separate smaller, muted group below. Each earned badge shows the same portrait Liquid Glass tile as its celebration, with the name of the most recent project to earn it. Open the project count below the tile to see all the projects that earned it and what the reviewer recognized. Each project earns a given badge once. A later passing movement check for the same mechanism can add movement evidence.
 
 When a project earns a new badge, a portrait glass tile spins into the center of the Rumi window, lands, and fades. It shows the mechanism and project name. With Reduce Motion on, the tile appears without the spin or stamp. If Live Voice is active in that project, it receives a short note about the badge that it can mention the next time it speaks. New awards stay in the collection if their reveal is missed.
 

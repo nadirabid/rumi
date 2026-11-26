@@ -4,12 +4,24 @@
   height: 100%;
   min-height: 0;
   overflow: auto;
-  padding: calc(var(--dsh-frame-top-clearance, 48px) + 28px) clamp(20px, 4vw, 56px) 48px;
+  container: rumi-badges / inline-size;
+  padding: calc(var(--dsh-frame-top-clearance, 48px) + 28px) clamp(16px, 4vw, 56px) 56px;
   color: var(--dsw-alias-label-primary);
-  background: radial-gradient(ellipse at 85% 0%, color-mix(in srgb, var(--dsw-alias-brand-primary) 5%, transparent), transparent 60%), var(--dsw-alias-bg-base);
+  background:
+    radial-gradient(ellipse 68% 48% at 14% 8%, color-mix(in srgb, var(--dsw-static-blue-400) 9%, transparent), transparent 68%),
+    radial-gradient(ellipse 60% 44% at 86% 6%, color-mix(in srgb, var(--dsw-static-violet-400) 8%, transparent), transparent 64%),
+    radial-gradient(ellipse 52% 40% at 52% 52%, color-mix(in srgb, var(--dsw-static-green-400) 5%, transparent), transparent 72%),
+    var(--dsw-alias-bg-base);
   -webkit-font-smoothing: antialiased;
 }
-.rumi-badges-heading { margin-bottom: 24px; }
+[data-ds-dark-theme] .rumi-badges {
+  background:
+    radial-gradient(ellipse 68% 48% at 14% 8%, color-mix(in srgb, var(--dsw-static-blue-500) 11%, transparent), transparent 68%),
+    radial-gradient(ellipse 60% 44% at 86% 6%, color-mix(in srgb, var(--dsw-static-violet-600) 10%, transparent), transparent 64%),
+    radial-gradient(ellipse 52% 40% at 52% 52%, color-mix(in srgb, var(--dsw-static-green-500) 6%, transparent), transparent 72%),
+    var(--dsw-alias-bg-base);
+}
+.rumi-badges-heading { margin-bottom: 28px; }
 .rumi-badges-heading h1 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
 .rumi-badges-heading p, .rumi-badges-pending, .rumi-badges-notice {
   margin: 6px 0 0;
@@ -17,75 +29,50 @@
   font-size: 13px;
   line-height: 1.5;
 }
-.rumi-badges-pending, .rumi-badges-notice { margin: 0 0 16px; }
+.rumi-badges-pending, .rumi-badges-notice { margin: 0 0 18px; }
 .rumi-badges-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+
+.rumi-badges-groups {
+  display: flex;
+  flex-direction: column;
+  max-width: 1160px;
+}
 .rumi-badges-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
-  gap: 16px;
-  max-width: 1120px;
   align-items: start;
 }
-.rumi-badge-card, .rumi-badges-skeleton {
-  min-width: 0;
-  box-sizing: border-box;
-  border-radius: 20px;
-  overflow-wrap: anywhere;
+.rumi-badges-earned {
+  grid-template-columns: repeat(auto-fill, min(100%, var(--badge-width)));
+  gap: 24px;
 }
-.rumi-badge-card { --rumi-tint: 56%; --rumi-sy: 3px; --rumi-sb: 10px; --rumi-sa: .075; }
-.rumi-badge-face {
-  display: grid;
-  justify-items: center;
-  gap: 14px;
-  padding: 24px 20px 20px;
-  text-align: center;
+.rumi-badges-unearned {
+  grid-template-columns: repeat(auto-fill, min(100%, var(--badge-unearned-width)));
+  gap: 16px;
 }
-.rumi-badge-medallion {
-  --badge-rim: var(--dsw-alias-label-tertiary);
-  --badge-tint: 10%;
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 96px;
-  height: 96px;
-  border-radius: 50%;
-  corner-shape: round;
-  color: var(--dsw-alias-label-secondary);
-  background:
-    radial-gradient(ellipse at 34% 0%, color-mix(in srgb, var(--dsw-alias-bg-layer-2) 80%, transparent), transparent 72%),
-    color-mix(in srgb, var(--badge-rim) var(--badge-tint), var(--dsw-alias-bg-layer-1));
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--badge-rim) 40%, var(--dsw-alias-border-l2)),
-    inset 0 2px 3px color-mix(in srgb, var(--dsw-alias-bg-layer-2) 90%, transparent),
-    0 4px 12px color-mix(in srgb, var(--badge-rim) 18%, transparent);
+.rumi-badges-divider {
+  block-size: 1px;
+  margin: 40px 0 32px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--dsw-alias-border-l2) 95%, transparent),
+    color-mix(in srgb, var(--dsw-alias-border-l2) 45%, transparent) 65%,
+    transparent);
 }
-.rumi-badge-medallion::before {
-  content: '';
-  position: absolute;
-  inset: 7px;
-  border: 1px solid color-mix(in srgb, var(--badge-rim) 25%, var(--dsw-alias-border-l2));
-  border-radius: inherit;
-  corner-shape: inherit;
-}
-.rumi-badge-card[data-earned] .rumi-badge-medallion {
-  --badge-rim: var(--dsw-alias-state-done-primary);
-  --badge-tint: 24%;
-  color: var(--badge-rim);
-}
-.rumi-badge-card h2 { margin: 0; font-size: 16px; font-weight: 500; line-height: 20px; letter-spacing: -.012em; }
+
+.rumi-badge-card { min-width: 0; overflow-wrap: anywhere; }
 .rumi-badge-projects p { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 1.5; }
-.rumi-badge-projects { padding: 0 20px; }
+.rumi-badge-projects { margin: 8px 8px 0; }
 .rumi-badge-projects summary {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 0;
-  border-top: 1px solid var(--dsw-alias-border-l2); font-size: 13px; font-weight: 500; cursor: pointer; list-style: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px; font-weight: 500; cursor: pointer; list-style: none;
 }
 .rumi-badge-projects summary::-webkit-details-marker { display: none; }
-.rumi-badge-projects summary:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
+.rumi-badge-projects summary:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 6px; }
 .rumi-badge-projects[open] summary svg { transform: rotate(90deg); }
 .rumi-badge-projects ul { list-style: none; padding: 0 0 16px; margin: 0; display: grid; gap: 12px; }
-.rumi-badge-projects h3 { margin: 0 0 2px; font-size: 13px; font-weight: 500; }
+.rumi-badge-projects h3 { margin: 0 0 2px; font-size: 13px; font-weight: 500; color: var(--dsw-alias-label-primary); }
 .rumi-badge-projects .rumi-badge-checked { margin-top: 4px; font-size: 12px; }
-.rumi-badges-skeleton { height: 174px; background: var(--dsw-alias-bg-layer-1); }
+.rumi-badges-skeleton { aspect-ratio: 3 / 4; border-radius: 26px; background: var(--dsw-alias-bg-layer-1); }
 .rumi-badges-button[aria-pressed=true] { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-1); }
 
 .rumi-badge-announcement {
@@ -96,29 +83,75 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* SwiftUI Liquid Glass material tokens */
+.rumi-badges, .rumi-badge-reveal {
+  --badge-width: 216px;
+  --badge-unearned-width: 144px;
+  --badge-glass-base: var(--dsw-static-neutral-00);
+  --badge-specular: var(--dsw-static-neutral-00);
+  --badge-shadow: var(--dsw-static-neutral-bluish-1000);
+  --badge-tint: var(--dsw-static-blue-500);
+  --badge-tint-soft: var(--dsw-static-blue-400);
+  --badge-ink: var(--dsw-static-blue-600);
+}
+[data-ds-dark-theme] :is(.rumi-badges, .rumi-badge-reveal) {
+  --badge-glass-base: var(--dsw-static-neutral-bluish-800);
+  --badge-shadow: var(--dsw-static-neutral-1000);
+  --badge-ink: var(--dsw-static-blue-300);
+}
+
+/* Per-mechanism Apple Liquid Glass tints */
+[data-kind='barrel-hinge'] {
+  --badge-tint: var(--dsw-static-blue-500);
+  --badge-tint-soft: var(--dsw-static-blue-300);
+  --badge-ink: var(--dsw-static-blue-600);
+}
+[data-kind='living-hinge'] {
+  --badge-tint: var(--dsw-static-green-500);
+  --badge-tint-soft: var(--dsw-static-green-400);
+  --badge-ink: color-mix(in srgb, var(--dsw-static-green-500) 76%, var(--dsw-static-green-900));
+}
+[data-kind='wheel-and-axle'] {
+  --badge-tint: var(--dsw-static-amber-500);
+  --badge-tint-soft: var(--dsw-static-amber-400);
+  --badge-ink: var(--dsw-static-amber-600);
+}
+[data-kind='dovetail-slide'] {
+  --badge-tint: var(--dsw-static-deepseek-500);
+  --badge-tint-soft: var(--dsw-static-deepseek-300);
+  --badge-ink: var(--dsw-static-deepseek-600);
+}
+[data-kind='gear-pair'] {
+  --badge-tint: var(--dsw-static-violet-600);
+  --badge-tint-soft: var(--dsw-static-violet-400);
+  --badge-ink: var(--dsw-static-violet-600);
+}
+[data-kind='rack-and-pinion'] {
+  --badge-tint: color-mix(in srgb, var(--dsw-static-red-400) 72%, var(--dsw-static-amber-500));
+  --badge-tint-soft: color-mix(in srgb, var(--dsw-static-red-400) 58%, var(--dsw-static-amber-400));
+  --badge-ink: color-mix(in srgb, var(--dsw-static-red-500) 72%, var(--dsw-static-amber-600));
+}
+
+[data-ds-dark-theme] [data-kind='barrel-hinge'] { --badge-ink: var(--dsw-static-blue-300); }
+[data-ds-dark-theme] [data-kind='living-hinge'] { --badge-ink: var(--dsw-static-green-400); }
+[data-ds-dark-theme] [data-kind='wheel-and-axle'] { --badge-ink: var(--dsw-static-amber-400); }
+[data-ds-dark-theme] [data-kind='dovetail-slide'] { --badge-ink: var(--dsw-static-deepseek-300); }
+[data-ds-dark-theme] [data-kind='gear-pair'] { --badge-ink: var(--dsw-static-violet-400); }
+[data-ds-dark-theme] [data-kind='rack-and-pinion'] {
+  --badge-ink: color-mix(in srgb, var(--dsw-static-red-400) 64%, var(--dsw-static-amber-400));
+}
+
 .rumi-badge-reveal {
-  --badge-glass: var(--dsw-static-neutral-150);
-  --badge-silver: var(--dsw-static-neutral-bluish-400);
-  --badge-pearl: var(--dsw-static-neutral-bluish-300);
-  --badge-light: var(--dsw-static-neutral-00);
-  --badge-steel: var(--dsw-static-neutral-500);
-  --badge-edge: var(--dsw-static-neutral-bluish-750);
-  --badge-shadow: var(--dsw-static-neutral-800);
   position: fixed;
   inset: 0;
   z-index: 65;
   margin: auto;
-  inline-size: min(216px, calc(100% - 32px), calc(75dvh - 24px));
+  inline-size: min(var(--badge-width), calc(100% - 32px), calc(75dvh - 24px));
   block-size: fit-content;
   color: var(--dsw-alias-label-primary);
   transition: opacity 340ms ease-out;
   -webkit-app-region: no-drag;
-}
-[data-ds-dark-theme] .rumi-badge-reveal {
-  --badge-glass: var(--dsw-static-neutral-bluish-800);
-  --badge-pearl: var(--dsw-static-neutral-bluish-600);
-  --badge-steel: var(--dsw-static-neutral-bluish-500);
-  --badge-shadow: var(--dsw-static-neutral-900);
 }
 @starting-style { .rumi-badge-reveal { opacity: 0; } }
 .rumi-badge-reveal[data-leaving] { opacity: 0; transition-duration: var(--badge-fade); }
@@ -128,124 +161,305 @@
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background: color-mix(in srgb, var(--badge-shadow) 6%, transparent);
-  backdrop-filter: saturate(.25);
+  background: color-mix(in srgb, var(--badge-shadow) 8%, transparent);
+  backdrop-filter: blur(4px) saturate(.7);
+  -webkit-backdrop-filter: blur(4px) saturate(.7);
 }
 .rumi-badge-reveal-scene { position: relative; perspective: 960px; }
 .rumi-badge-reveal-scene::before {
   content: '';
   position: absolute;
-  inset: -18%;
+  inset: -24%;
   pointer-events: none;
   opacity: 0;
-  background: radial-gradient(ellipse, color-mix(in srgb, var(--badge-silver) 38%, transparent) 21%, transparent 68%);
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--badge-tint) 34%, transparent) 18%, transparent 66%);
   animation: rumi-badge-reveal-impact 680ms 1100ms ease-out both;
 }
 .rumi-badge-reveal-flight, .rumi-badge-reveal-plate { position: relative; transform-style: preserve-3d; }
 .rumi-badge-reveal-flight { animation: rumi-badge-reveal-land 1560ms both; }
 .rumi-badge-reveal-plate { animation: rumi-badge-reveal-spin 1160ms cubic-bezier(.43, 0, .26, 1) both; }
-.rumi-badge-reveal-side {
+
+/* Liquid Glass card surface — identical between reveal and earned collection */
+.rumi-badge-surface {
   position: relative;
   overflow: hidden;
-  border-radius: 20px;
+  border-radius: 26px;
   backface-visibility: hidden;
-  backdrop-filter: blur(22px);
-  background-color: color-mix(in srgb, var(--badge-glass) 96%, transparent);
+  backdrop-filter: blur(28px) saturate(190%) brightness(1.04);
+  -webkit-backdrop-filter: blur(28px) saturate(190%) brightness(1.04);
+  background-color: color-mix(in srgb, var(--badge-glass-base) 58%, color-mix(in srgb, var(--badge-tint) 9%, transparent));
   background-image:
-    radial-gradient(ellipse 80% 75% at 17% 0%, color-mix(in srgb, var(--badge-light) 35%, transparent), transparent 83%),
-    radial-gradient(ellipse 43% 30% at 13% 110%, color-mix(in srgb, var(--badge-silver) 44%, transparent), transparent),
-    radial-gradient(ellipse 63% 41% at 96% 103%, color-mix(in srgb, var(--badge-pearl) 33%, transparent), transparent);
+    radial-gradient(ellipse 90% 62% at 18% 0%, color-mix(in srgb, var(--badge-specular) 68%, transparent), transparent 72%),
+    radial-gradient(ellipse 75% 58% at 50% 34%, color-mix(in srgb, var(--badge-tint-soft) 24%, transparent), transparent 76%),
+    radial-gradient(ellipse 70% 42% at 88% 102%, color-mix(in srgb, var(--badge-tint) 16%, transparent), transparent 74%);
   box-shadow:
-    inset 2px 3px 4px -2px color-mix(in srgb, var(--badge-light) 86%, transparent),
-    inset -2px -3px 5px -2px color-mix(in srgb, var(--badge-light) 62%, transparent),
-    inset 0 -6px 13px -8px color-mix(in srgb, var(--badge-shadow) 38%, transparent),
-    0 17px 30px -11px color-mix(in srgb, var(--badge-shadow) 36%, transparent),
-    0 3px 6px -3px color-mix(in srgb, var(--badge-shadow) 22%, transparent);
+    inset 0 1.5px 1px 0 color-mix(in srgb, var(--badge-specular) 88%, transparent),
+    inset 0 -1px 1.5px 0 color-mix(in srgb, var(--badge-specular) 36%, transparent),
+    inset 0 0 18px 0 color-mix(in srgb, var(--badge-specular) 22%, transparent),
+    0 0 0 .5px color-mix(in srgb, var(--badge-shadow) 8%, transparent),
+    0 18px 38px -14px color-mix(in srgb, var(--badge-shadow) 24%, transparent),
+    0 6px 14px -6px color-mix(in srgb, var(--badge-tint) 18%, transparent);
+  transition: transform 180ms cubic-bezier(.2, .8, .2, 1), box-shadow 180ms ease;
 }
-.rumi-badge-reveal-side::before {
+[data-ds-dark-theme] .rumi-badge-surface {
+  backdrop-filter: blur(28px) saturate(185%) brightness(1.1);
+  -webkit-backdrop-filter: blur(28px) saturate(185%) brightness(1.1);
+  background-color: color-mix(in srgb, var(--badge-glass-base) 50%, color-mix(in srgb, var(--badge-tint) 14%, transparent));
+  background-image:
+    radial-gradient(ellipse 90% 62% at 18% 0%, color-mix(in srgb, var(--badge-specular) 22%, transparent), transparent 72%),
+    radial-gradient(ellipse 75% 58% at 50% 34%, color-mix(in srgb, var(--badge-tint-soft) 22%, transparent), transparent 76%),
+    radial-gradient(ellipse 70% 42% at 88% 102%, color-mix(in srgb, var(--badge-tint) 20%, transparent), transparent 74%);
+  box-shadow:
+    inset 0 1.5px 1px 0 color-mix(in srgb, var(--badge-specular) 34%, transparent),
+    inset 0 -1px 1.5px 0 color-mix(in srgb, var(--badge-specular) 14%, transparent),
+    inset 0 0 20px 0 color-mix(in srgb, var(--badge-tint-soft) 10%, transparent),
+    0 0 0 .5px color-mix(in srgb, var(--badge-specular) 16%, transparent),
+    0 22px 44px -14px color-mix(in srgb, var(--badge-shadow) 58%, transparent),
+    0 6px 16px -6px color-mix(in srgb, var(--badge-tint) 22%, transparent);
+}
+
+/* Specular diagonal sheen */
+.rumi-badge-surface::before {
   content: '';
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(155deg, transparent 24%, color-mix(in srgb, var(--badge-light) 17%, transparent) 37%,
-    transparent 38.5% 42%, color-mix(in srgb, var(--badge-light) 9%, transparent) 45%, transparent 57%);
+  background: linear-gradient(142deg,
+    transparent 20%,
+    color-mix(in srgb, var(--badge-specular) 26%, transparent) 36%,
+    transparent 39% 43%,
+    color-mix(in srgb, var(--badge-specular) 12%, transparent) 46%,
+    transparent 58%);
   background-size: 210% 145%;
+  background-position: 22% 28%;
+}
+[data-ds-dark-theme] .rumi-badge-surface::before {
+  background: linear-gradient(142deg,
+    transparent 20%,
+    color-mix(in srgb, var(--badge-specular) 13%, transparent) 36%,
+    transparent 39% 43%,
+    color-mix(in srgb, var(--badge-specular) 6%, transparent) 46%,
+    transparent 58%);
+  background-size: 210% 145%;
+  background-position: 22% 28%;
+}
+
+/* Directional Liquid Glass optical rim */
+.rumi-badge-surface::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(150deg,
+    color-mix(in srgb, var(--badge-specular) 92%, transparent) 0%,
+    color-mix(in srgb, var(--badge-specular) 34%, color-mix(in srgb, var(--badge-tint-soft) 28%, transparent)) 38%,
+    color-mix(in srgb, var(--badge-tint) 18%, transparent) 72%,
+    color-mix(in srgb, var(--badge-specular) 58%, transparent) 100%);
+  -webkit-mask: linear-gradient(var(--badge-specular) 0 0) content-box, linear-gradient(var(--badge-specular) 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(var(--badge-specular) 0 0) content-box, linear-gradient(var(--badge-specular) 0 0);
+  mask-composite: exclude;
+}
+[data-ds-dark-theme] .rumi-badge-surface::after {
+  background: linear-gradient(150deg,
+    color-mix(in srgb, var(--badge-specular) 48%, transparent) 0%,
+    color-mix(in srgb, var(--badge-specular) 14%, color-mix(in srgb, var(--badge-tint-soft) 24%, transparent)) 42%,
+    color-mix(in srgb, var(--badge-tint) 16%, transparent) 74%,
+    color-mix(in srgb, var(--badge-specular) 26%, transparent) 100%);
+}
+
+.rumi-badge-reveal .rumi-badge-surface::before {
   animation: rumi-badge-reveal-reflection 1550ms cubic-bezier(.34, 0, .22, 1) both;
 }
-.rumi-badge-reveal-front {
+
+@media (hover: hover) {
+  .rumi-badge-card[data-earned]:hover .rumi-badge-surface {
+    transform: translateY(-2px);
+    box-shadow:
+      inset 0 1.5px 1px 0 color-mix(in srgb, var(--badge-specular) 94%, transparent),
+      inset 0 -1px 1.5px 0 color-mix(in srgb, var(--badge-specular) 42%, transparent),
+      inset 0 0 20px 0 color-mix(in srgb, var(--badge-specular) 26%, transparent),
+      0 0 0 .5px color-mix(in srgb, var(--badge-shadow) 9%, transparent),
+      0 22px 44px -14px color-mix(in srgb, var(--badge-shadow) 28%, transparent),
+      0 8px 18px -6px color-mix(in srgb, var(--badge-tint) 24%, transparent);
+  }
+  [data-ds-dark-theme] .rumi-badge-card[data-earned]:hover .rumi-badge-surface {
+    box-shadow:
+      inset 0 1.5px 1px 0 color-mix(in srgb, var(--badge-specular) 42%, transparent),
+      inset 0 -1px 1.5px 0 color-mix(in srgb, var(--badge-specular) 18%, transparent),
+      inset 0 0 24px 0 color-mix(in srgb, var(--badge-tint-soft) 14%, transparent),
+      0 0 0 .5px color-mix(in srgb, var(--badge-specular) 22%, transparent),
+      0 26px 48px -14px color-mix(in srgb, var(--badge-shadow) 66%, transparent),
+      0 8px 20px -6px color-mix(in srgb, var(--badge-tint) 28%, transparent);
+  }
+}
+
+.rumi-badge-face {
   box-sizing: border-box;
   aspect-ratio: 3 / 4;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  padding: 24px 16px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 24px 18px 22px;
   text-align: center;
-  transform: translateZ(0);
 }
+.rumi-badge-reveal .rumi-badge-face { transform: translateZ(0); }
+
 .rumi-badge-reveal-back {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
-  color: var(--dsw-alias-label-secondary);
   transform: rotateY(180deg) translateZ(5px);
 }
-.rumi-badge-reveal-art { position: relative; display: grid; place-items: center; perspective: 240px; }
-.rumi-badge-reveal-art svg, .rumi-badge-reveal-back svg {
+
+/* Inner circular Liquid Glass medallion */
+.rumi-badge-art {
   position: relative;
-  max-inline-size: 100%;
-  max-block-size: 100%;
-  color: var(--dsw-alias-label-secondary);
-  fill: color-mix(in srgb, var(--badge-silver) 28%, transparent);
-  filter: drop-shadow(0 1px 1px color-mix(in srgb, var(--badge-light) 70%, transparent));
-}
-.rumi-badge-reveal-hinge {
   display: grid;
-  grid-template-columns: 1fr 7px 1fr;
-  inline-size: min(104px, 100%);
-  block-size: min(74px, 100%);
-  transform: rotateX(21deg) rotateZ(-17deg);
-  transform-style: preserve-3d;
+  place-items: center;
 }
-.rumi-badge-reveal-hinge::before, .rumi-badge-reveal-hinge::after {
-  content: '';
-  border-radius: 9px 3px 3px 9px;
-  transform-origin: right center;
-  transform: rotateY(34deg);
-  background: linear-gradient(137deg, var(--badge-light), var(--badge-silver) 37%, var(--badge-steel) 85%);
-  box-shadow: inset 1px 2px 3px -1px var(--badge-light), inset -2px -3px 3px -2px var(--badge-edge),
-    0 2px 0 var(--badge-edge), 0 7px 10px -5px var(--badge-edge);
+.rumi-badge-medallion {
+  position: relative;
+  display: grid;
+  place-items: center;
+  inline-size: 112px;
+  block-size: 112px;
+  border-radius: 50%;
+  corner-shape: round;
+  color: var(--badge-ink);
+  background:
+    radial-gradient(circle at 30% 22%, color-mix(in srgb, var(--badge-specular) 82%, transparent), transparent 56%),
+    radial-gradient(circle at 50% 60%, color-mix(in srgb, var(--badge-tint-soft) 28%, transparent), color-mix(in srgb, var(--badge-tint) 10%, transparent) 72%);
+  box-shadow:
+    inset 0 1.5px 2px color-mix(in srgb, var(--badge-specular) 92%, transparent),
+    inset 0 -2px 5px color-mix(in srgb, var(--badge-tint) 18%, transparent),
+    0 1px 2px color-mix(in srgb, var(--badge-specular) 70%, transparent),
+    0 8px 20px -8px color-mix(in srgb, var(--badge-tint) 30%, transparent);
 }
-.rumi-badge-reveal-hinge::after {
-  border-radius: 3px 9px 9px 3px;
-  transform-origin: left center;
-  transform: rotateY(-25deg);
-  background: linear-gradient(142deg, var(--badge-light), var(--badge-silver) 55%, var(--badge-steel));
+[data-ds-dark-theme] .rumi-badge-medallion {
+  background:
+    radial-gradient(circle at 30% 22%, color-mix(in srgb, var(--badge-specular) 26%, transparent), transparent 56%),
+    radial-gradient(circle at 50% 60%, color-mix(in srgb, var(--badge-tint-soft) 26%, transparent), color-mix(in srgb, var(--badge-tint) 12%, transparent) 72%);
+  box-shadow:
+    inset 0 1.5px 2px color-mix(in srgb, var(--badge-specular) 32%, transparent),
+    inset 0 -2px 6px color-mix(in srgb, var(--badge-shadow) 38%, transparent),
+    0 8px 20px -8px color-mix(in srgb, var(--badge-shadow) 55%, transparent);
 }
-.rumi-badge-reveal-hinge span {
-  margin-block: 1px;
-  background: linear-gradient(90deg, var(--badge-steel), var(--badge-edge) 42%, var(--badge-steel));
-  box-shadow: 0 2px 0 var(--badge-edge);
+.rumi-badge-emblem {
+  inline-size: 62px;
+  block-size: 62px;
+  overflow: visible;
+  filter: drop-shadow(0 1px 1px color-mix(in srgb, var(--badge-specular) 60%, transparent));
 }
-.rumi-badge-reveal p { margin: 0; }
-.rumi-badge-reveal-label, .rumi-badge-reveal-project {
+[data-ds-dark-theme] .rumi-badge-emblem {
+  filter: drop-shadow(0 2px 6px color-mix(in srgb, var(--badge-shadow) 45%, transparent));
+}
+.rumi-badge-emblem-fill {
+  fill: color-mix(in srgb, var(--badge-tint) 24%, transparent);
+  stroke: none;
+}
+.rumi-badge-emblem-stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+}
+
+.rumi-badge-face :is(p, h2) { margin: 0; }
+.rumi-badge-caption {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(18px, auto);
+  gap: 4px;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+.rumi-badge-title {
+  color: var(--dsw-alias-label-primary);
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -.022em;
+  line-height: 1.18;
+}
+.rumi-badge-project {
   position: relative;
   color: var(--dsw-alias-label-secondary);
   font-size: 13px;
   line-height: 18px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
-.rumi-badge-reveal-label { font-weight: 500; }
-.rumi-badge-reveal-content { position: relative; display: grid; gap: 4px; min-inline-size: 0; overflow-wrap: anywhere; }
-.rumi-badge-reveal-title { font-size: 21px; font-weight: 500; letter-spacing: -.025em; line-height: 1.15; }
-.rumi-badge-reveal-project { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+
+/* Unearned badges: visually quieter, smaller, muted monochrome glass */
+.rumi-badge-face[data-locked] {
+  border-radius: 20px;
+  padding: 16px 12px 15px;
+  gap: 8px;
+  backdrop-filter: blur(14px) saturate(110%);
+  -webkit-backdrop-filter: blur(14px) saturate(110%);
+  background-color: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 52%, transparent);
+  background-image: linear-gradient(165deg, color-mix(in srgb, var(--badge-specular) 24%, transparent), transparent 64%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--badge-specular) 45%, transparent),
+    0 0 0 .5px color-mix(in srgb, var(--dsw-alias-border-l2) 85%, transparent),
+    0 2px 6px -3px color-mix(in srgb, var(--badge-shadow) 8%, transparent);
+}
+[data-ds-dark-theme] .rumi-badge-face[data-locked] {
+  background-color: color-mix(in srgb, var(--dsw-static-neutral-bluish-850) 44%, transparent);
+  background-image: linear-gradient(165deg, color-mix(in srgb, var(--badge-specular) 6%, transparent), transparent 64%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--badge-specular) 10%, transparent),
+    0 0 0 .5px color-mix(in srgb, var(--badge-specular) 8%, transparent),
+    0 2px 8px -3px color-mix(in srgb, var(--badge-shadow) 32%, transparent);
+}
+.rumi-badge-face[data-locked]::before { display: none; }
+.rumi-badge-face[data-locked]::after { opacity: .28; filter: saturate(0); }
+.rumi-badge-face[data-locked] .rumi-badge-medallion {
+  inline-size: 64px;
+  block-size: 64px;
+  color: var(--dsw-alias-label-tertiary);
+  background: color-mix(in srgb, var(--dsw-alias-label-tertiary) 7%, transparent);
+  box-shadow: inset 0 1px 1px color-mix(in srgb, var(--badge-specular) 32%, transparent);
+}
+[data-ds-dark-theme] .rumi-badge-face[data-locked] .rumi-badge-medallion {
+  background: color-mix(in srgb, var(--badge-specular) 5%, transparent);
+  box-shadow: inset 0 1px 1px color-mix(in srgb, var(--badge-specular) 8%, transparent);
+}
+.rumi-badge-face[data-locked] .rumi-badge-emblem {
+  inline-size: 36px;
+  block-size: 36px;
+  opacity: .56;
+  filter: none;
+}
+.rumi-badge-face[data-locked] .rumi-badge-emblem-fill {
+  fill: color-mix(in srgb, var(--dsw-alias-label-tertiary) 12%, transparent);
+}
+.rumi-badge-face[data-locked] .rumi-badge-caption {
+  grid-template-rows: auto;
+}
+.rumi-badge-face[data-locked] .rumi-badge-title {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  letter-spacing: -.01em;
+  line-height: 1.25;
+}
+
 .rumi-badge-reveal .rumi-badge-reveal-dismiss {
   position: absolute;
-  inset-block-start: 6px;
-  inset-inline-end: 6px;
+  inset-block-start: 8px;
+  inset-inline-end: 8px;
   inline-size: 32px;
   block-size: 32px;
   padding: 0;
   border-radius: 50%;
   corner-shape: round;
+}
+@container rumi-badges (width < 452px) {
+  .rumi-badges-earned { justify-content: center; }
 }
 @media (hover: hover) {
   .rumi-badge-reveal:not(:hover, :focus-within) .rumi-badge-reveal-dismiss { opacity: 0; }
@@ -268,15 +482,17 @@
 @keyframes rumi-badge-reveal-reflection {
   from { background-position: 100% 30%; }
   85% { background-position: 18% 30%; }
-  to { background-position: 20% 30%; }
+  to { background-position: 22% 28%; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .rumi-badge-reveal { transition: none; }
+  .rumi-badge-reveal, .rumi-badge-surface { transition: none; }
+  .rumi-badge-card[data-earned]:hover .rumi-badge-surface { transform: none; }
   .rumi-badge-reveal[data-leaving] { opacity: 1; }
   .rumi-badge-reveal-flight, .rumi-badge-reveal-plate, .rumi-badge-reveal-scene::before,
-  .rumi-badge-reveal-side::before { animation: none; }
+  .rumi-badge-reveal .rumi-badge-surface::before { animation: none; }
 }
 @media (prefers-reduced-transparency: reduce) {
-  .rumi-badge-card::before, .rumi-badge-reveal-side { background: var(--dsw-alias-bg-layer-1); backdrop-filter: none; }
-  .rumi-badge-reveal::before { backdrop-filter: none; }
+  .rumi-badge-surface { background: var(--dsw-alias-bg-layer-1); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .rumi-badge-face[data-locked] { background: var(--dsw-alias-bg-layer-1); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .rumi-badge-reveal::before { backdrop-filter: none; -webkit-backdrop-filter: none; }
 }

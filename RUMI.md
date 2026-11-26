@@ -16,7 +16,7 @@ A DeepSeek Harness app built for my kids to play, make things, and learn alongsi
 | configuration | `~/.rumi/.credentials.yaml`, plus Rumi’s own `AGENTS.md`, skills, and presets under `~/.rumi` |
 | projects | `~/.rumi/workspace` |
 | data root | `~/Library/Application Support/dsh-rumi` |
-| icon | `apps/rumi/resources/icon*.png` — the word "rumi" |
+| icon | `apps/rumi/resources/icon*.png` — sculpted clay lightbulb on a cross-ply 3D-printed filament tile |
 | window title | `Rumi`, set by the native shell |
 
 Both apps run at the same time and share nothing: separate bundle ids, single-instance locks, homes, profiles, Sessions, credentials, instructions, and plugin sets. The Electron main process points `DSH_HOME` at `~/.rumi` before the first path resolves, so the profile, Session and storage roots, credentials, `AGENTS.md`, skills, presets, provisioned runtimes, and every bundled plugin that reads the home all land under Rumi's own directory. Nothing resolves `~/.dsh`, which belongs to DeepSeek Harness.

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="apps/rumi/resources/icon-macos.png" alt="Rumi" width="88" height="88" />
+  <img src="apps/rumi/resources/icon.png" alt="Rumi" width="96" height="96" />
   <h1>Rumi</h1>
   <p>A macOS learning workshop where children design, test, and 3D-print real mechanical things alongside an agent.</p>
   <p>

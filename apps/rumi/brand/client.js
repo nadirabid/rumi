@@ -14,11 +14,7 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
 
-    /**
-     * The wordmark, not a glyph: the app icon is the word "rumi" set in Arial,
-     * and the sidebar and hero repeat it in the same face so the mark inside
-     * the app matches the one in the Dock.
-     */
+    /** Plain lowercase "rumi" wordmark rendered in the sidebar and conversation hero. */
     const FONT = 'Arial, Helvetica, "Helvetica Neue", sans-serif';
 
     /** Plain wordmark; `size` is the caller's icon box, scaled to set type. */

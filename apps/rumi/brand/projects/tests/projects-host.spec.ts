@@ -2,8 +2,8 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
-import { apply, createProjectStore } from '../index.js'
+import { afterEach, expect, it, vi } from 'vitest'
+import { apply, createProjectStore, createProjectTypes } from '../index.js'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -96,6 +96,9 @@ it('serves the gallery from the project scope workspace over the connection rout
   })
   const request = (path: string, init?: RequestInit) => routes.get(path.split('?')[0])!(new Request(`http://rumi${path}`, init))
 
+  const onOpen = vi.fn()
+  const types = provided.get('rumiProjectTypes') as ReturnType<typeof createProjectTypes>
+  types.register({ id: 'print', isDefault: true, onOpen })
   const created = await (await request('/api/rumi-projects', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Tiny rover' }),
   })).json()
@@ -113,6 +116,12 @@ it('serves the gallery from the project scope workspace over the connection rout
     body: JSON.stringify({ projectId: created.project.id, sessionId: 'session-9' }),
   })).json()
   expect(attached.project.activeSessionId).toBe('session-9')
+  expect(onOpen).toHaveBeenCalledWith(attached.project)
+  await request('/api/rumi-projects/session', {
+    method: 'POST', body: JSON.stringify({ projectId: created.project.id, sessionId: 'session-9' }),
+  })
+  expect(onOpen).toHaveBeenCalledTimes(2)
+
 
   const missing = await request('/api/rumi-projects/session', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId: 'nope' }),

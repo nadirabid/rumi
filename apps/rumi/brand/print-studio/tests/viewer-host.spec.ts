@@ -456,7 +456,7 @@ it('highlights a feature by name when the named cursor supplies no pointing refe
     const feature = {
       id: 'pin-clearance', name: 'Pin clearance', aliases: ['pin gap'],
       description: 'The space that lets the pin turn.',
-      location: { kind: 'volume', boxes: [[-2, -1, 0, 2, 1, 6]] },
+      location: { kind: 'point', point: [0, 0, 3] },
     }
     await writeFile(join(directory, 'model.regions.json'), JSON.stringify({ sourceHash, regions: [feature] }))
     const { design } = await f.state()
@@ -1251,7 +1251,7 @@ def Mesh "Panel"
     await saveMap([partial], '0'.repeat(64))
     expect(await f.run('viewer_analyze_surfaces', args)).toMatchObject({ status: 'outdated_region_map' })
     await saveMap([partial, other, { ...other, id: 'corner-detail', parentId: 'panel-part' },
-      { id: 'clearance', name: 'Clearance', location: { kind: 'volume', boxes: [[-1, -1, -1, 100, 100, 100]] } }])
+      { id: 'clearance', name: 'Clearance', location: { kind: 'point', point: [0, 0, 0] } }])
     const audit = await f.run('viewer_analyze_surfaces', args)
     expect(audit).toMatchObject({
       status: 'analyzed', sourceHash,

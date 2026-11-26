@@ -26,6 +26,7 @@ import { applyBlender } from './blender/host.js'
 import { applySkillReminders, createProjectSkillReviewStore, skillReviewDomain } from './skill-reminders.js'
 import { createBadgeReviewConfig, capturePrintBadgeRevisions, reviewPrintBadges } from './badge-review.js'
 import { createBadgeHost } from './badges-host.js'
+import { registerRegionAudits } from './viewer/region-audit.js'
 import { applyViewer } from './viewer/host.js'
 import { applyContextRetention } from './viewer/context-retention.js'
 import * as analogWorkflow from './viewer/analog/workflow.js'
@@ -235,6 +236,7 @@ export async function apply(ctx, config) {
   await applyContextRetention(ctx, createDeveloperMessage)
   ctx.plugin(analogWorkflow)
   ctx.plugin(mechanicalWorkflow)
+  const checkNamedRegions = registerRegionAudits(ctx)
   applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory, config.viewerLoadTimeoutMs, config)
   applyBlender(ctx, defineTool, config)
   const legacySkillReviews = await ctx.storageDomain.open(skillReviewDomain).catch(() => {
@@ -247,7 +249,7 @@ export async function apply(ctx, config) {
     createUserMessage, skillReviews)
   // A project-type plugin contributes; it does not own the creation flow.
   ctx.inject(['rumiProjectTypes'], (scoped) => {
-    scoped.effect(() => scoped.rumiProjectTypes.register(PRINT_TYPE), 'print-studio: project type')
+    scoped.effect(() => scoped.rumiProjectTypes.register({ ...PRINT_TYPE, onOpen: checkNamedRegions }), 'print-studio: project type')
   })
   const register = (path, methods, fetch) => {
     ctx.effect(() => ctx.connection.fetch.register({

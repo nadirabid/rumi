@@ -24,6 +24,7 @@ import '../brand/print-studio/tests/analog.spec.ts'
 
 import '../brand/print-studio/tests/model-focus.spec.ts'
 import '../brand/print-studio/tests/model-regions.spec.ts'
+import '../brand/print-studio/tests/region-audit.spec.ts'
 
 import '../brand/print-studio/tests/context-retention.spec.ts'
 import '../brand/print-studio/tests/viewer-load-receipts.spec.ts'

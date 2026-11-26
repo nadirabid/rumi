@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/rumi/brand/print-studio/upgrade-guide/named-region-maps/README.md
+/:
+  en: 94b71c6f86d73b24
+  zh: eb20c78b0e6425b2
+/named-regions-in-saved-projects:
+  en: 267576420e7e0bef
+  zh: 22f582512f01d7c0
+/named-regions-in-saved-projects/change:
+  en: d04085f50ad62f55
+  zh: c17fa36d35ed683d
+/named-regions-in-saved-projects/migration:
+  en: 654249901b08a09a
+  zh: ee8f476ecfd1fef2

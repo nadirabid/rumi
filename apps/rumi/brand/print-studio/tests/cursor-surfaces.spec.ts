@@ -106,16 +106,14 @@ it('picks and draws the same named faces with viewer placement', () => {
   } finally { geometry.dispose(); material.dispose() }
 })
 
-it('picks named curves and volumes in empty space without claiming hidden geometry', () => {
+it('picks named curves and points in empty space without claiming hidden geometry', () => {
   const placement = new THREE.Group()
   const index = createNamedRegionIndex(placement, placement, [
     { id: 'opening', name: 'Opening', location: { kind: 'curve', points: [[0, 0, 3], [4, 0, 3]] } },
-    { id: 'clearance', name: 'Clearance', location: { kind: 'volume', boxes: [[-3, -1, 0, -1, 1, 2]] } },
     { id: 'pivot', name: 'Pivot', location: { kind: 'point', point: [2, 2, 0] } },
   ])
   const ray = (x: number, y: number) => new THREE.Ray(new THREE.Vector3(x, y, 10), new THREE.Vector3(0, 0, -1))
   expect(index.pick(null, null, ray(2, 0), 0.001)?.named.region.id).toBe('opening')
-  expect(index.pick(null, null, ray(-2, 0), 0.001)?.named.region.id).toBe('clearance')
   expect(index.pick(null, null, ray(2, 2), 0.001)?.named.region.id).toBe('pivot')
   expect(index.pick({ point: new THREE.Vector3(2, 0, 5) }, null, ray(2, 0), 0.001)).toBeNull()
 })

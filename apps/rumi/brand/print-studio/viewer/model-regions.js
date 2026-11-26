@@ -1,14 +1,15 @@
 /** Revision-bound feature names, descriptions, and model-local geometry. */
 
 /** @typedef {{partPath: string[], surfaceIds?: number[], faceRanges?: number[][]}} SurfacePart */
-/** @typedef {{kind: 'surface', parts: SurfacePart[]} | {kind: 'curve', points: number[][], closed: boolean} | {kind: 'volume', boxes: number[][]} | {kind: 'point', point: number[]}} FeatureLocation */
-/** @typedef {{id: string, name: string, parentId?: string, description?: string, aliases?: string[], location: FeatureLocation, boxes?: number[][]}} ModelFeature */
+/** @typedef {{kind: 'surface', parts: SurfacePart[]} | {kind: 'curve', points: number[][], closed: boolean} | {kind: 'point', point: number[]}} FeatureLocation */
+/** @typedef {{id: string, name: string, parentId?: string, description?: string, aliases?: string[], location: FeatureLocation}} ModelFeature */
 /** @typedef {{regions: ModelFeature[], remainder: {id: string, name: string}|null}} FeatureMap */
 
 const textPattern = /^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+$/u
 const coordinate = n => Number.isFinite(n) && Math.abs(n) <= 1e6
 const maxFaces = 200_000
 const maxRegions = 256
+const featureFields = new Set(['id', 'name', 'parentId', 'description', 'aliases', 'location'])
 /** A saved map can contain thousands of disjoint triangle ranges for one sculpted feature. */
 export const MAX_REGION_MAP_BYTES = 2 * 1024 * 1024
 const featureKey = value => value.normalize('NFKC').toLowerCase().trim().replace(/\s+/gu, ' ')
@@ -26,16 +27,6 @@ function name(value) {
 
 function boundedArray(value, min, max) {
   return Array.isArray(value) && value.length >= min && value.length <= max
-}
-
-function boxes(value) {
-  if (!boundedArray(value, 1, 16)) throw new Error('Supply between 1 and 16 boxes for a region')
-  return value.map(box => {
-    if (!boundedArray(box, 6, 6) || !box.every(coordinate) || !box.slice(0, 3).every((n, i) => n < box[i + 3])) {
-      throw new Error('A box needs minimum and maximum XYZ coordinates in millimetres')
-    }
-    return [...box]
-  })
 }
 
 function point(value) {
@@ -84,9 +75,8 @@ function location(value) {
       })) throw new Error('Use distinct consecutive points for a curve')
       return { kind: 'curve', points: vertices, closed: closed ?? false }
     }
-    case 'volume': return { kind: 'volume', boxes: boxes(value.boxes) }
     case 'point': return { kind: 'point', point: point(value.point) }
-    default: throw new Error('Supply a surface, curve, volume, or point location for the region')
+    default: throw new Error('Supply a surface, curve, or point location for the region')
   }
 }
 
@@ -125,6 +115,7 @@ export function readModelRegions(value, hash) {
   const ids = new Set(['remainder'])
   const regions = value.regions.map(region => {
     if (!region || typeof region.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,47}$/u.test(region.id) || ids.has(region.id)) throw new Error('Use a distinct lowercase ID for each region')
+    if (Object.keys(region).some(key => !featureFields.has(key))) throw new Error(`Region "${region.id}": supply a named feature with a supported location`)
     ids.add(region.id)
     const feature = { id: region.id, name: name(region.name) }
     if (region.parentId !== undefined) {
@@ -136,11 +127,6 @@ export function readModelRegions(value, hash) {
       if (!boundedArray(region.aliases, 1, 8)) throw new Error('Supply up to 8 aliases for a region')
       feature.aliases = region.aliases.map(name)
     }
-    if (region.boxes !== undefined) {
-      if (region.location !== undefined) throw new Error('Supply one location for each region')
-      const legacyBoxes = boxes(region.boxes)
-      return { ...feature, location: { kind: 'volume', boxes: legacyBoxes }, boxes: legacyBoxes }
-    }
     try {
       return { ...feature, location: location(region.location) }
     } catch (error) {
@@ -150,16 +136,6 @@ export function readModelRegions(value, hash) {
   validateHierarchy(regions)
   const remainder = value.remainder === undefined ? null : { id: 'remainder', name: name(value.remainder) }
   return { regions, remainder }
-}
-
-/**
- * Identify maps with old box labels or only spatial guides for a model's physical features.
- * @param {FeatureMap} map Validated feature map for the saved model.
- * @returns {boolean} Whether model naming still needs mesh-backed selections.
- */
-export function needsSurfaceRegions(map) {
-  return map.regions.some(region => region.boxes)
-    || (map.regions.some(region => region.location.kind === 'volume') && !map.regions.some(region => region.location.kind === 'surface'))
 }
 
 /**
@@ -215,18 +191,6 @@ export function mentionedModelRegions(map, value) {
     if (match.regions.size === 1) for (const region of match.regions) accepted.add(region)
   }
   return [...accepted]
-}
-
-/**
- * Find a volume at the given model-local point. Earlier, more specific volumes take priority.
- * @param {FeatureMap} map A validated region map.
- * @param {number[]} point XYZ in saved model millimetres.
- * @returns {ModelFeature|{id: string, name: string}|null} Named volume, legacy remainder, or null.
- */
-export function modelRegionAt(map, point) {
-  const [x, y, z] = point
-  return map.regions.find(region => region.location.kind === 'volume' && region.location.boxes.some(([xmin, ymin, zmin, xmax, ymax, zmax]) =>
-    x >= xmin && x <= xmax && y >= ymin && y <= ymax && z >= zmin && z <= zmax)) ?? map.remainder
 }
 
 /**

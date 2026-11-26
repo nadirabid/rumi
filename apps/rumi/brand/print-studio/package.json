@@ -26,6 +26,7 @@
     "app-setup.js",
     "monitor.js",
     "skill-reminders.js",
+    "print-project.js",
     "badges-*.js",
     "badge-review*.js",
     "lib/client.js",

@@ -11,7 +11,7 @@ Name the recognizable parts first. On creation or refresh, inspect each broad re
 
 Call `viewer_analyze_surfaces` with the saved USD `path` for its `sourceHash` and part paths. Pass an exact `partPath` array and `sourceHash` to list a part's connected surfaces. Follow `nextOffset` as needed. Match the images and source to the reported positions, bounds, and normals, then bind physical features to those triangles.
 
-Save `model.regions.json` beside the final `model.usda` with that `sourceHash` and an ordered `regions` array. Give each region a stable lowercase hyphenated `id`, a `name` and a `location`. Keep accurate existing names and replace legacy boxes around physical features with triangle selectors. For overlapping regions without a parent-child relationship, put the more specific region first.
+Save `model.regions.json` beside the final `model.usda` with that `sourceHash` and an ordered `regions` array. Give each region a stable lowercase hyphenated `id`, a `name` and a `location`. Bind each physical feature to its measured triangles. Write the completed JSON to a temporary file and rename it into place. For overlapping regions without a parent-child relationship, put the more specific region first.
 
 For a `surface`, copy the part path and surface IDs from the tool.
 
@@ -27,7 +27,6 @@ For spatial features, use saved model-local millimetres with Z up.
 
 - `curve` takes `points` along a path and `closed: true` for a loop.
 - `point` takes a single XYZ `point`, such as a pivot.
-- `volume` takes `boxes` of `[minX, minY, minZ, maxX, maxY, maxZ]` for space such as hinge clearance.
 
 ## Verify the saved map
 

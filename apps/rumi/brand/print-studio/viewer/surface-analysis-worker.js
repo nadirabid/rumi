@@ -103,34 +103,41 @@ function measurePart(node, vertices, covered) {
 }
 
 const model = await parseUsdModel(workerData.bytes)
-const parts = [], partCoverage = [], transfer = [model.positions.buffer]
-let audit
-if (workerData.regions) {
+if (workerData.selectorsOnly) {
+  const index = createNamedRegionIndex(model.root, null, workerData.regions)
+  parentPort.postMessage({ unresolved: workerData.regions.some(region => !index.get(region.id)) })
+} else measureModel()
+
+function measureModel() {
+  const parts = [], partCoverage = [], transfer = [model.positions.buffer]
+  let audit
+  if (workerData.regions) {
+    model.root.traverseVisible(node => {
+      if (node.isMesh) node.geometry.userData.rumiSurfaceIndex ??= createSurfaceIndex(node.geometry)
+    })
+    audit = coveredFaces(model.root, workerData.regions)
+  }
+  let firstFace = 0
   model.root.traverseVisible(node => {
-    if (node.isMesh) node.geometry.userData.rumiSurfaceIndex ??= createSurfaceIndex(node.geometry)
+    if (!node.isMesh) return
+    const triangles = (node.geometry.index?.count ?? node.geometry.attributes.position.count) / 3
+    if (!triangles) return
+    // buildModel emits these saved millimetre/Z-up vertices in the same traversal and face order.
+    const mask = audit && (audit.masks.get(node) ?? new Uint8Array(triangles))
+    const { boundsMm, surfaces, coverage } = measurePart(node, model.positions.subarray(firstFace * 9, (firstFace + triangles) * 9), mask)
+    const partPath = modelPartPath(node, null)
+    parts.push({ partPath, triangles, firstFace, boundsMm, surfaces })
+    if (coverage) partCoverage.push({ partPath, triangles, ...coverage })
+    transfer.push(...Object.values(surfaces).map(column => column.buffer))
+    firstFace += triangles
   })
-  audit = coveredFaces(model.root, workerData.regions)
+  const coverage = audit && {
+    unresolvedIds: audit.unresolvedIds,
+    triangles: firstFace,
+    uncoveredTriangles: partCoverage.reduce((sum, part) => sum + part.uncoveredTriangles, 0),
+    areaMm2: partCoverage.reduce((sum, part) => sum + part.areaMm2, 0),
+    uncoveredAreaMm2: partCoverage.reduce((sum, part) => sum + part.uncoveredAreaMm2, 0),
+    parts: partCoverage,
+  }
+  parentPort.postMessage({ positions: model.positions, parts, ...(coverage ? { coverage } : {}) }, transfer)
 }
-let firstFace = 0
-model.root.traverseVisible(node => {
-  if (!node.isMesh) return
-  const triangles = (node.geometry.index?.count ?? node.geometry.attributes.position.count) / 3
-  if (!triangles) return
-  // buildModel emits these saved millimetre/Z-up vertices in the same traversal and face order.
-  const mask = audit && (audit.masks.get(node) ?? new Uint8Array(triangles))
-  const { boundsMm, surfaces, coverage } = measurePart(node, model.positions.subarray(firstFace * 9, (firstFace + triangles) * 9), mask)
-  const partPath = modelPartPath(node, null)
-  parts.push({ partPath, triangles, firstFace, boundsMm, surfaces })
-  if (coverage) partCoverage.push({ partPath, triangles, ...coverage })
-  transfer.push(...Object.values(surfaces).map(column => column.buffer))
-  firstFace += triangles
-})
-const coverage = audit && {
-  unresolvedIds: audit.unresolvedIds,
-  triangles: firstFace,
-  uncoveredTriangles: partCoverage.reduce((sum, part) => sum + part.uncoveredTriangles, 0),
-  areaMm2: partCoverage.reduce((sum, part) => sum + part.areaMm2, 0),
-  uncoveredAreaMm2: partCoverage.reduce((sum, part) => sum + part.uncoveredAreaMm2, 0),
-  parts: partCoverage,
-}
-parentPort.postMessage({ positions: model.positions, parts, ...(coverage ? { coverage } : {}) }, transfer)

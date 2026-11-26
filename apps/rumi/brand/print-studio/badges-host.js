@@ -1,39 +1,9 @@
 /** Evaluate completed print turns outside the agent loop and expose the owner's badge collection. */
-import { constants, closeSync, fstatSync, openSync, readFileSync, realpathSync } from 'node:fs'
-import { basename, join, relative, resolve } from 'node:path'
+import { owningProject, projectById } from './print-project.js'
+import { join, relative, resolve } from 'node:path'
 import { createBadgeEvents } from './badges-events.js'
 import { openBadgeStore } from './badges-store.js'
 import { PRINT_BADGE_KINDS } from './badges-kinds.js'
-
-const projectIdPattern = /^[a-f0-9-]{36}$/u
-
-function projectById(workspace, id) {
-  if (!projectIdPattern.test(id)) return null
-  try {
-    const root = realpathSync(workspace)
-    const path = join(root, id)
-    if (realpathSync(path) !== path) return null
-    const file = openSync(join(path, 'project.json'), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
-    try {
-      const info = fstatSync(file)
-      if (!info.isFile() || info.size > 1_048_576) return null
-      const metadata = JSON.parse(readFileSync(file, 'utf8'))
-      if (metadata?.id !== id || metadata.type !== 'print' || typeof metadata.name !== 'string' || !Array.isArray(metadata.sessionIds)) return null
-      return { id, path, name: metadata.name, type: metadata.type, sessionIds: metadata.sessionIds }
-    } finally { closeSync(file) }
-  } catch (error) {
-    if (error.code === 'ENOENT' || error.code === 'ENOTDIR' || error.code === 'ELOOP') return null
-    throw error
-  }
-}
-
-function owningProject(scope, session) {
-  const cwd = session.header.cwd
-  if (!cwd || !projectIdPattern.test(basename(cwd))) return null
-  const project = projectById(scope.workspaceRoot, basename(cwd))
-  if (!project || !project.sessionIds.includes(session.id) || realpathSync(cwd) !== project.path) return null
-  return project
-}
 
 function validationPath(event, project) {
   if (event.data.name !== 'validation_mechanics' || event.data.isError) return null

@@ -7,7 +7,7 @@ import { basename, dirname, join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { z } from 'zod'
 import { discoverModels } from './viewer/catalog.js'
-import { MAX_REGION_MAP_BYTES, needsSurfaceRegions, readModelRegions } from './viewer/model-regions.js'
+import { MAX_REGION_MAP_BYTES, readModelRegions } from './viewer/model-regions.js'
 import { USD_MAX_BYTES } from './viewer/usd.js'
 
 const endpoint = 'https://inference.baseten.co/v1/systemone'
@@ -15,7 +15,7 @@ const model = 'decision-models/baseten-bison-latest'
 const questions = {
   namedRegions: {
     type: 'noul',
-    instructions: 'Does the agent need a reminder to finish naming features on the final saved mesh? Review models and maps created or revised this turn. When the agent is wrapping up, remind it about missing, invalid, or outdated maps. For needs_surface_regions, remind it to identify physical features on the mesh when creating or refreshing names. A request specifically about empty space can use a volume alone. Keep observing while the agent is still working.',
+    instructions: 'Does the agent need a reminder to finish naming features on the final saved mesh? Review models and maps created or revised this turn. When the agent is wrapping up, remind it about missing, invalid, or outdated maps. Keep observing while the agent is still working.',
   },
   conciseReply: {
     type: 'noul',
@@ -221,9 +221,9 @@ async function regionStatus(cwd, path, hash) {
   }
   try {
     const value = JSON.parse(raw.toString('utf8'))
-    const map = readModelRegions(value, value?.sourceHash)
+    readModelRegions(value, value?.sourceHash)
     if (value.sourceHash !== hash) return 'outdated'
-    return needsSurfaceRegions(map) ? 'needs_surface_regions' : 'ready'
+    return 'ready'
   } catch (_error) {
     return 'invalid'
   }
@@ -249,7 +249,7 @@ async function review(transport, key, state, signal, threshold) {
   }))
 }
 
-const needsMap = status => ['missing', 'invalid', 'outdated', 'needs_surface_regions'].includes(status)
+const needsMap = status => ['missing', 'invalid', 'outdated'].includes(status)
 
 async function changedModels(state, maxModels, signal) {
   const changes = []

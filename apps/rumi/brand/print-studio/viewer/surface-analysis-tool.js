@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
-import { Worker } from 'node:worker_threads'
+import { loadInventory } from './surface-worker.js'
 import { USD_MAX_BYTES } from './usd.js'
 import { saveAnalyzedMesh, saveAnalyzedRanges } from './cursor.js'
 import { MAX_REGION_MAP_BYTES, readModelRegions } from './model-regions.js'
@@ -11,27 +11,6 @@ const pageSize = 24
 const inlineRangeLimit = 16
 const readable = value => Number(value.toPrecision(6))
 const vector = (values, row) => Array.from(values.subarray(row * 3, row * 3 + 3), readable)
-
-async function loadInventory(bytes, regions, signal) {
-  signal.throwIfAborted()
-  const buffer = Uint8Array.from(bytes).buffer
-  const worker = new Worker(new URL('./surface-analysis-worker.js', import.meta.url), {
-    workerData: { bytes: buffer, regions }, transferList: [buffer], execArgv: [],
-  })
-  let cancel
-  try {
-    return await new Promise((resolve, reject) => {
-      cancel = () => reject(signal.reason)
-      signal.addEventListener('abort', cancel, { once: true })
-      worker.once('message', resolve)
-      worker.once('error', reject)
-      worker.once('exit', code => reject(new Error(`Mesh analysis exited before returning its measurements (code ${code})`)))
-    })
-  } finally {
-    signal.removeEventListener('abort', cancel)
-    await worker.terminate()
-  }
-}
 
 function partPage(parts, offset) {
   return { total: parts.length, parts: parts.slice(offset, offset + pageSize).map(part => ({

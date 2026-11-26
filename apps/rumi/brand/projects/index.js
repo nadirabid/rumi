@@ -100,6 +100,7 @@ export function createProjectTypes() {
         id,
         label: typeof contribution.label === 'string' ? contribution.label : id,
         isDefault: contribution.isDefault === true,
+        ...(contribution.onOpen ? { onOpen: contribution.onOpen } : {}),
         templates: Array.isArray(contribution.templates) ? contribution.templates : [],
       }
       types.set(id, entry)
@@ -488,6 +489,7 @@ export function apply(ctx, config = {}) {
           project = (await reconcileSessionTitle(session, project)) ?? project
         }
       }
+      types.get(project.type)?.onOpen?.(project)
       return json({ project })
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 404)

@@ -186,8 +186,8 @@ function sceneReport(record) {
 function agentDesign(design) {
   if (!design?.regionMap) return design ?? null
   const { key, regions, remainder } = design.regionMap
-  return { ...design, regionMap: { key, remainder, regions: regions.map(({ id, name, description, aliases, parentId, location, boxes }) => ({
-    id, name, description, aliases, parentId, kind: location.kind, ...(boxes ? { legacy: true } : {}),
+  return { ...design, regionMap: { key, remainder, regions: regions.map(({ id, name, description, aliases, parentId, location }) => ({
+    id, name, description, aliases, parentId, kind: location.kind,
   })) } }
 }
 
@@ -245,7 +245,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   ctx.inject(['systemPrompt'], scoped => {
     scoped.effect(() => scoped.systemPrompt.section({
       name: 'rumi:naming-model-regions', order: scoped.systemPrompt.getSectionOrder('TOOL_WORKFLOW'),
-      text: 'When creating or refreshing named regions, follow name-model-regions to bind physical features to measured triangles, including features previously labeled with boxes. Save and audit the map for unnamed geometry on each final model revision you keep.',
+      text: 'For every model listed in missingRegionMaps, follow name-model-regions and recreate its named regions during this turn. Finish requested model edits first. Bind physical features to measured triangles and audit the saved map for each final revision you keep.',
     }), 'print viewer: name model features')
     scoped.effect(() => scoped.systemPrompt.context({
       name: 'rumi:mesh-state', order: scoped.systemPrompt.getContextOrder('WEB_SURFACE'), interpolate: false, required: true,

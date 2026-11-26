@@ -66,7 +66,7 @@ it.each([
   { scenario: 'both decisions are positive', status: 'missing', score: 0.99, malformed: false, expected: ['name-model-regions', 'project reply guidance'] },
   { scenario: 'there is no changed mesh', status: null, score: 0.99, malformed: false, expected: ['project reply guidance'] },
   { scenario: 'the changed mesh has a matching map', status: 'ready', score: 0.99, malformed: false, expected: ['project reply guidance'] },
-  { scenario: 'only the map changed and it still uses legacy boxes', status: 'needs_surface_regions', score: 0.99, malformed: false, expected: ['name-model-regions', 'project reply guidance'] },
+  { scenario: 'only the map changed and its location is invalid', status: 'invalid', score: 0.99, malformed: false, expected: ['name-model-regions', 'project reply guidance'] },
   { scenario: 'the region decision is negative', status: 'missing', score: 0.01, malformed: false, expected: ['project reply guidance'] },
   { scenario: 'both decisions are negative', status: 'missing', score: 0.01, conciseScore: 0.01, malformed: false, expected: [] },
   { scenario: 'the decision response is malformed', status: 'missing', score: 0.99, malformed: true, expected: [] },
@@ -79,7 +79,7 @@ it.each([
     const directory = join(root, 'models', 'box')
     await mkdir(directory, { recursive: true })
     const usd = '#usda 1.0\n'
-    const refresh = status === 'needs_surface_regions'
+    const refresh = status === 'invalid'
     if (refresh) await writeFile(join(directory, 'model.usda'), usd)
     const request = refresh ? 'Refresh the names on the box.' : 'Make a box.'
     const adapter = new ReviewReplay(async () => {

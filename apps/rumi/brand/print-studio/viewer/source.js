@@ -8,7 +8,7 @@ import { readMotion } from './motion.js'
 import { normalizePlacement } from './transform.js'
 import { normalizeShape, normalizeValues } from './analog/spec.js'
 import { controlValues, parameterValues } from './analog/control-spec.js'
-import { MAX_REGION_MAP_BYTES, needsSurfaceRegions, readModelRegions } from './model-regions.js'
+import { MAX_REGION_MAP_BYTES, readModelRegions } from './model-regions.js'
 
 const ROUTE = '/api/print-studio/viewer'
 const MAX_FILES = 64
@@ -82,7 +82,7 @@ function applyFeedback(state, value) {
   if (value.report) state.parameters = parameters
   if (resolution && state.regionMap) {
     const ids = resolution.unresolvedIds
-    state.regionStatus = ids.length ? 'invalid' : needsSurfaceRegions(state.regionMap) ? 'needs_surface_regions' : 'ready'
+    state.regionStatus = ids.length ? 'invalid' : 'ready'
     if (ids.length) {
       const names = ids.slice(0, 6).join(', ') + (ids.length > 6 ? ` (+${ids.length - 6} more)` : '')
       state.regionError = `No matching mesh selection for ${names}. Use viewer_analyze_surfaces on this revision to check the part paths, surface IDs and face ranges.`
@@ -186,9 +186,9 @@ export async function createSource(ctx, path, workspace) {
         if (Buffer.byteLength(text) > MAX_REGION_MAP_BYTES) throw new Error('Region map exceeds 2 MiB')
         const parsed = JSON.parse(text)
         const map = readModelRegions(parsed, parsed?.sourceHash)
-        regionsFile = { key, sourceHash: parsed.sourceHash, needsSurfaces: needsSurfaceRegions(map), map: { ...map, key: createHash('sha256').update(text).digest('hex') } }
+        regionsFile = { key, sourceHash: parsed.sourceHash, map: { ...map, key: createHash('sha256').update(text).digest('hex') } }
       }
-      regionsStatus = regionsFile.sourceHash !== state.contentHash ? 'outdated' : regionsFile.needsSurfaces ? 'needs_surface_regions' : 'ready'
+      regionsStatus = regionsFile.sourceHash !== state.contentHash ? 'outdated' : 'ready'
       regionError = undefined
     } catch (error) {
       regionsFile = null

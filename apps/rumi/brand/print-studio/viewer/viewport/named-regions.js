@@ -7,7 +7,6 @@ const MIN_DETAIL_PIXELS = 36
 const MIN_NESTED_ZOOM_RATIO = 1.25
 
 function vector(point) { return new THREE.Vector3(...point) }
-function box(bounds) { return new THREE.Box3(vector(bounds.slice(0, 3)), vector(bounds.slice(3))) }
 
 function compileSurface(location, parts, indexes) {
   const selectors = new Map()
@@ -48,7 +47,6 @@ function compileRegion(region, parts, indexes) {
       const selectors = compileSurface(location, parts, indexes)
       return selectors && { region, selectors, children: [] }
     }
-    case 'volume': return { region, boxes: location.boxes.map(box) }
     case 'curve': {
       const points = location.points.map(vector)
       if (location.closed) points.push(points[0])
@@ -161,12 +159,7 @@ export function createNamedRegionIndex(root, placement, regions) {
           picked = point.clone()
           nearest = distance
         }
-        if (entry.boxes) {
-          for (const bounds of entry.boxes) {
-            if (modelHit && bounds.containsPoint(modelHit)) accept(modelHit, modelDistance)
-            else if (ray.intersectBox(bounds, rayPoint)) accept(rayPoint, ray.origin.distanceTo(rayPoint))
-          }
-        } else if (entry.points) {
+        if (entry.points) {
           for (let i = 1; i < entry.points.length; i++) {
             const distanceSquared = ray.distanceSqToSegment(entry.points[i - 1], entry.points[i], rayPoint, curvePoint)
             const depth = ray.origin.distanceTo(rayPoint)
@@ -218,9 +211,8 @@ export function createNamedRegionVisual(entry, parent, placement, color, posedNo
     polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, depthWrite: false,
   })
   const guide = new THREE.LineBasicMaterial({ color, depthTest: false, depthWrite: false })
-  const fill = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.13, depthTest: false, depthWrite: false })
   const marker = new THREE.MeshBasicMaterial({ color, depthTest: false, depthWrite: false })
-  const materials = [surface, guide, fill, marker]
+  const materials = [surface, guide, marker]
   const anchor = new THREE.Vector3()
   const center = new THREE.Vector3()
   let anchorNode = root
@@ -241,17 +233,7 @@ export function createNamedRegionVisual(entry, parent, placement, color, posedNo
     }
   } else {
     root.matrixAutoUpdate = false
-    if (entry.boxes) {
-      for (const bounds of entry.boxes) {
-        const origin = bounds.getCenter(new THREE.Vector3()), size = bounds.getSize(new THREE.Vector3())
-        const geometry = new THREE.BoxGeometry(size.x, size.y, size.z)
-        const mesh = new THREE.Mesh(geometry, fill)
-        const outline = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), guide)
-        mesh.position.copy(origin); outline.position.copy(origin)
-        root.add(mesh, outline)
-      }
-      entry.boxes[0].getCenter(anchor)
-    } else if (entry.points) {
+    if (entry.points) {
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(entry.points), guide)
       root.add(line)
       anchor.copy(entry.points[Math.floor(entry.points.length / 2)])

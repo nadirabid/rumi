@@ -7,7 +7,6 @@ import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createSource } from '../viewer/source.js'
-import { modelRegionAt } from '../viewer/model-regions.js'
 
 const cleanup: (() => Promise<void>)[] = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
@@ -174,18 +173,15 @@ it('loads hover names separately from USD and clears them for a different revisi
   cleanup.push(() => source.dispose())
   const initial = source.state()
   expect(initial.regionStatus).toBe('missing')
-  const region = { id: 'tip', name: 'Tail tip', boxes: [[-1, -1, 8, 1, 1, 10]] }
-  const tail = { id: 'tail', name: 'Tail', boxes: [[-2, -2, 4, 2, 2, 11]] }
+  const region = { id: 'tip', name: 'Tail tip', location: { kind: 'point', point: [0, 0, 9] } }
+  const tail = { id: 'tail', name: 'Tail', location: { kind: 'point', point: [0, 0, 6] } }
   const map = { sourceHash: initial.contentHash, regions: [region, tail], remainder: 'Body' }
   await writeFile(metadata, JSON.stringify(map))
   await source.poll()
   const named = source.state()
-  expect(named).toMatchObject({ url: initial.url, revision: initial.revision, regionStatus: 'needs_surface_regions' })
+  expect(named).toMatchObject({ url: initial.url, revision: initial.revision, regionStatus: 'ready' })
   source.feedback({ ...named, regionResolution: { key: named.regionMap.key, unresolvedIds: [] } })
-  expect(source.state().regionStatus).toBe('needs_surface_regions')
-  expect(modelRegionAt(named.regionMap, [0, 0, 9]).name).toBe('Tail tip')
-  expect(modelRegionAt(named.regionMap, [0, 0, 6]).name).toBe('Tail')
-  expect(modelRegionAt(named.regionMap, [0, 0, 2]).name).toBe('Body')
+  expect(source.state().regionStatus).toBe('ready')
   const location = { kind: 'surface', parts: [{ partPath: 'Model/Tail' }] }
   await writeFile(metadata, JSON.stringify({ ...map, regions: [{ id: 'tail', name: 'Tail', location }] }))
   await source.poll()

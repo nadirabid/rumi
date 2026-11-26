@@ -94,6 +94,9 @@ window.__ModuleLoader__.load({
 .rumi-projects-empty-hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
 .rumi-projects-error{margin:0;font-size:12px;color:var(--dsw-alias-state-error-primary)}
 .rumi-projects-leading{position:fixed;inset:0 0 auto 0;box-sizing:border-box;height:var(--dsh-frame-top-clearance,48px);display:flex;align-items:center;gap:10px;padding:0 16px 0 88px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 92%,transparent);border-bottom:1px solid var(--dsw-alias-border-l2);backdrop-filter:blur(24px);-webkit-app-region:drag}
+.rumi-header-start{display:flex;align-items:center;gap:10px;min-width:0;max-width:calc(50% - 110px)}
+.rumi-header-brand{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;pointer-events:none;user-select:none}
+.rumi-header-icon{display:block;height:36px;width:auto;object-fit:contain;filter:drop-shadow(0 1px 2px rgba(0,0,0,.18))}
 body:has(.rumi-projects-leading) header:has([data-conversation-tabs]){border-bottom-color:transparent}
 /* The full-width project header reserves the same band above sidebar tabs. */
 body:has(.rumi-projects-leading) [data-sidebar-right-panel]{top:var(--dsh-frame-top-clearance,48px)}
@@ -147,6 +150,7 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
 .rumi-alert-cancel{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary-foreground)}
 .rumi-alert-delete{background:color-mix(in srgb,var(--dsw-alias-label-primary) 10%,transparent);color:var(--dsw-alias-state-error-primary)}
 @media(max-width:900px){.rumi-projects-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.rumi-header-brand{display:none}.rumi-header-start{max-width:none}}
 @media(max-width:520px){.rumi-projects-grid{grid-template-columns:minmax(0,1fr)}}
 @media(prefers-reduced-motion:reduce){.rumi-project-cover,.rumi-glass{transition:none}}
 `;
@@ -715,14 +719,22 @@ html[data-fullscreen] .rumi-projects-leading{padding-left:16px}
             setBusy(true);
             try { await list.create(); } finally { setBusy(false); }
           };
+          const [headerIconFailed, setHeaderIconFailed] = React.useState(false);
           const title = atPage ? page.title : onHome ? t('title') : project?.name;
           const back = t(atPage ? 'goBack' : 'back');
           return h('header', { className: 'rumi-projects-leading' },
-            onHome ? null : h('button', {
-              type: 'button', className: 'rumi-glass', 'aria-label': back, title: back,
-              onClick: () => atPage ? openPage(page.id, page.title) : list.close(),
-            }, h(IconChevronLeftOutlineRegular, { size: 16 })),
-            h('span', { className: 'rumi-header-title', title }, title),
+            h('div', { className: 'rumi-header-start' },
+              onHome ? null : h('button', {
+                type: 'button', className: 'rumi-glass', 'aria-label': back, title: back,
+                onClick: () => atPage ? openPage(page.id, page.title) : list.close(),
+              }, h(IconChevronLeftOutlineRegular, { size: 16 })),
+              h('span', { className: 'rumi-header-title', title }, title)),
+            h('div', { className: 'rumi-header-brand', 'aria-hidden': 'true' },
+              headerIconFailed ? null : h('img', {
+                src: '/api/rumi-brand/icon.png', alt: '', height: 36,
+                className: 'rumi-header-icon', draggable: false,
+                onError: () => setHeaderIconFailed(true),
+              })),
             h('div', { className: 'rumi-header-actions' },
               h(UpdateBadge, { updates, t }),
               sidebar === 'none' ? null : h(React.Fragment, null,

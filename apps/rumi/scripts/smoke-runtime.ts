@@ -15,6 +15,33 @@ import type { DesktopRuntimeDescriptor } from '../src/runtime-tree.ts'
 const OFFICE_SKILLS = ['office']
 
 /**
+ * Per-operation LibreOffice deadline during packaging smokes, where DMG/ZIP creation and
+ * notarization copies contend for CPU and disk I/O alongside the packaged runtime check.
+ */
+export const SMOKE_OFFICE_TIMEOUT_MS = 180_000
+
+/**
+ * Build the smoke profile's `cordis.patch.yml` with an ephemeral Host port and contention-safe
+ * Office Kit conversion deadline.
+ * @param home - Isolated smoke `DSH_HOME` directory.
+ * @returns YAML patch content for the disposable smoke profile.
+ */
+export function smokeProfilePatch(home: string): string {
+  const outputDirectory = JSON.stringify(join(home, 'office-kit', 'outputs'))
+  return [
+    '- id: webserver',
+    '  config:',
+    '    host: 127.0.0.1',
+    '    port: 0',
+    '- id: office-kit',
+    '  config:',
+    `    outputDirectory: ${outputDirectory}`,
+    `    timeoutMs: ${String(SMOKE_OFFICE_TIMEOUT_MS)}`,
+    '',
+  ].join('\n')
+}
+
+/**
  * Require the bundled `office` skill to be listed and loaded with a nonempty body.
  * @param results - Host probe results; `bytes` is the loaded body length, 0 when unlisted or not loaded.
  * @throws Error listing every result when the bundled `office` skill is missing or empty.
@@ -102,7 +129,7 @@ export function apply(ctx) {
         fileURLToPath(new URL('../tests/fixtures/validation-models.py', import.meta.url)), '--', validationFixtures,
         join(root, 'node_modules/@rumi/print-studio/blender/rumi_blender.py').replace(/app\.asar([/\\])/u, 'app.asar.unpacked$1'),
         fileURLToPath(new URL('../brand/print-studio/bullet/tests/fixtures.py', import.meta.url))],
-      { env: { ...hostEnvironment, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' }, timeout: 60000 })
+      { env: { ...hostEnvironment, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' }, timeout: 120_000 })
     cpSync(fileURLToPath(new URL('../tests/fixtures/validation-smoke-plugin.mjs', import.meta.url)), join(plugin, 'validation-smoke.mjs'))
     writeFileSync(join(plugin, 'index.js'), `
 import { Context } from '@deepseek-ai/cordis'
@@ -189,7 +216,7 @@ export function apply(ctx) {
     manifest.dependencies = { ...manifest.dependencies, [pluginName]: `file:${plugin}` }
     manifest.dsh.profile.bundles.push(pluginName)
     writeFileSync(join(profile, 'package.json'), JSON.stringify(manifest))
-    writeFileSync(join(profile, 'cordis.patch.yml'), '- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 0\n')
+    writeFileSync(join(profile, 'cordis.patch.yml'), smokeProfilePatch(home))
     const ready = await Promise.race([host.start(), new Promise<never>((_, reject) => {
       timer = setTimeout(() => { reject(new Error('desktop runtime: Host readiness exceeded 120 seconds')) }, 120_000)
     })])
@@ -216,7 +243,7 @@ export function apply(ctx) {
     console.log('desktop runtime: packaged Office skills listed and loaded')
     for (const { extension } of inputs) {
       const converted = await fetch(new URL(`/desktop-smoke-office/${extension}`, ready.url), {
-        headers: { cookie }, signal: AbortSignal.timeout(120_000),
+        headers: { cookie }, signal: AbortSignal.timeout(240_000),
       })
       if (!converted.ok) throw new Error(`desktop runtime: ${extension} conversion failed: ${await converted.text()}`)
       const pdf = Buffer.from(await converted.arrayBuffer())
@@ -227,7 +254,7 @@ export function apply(ctx) {
     }
     for (const { extension } of inputs) {
       const operations = await fetch(new URL(`/desktop-smoke-office-operations/${extension}`, ready.url), {
-        headers: { cookie }, signal: AbortSignal.timeout(240_000),
+        headers: { cookie }, signal: AbortSignal.timeout(600_000),
       })
       if (!operations.ok) throw new Error(`desktop runtime: ${extension} Office operations failed: ${await operations.text()}`)
       const result = await operations.json() as { images: string[]; converted: string; recalculated: string | null }

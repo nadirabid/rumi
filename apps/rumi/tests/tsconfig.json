@@ -10,7 +10,8 @@
   "include": [
     "project-isolation*.spec.ts",
     "project-manager.spec.ts",
-    "shell-errors.spec.ts"
+    "shell-errors.spec.ts",
+    "smoke-runtime.spec.ts"
   ],
   "references": [
     {

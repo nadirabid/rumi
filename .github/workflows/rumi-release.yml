@@ -47,7 +47,7 @@ jobs:
       - name: Build official workspace artifacts
         run: pnpm run build:official
       - name: Verify Rumi behavior
-        run: pnpm exec vitest run --config apps/rumi/vitest.release.config.mts apps/rumi/tests/print-studio.spec.ts apps/rumi/tests/print-studio-viewer.client.spec.tsx apps/rumi/tests/profile-mcp.spec.ts apps/rumi/tests/github-release.spec.ts apps/rumi/tests/notarize-macos.spec.ts apps/rumi/tests/macos-notarized-application.spec.ts
+        run: pnpm exec vitest run --config apps/rumi/vitest.release.config.mts apps/rumi/tests/print-studio.spec.ts apps/rumi/tests/print-studio-viewer.client.spec.tsx apps/rumi/tests/profile-mcp.spec.ts apps/rumi/tests/github-release.spec.ts apps/rumi/tests/notarize-macos.spec.ts apps/rumi/tests/macos-notarized-application.spec.ts apps/rumi/tests/smoke-runtime.spec.ts
       - name: Read published version
         env:
           GH_TOKEN: ${{ github.token }}

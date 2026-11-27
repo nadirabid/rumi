@@ -6,13 +6,12 @@ import { expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({ root: '', directory: '' }))
 vi.mock('../scripts/desktop-package-environment.mjs', () => ({
-  loadDesktopPackageEnvironment: () => ({ DSH_DESKTOP_WINDOWS_TOKEN_PIN: 'credential-sentinel' }),
+  loadDesktopPackageEnvironment: () => ({ APPLE_APP_SPECIFIC_PASSWORD: 'credential-sentinel' }),
   validateDesktopPackageEnvironment: () => {},
 }))
 vi.mock('../scripts/macos-signing-keychain.mjs', () => ({
   withMacOSSigningKeychain: async (_environment: object, action: (environment: object) => Promise<unknown>) => action({}),
 }))
-// This test fakes the host platform, so the real probes would report the absent Windows compilers rather than the failure under test.
 vi.mock('../scripts/desktop-toolchain-preflight.ts', () => ({ requireDesktopToolchain: async () => {} }))
 vi.mock('node:fs', async importOriginal => ({
   ...await importOriginal<typeof import('node:fs')>(),
@@ -27,7 +26,7 @@ vi.mock('../scripts/packaging-run.mjs', async (importOriginal) => {
   } }
 })
 
-it.each(['win32', 'darwin'] as const)('records and prints redacted parent failures on %s', async (platform) => {
+it('records and prints redacted parent failures on darwin', async () => {
   state.root = await mkdtemp(join(tmpdir(), 'package-errors-'))
   const savedPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
   const savedArch = Object.getOwnPropertyDescriptor(process, 'arch')!
@@ -37,9 +36,9 @@ it.each(['win32', 'darwin'] as const)('records and prints redacted parent failur
   const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
   const savedDirectory = process.env.DSH_DESKTOP_PACKAGING_RUN_DIR
   try {
-    Object.defineProperty(process, 'platform', { ...savedPlatform, value: platform })
+    Object.defineProperty(process, 'platform', { ...savedPlatform, value: 'darwin' })
     Object.defineProperty(process, 'arch', { ...savedArch, value: 'x64' })
-    process.argv = [process.execPath, fileURLToPath(new URL('../scripts/package-target.ts', import.meta.url)), platform === 'win32' ? 'win-x64' : 'mac-x64']
+    process.argv = [process.execPath, fileURLToPath(new URL('../scripts/package-target.ts', import.meta.url)), 'mac-x64']
     vi.resetModules()
     await import('../scripts/package-target.ts')
     expect(process.exitCode).toBe(1)
@@ -54,7 +53,7 @@ it.each(['win32', 'darwin'] as const)('records and prints redacted parent failur
       success: false, stages: [
         { stage: 'configuration', success: true },
         { stage: 'toolchain', success: true },
-        { stage: platform === 'win32' ? 'windows-package' : 'macos-package', success: false },
+        { stage: 'macos-package', success: false },
       ],
     })
     expect(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR).toBe(savedDirectory)

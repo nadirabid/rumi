@@ -5,11 +5,10 @@ import { join } from 'node:path'
 import { preparePrimaryRuntime as preparePayload, smokePrimaryRuntime as smokePayload } from '../../../scripts/primary-runtime/prepare.ts'
 import { parsePrimaryRuntime, workspaceDependencyPaths } from '../../../packages/skill/tool-workspace-dependencies/src/index.ts'
 import { resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
-import { scrubWindowsSigningEnvironment } from './windows-sign.mjs'
 
 /**
  * Prepare Desktop resources for its selected packaging target.
- * @param options - macOS and signed Windows packaging defer execution until after runtime preparation and any native signing.
+ * @param options - macOS packaging defers execution until after runtime preparation and any native signing.
  * @returns Resolves after preparation and, unless deferred, native-target execution checks.
  */
 export async function preparePrimaryRuntime(options: { deferSmoke?: boolean } = {}): Promise<void> {
@@ -29,7 +28,7 @@ export function smokePrimaryRuntime(root: string): void {
   if (Object.keys(manifest.pythonPackages).length === 0) throw new Error('primary runtime: missing Python distribution versions; prepare the payload before running its smoke checks.')
   const entries = workspaceDependencyPaths(root, manifest)
   if (entries.node === undefined || entries.pnpm === undefined) throw new Error('primary runtime: the Desktop payload must declare node and pnpm components.')
-  smokePayload(root, scrubWindowsSigningEnvironment(process.env))
+  smokePayload(root, process.env)
 }
 
 if (import.meta.main) await preparePrimaryRuntime()

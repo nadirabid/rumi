@@ -85,7 +85,7 @@ export function apply(ctx) {
       ['--background', '--factory-startup', '--disable-autoexec', '--python-exit-code', '1', '--python',
         fileURLToPath(new URL('../tests/fixtures/validation-models.py', import.meta.url)), '--', validationFixtures,
         join(root, 'node_modules/@rumi/print-studio/blender/rumi_blender.py').replace(/app\.asar([/\\])/u, 'app.asar.unpacked$1'),
-        fileURLToPath(new URL('../brand/print-studio/bullet/tests/fixtures.py', import.meta.url))],
+        fileURLToPath(new URL('../plugins/print-studio/bullet/tests/fixtures.py', import.meta.url))],
       { env: { ...hostEnvironment, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' }, timeout: 120_000 })
     cpSync(fileURLToPath(new URL('../tests/fixtures/validation-smoke-plugin.mjs', import.meta.url)), join(plugin, 'validation-smoke.mjs'))
     writeFileSync(join(plugin, 'index.js'), `

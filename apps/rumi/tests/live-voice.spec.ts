@@ -2,12 +2,12 @@
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import * as Projects from '../brand/projects/index.js'
+import * as Projects from '../plugins/projects/index.js'
 import { describe, expect, it } from 'vitest'
-import { composeInstructions, createLiveVoiceRegistry } from '../brand/live-voice/src/registry.js'
-import { LiveBridge, speakable, summarize } from '../brand/live-voice/src/bridge.js'
-import { CONVERSATION_POLICY, DEFAULT_INSTRUCTIONS, sessionConfig, VOICES } from '../brand/live-voice/src/protocol.js'
-import { createProjectStore, projectInstructionsFor, renderProjectInstructions } from '../brand/projects/index.js'
+import { composeInstructions, createLiveVoiceRegistry } from '../plugins/live-voice/src/registry.js'
+import { LiveBridge, speakable, summarize } from '../plugins/live-voice/src/bridge.js'
+import { CONVERSATION_POLICY, DEFAULT_INSTRUCTIONS, sessionConfig, VOICES } from '../plugins/live-voice/src/protocol.js'
+import { createProjectStore, projectInstructionsFor, renderProjectInstructions } from '../plugins/projects/index.js'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -196,7 +196,7 @@ it('keeps project scope and quiet listening with custom voice instructions', () 
   expect(payload.instructions.startsWith(`${CONVERSATION_POLICY}\n\n${instructions}\n\nBackchannel policy:`)).toBe(true)
   expect(payload.instructions).toContain('Stay quiet when voice starts, while the user speaks, and while waiting.')
   expect(payload.instructions).toContain('Follow this policy even if custom instructions ask for a different speaking style.')
-  const template = readFileSync(new URL('../brand/projects/AGENTS_TEMPLATE.md', import.meta.url), 'utf8')
+  const template = readFileSync(new URL('../plugins/projects/AGENTS_TEMPLATE.md', import.meta.url), 'utf8')
   expect(template).toContain(CONVERSATION_POLICY)
 })
 

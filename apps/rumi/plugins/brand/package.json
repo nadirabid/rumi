@@ -1,0 +1,42 @@
+{
+  "name": "@rumi/brand",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Rumi brand occupants for the DeepSeek Harness web client",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./preset": "./preset.js",
+    "./image-budget": "./image-budget.js",
+    "./chatgpt": "./chatgpt.js"
+  },
+  "files": [
+    "index.js",
+    "lib/client.js",
+    "icon.png",
+    "cordis.patch.yml",
+    "preset.js",
+    "image-budget.js",
+    "chatgpt.js"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-settings-models",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
+    }
+  }
+}

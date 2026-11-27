@@ -67,12 +67,6 @@ describe('desktop toolchain preflight', () => {
     }
   })
 
-  it('reports the Windows installer compiler when the host cannot locate Visual Studio', async () => {
-    const failures = await probeDesktopToolchain('win32', {})
-    expect(failures.map(failure => failure.tool)).toContain('vswhere')
-    expect(failures.find(failure => failure.tool === 'vswhere')?.detail).toContain('ProgramFiles(x86)')
-  })
-
   it('writes nothing into the working directory while probing', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-probe-cwd-'))
     directories.push(directory)

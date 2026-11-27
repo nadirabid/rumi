@@ -1,0 +1,66 @@
+.rumi-connection {
+  padding: 12px 14px;
+  border: 0.5px solid var(--dsw-alias-settings-card-stroke);
+  border-radius: var(--dsw-radius-xl);
+  background: var(--dsw-alias-settings-card-fill);
+  margin-bottom: 8px;
+}
+
+.rumi-connection p {
+  margin: 3px 0;
+}
+
+.rumi-connection strong {
+  font-weight: 500;
+}
+
+.rumi-default-model {
+  order: -1;
+}
+
+.rumi-default-model h3 {
+  margin: 20px 0 10px;
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.rumi-default-model h3:first-child {
+  margin-top: 0;
+}
+
+.rumi-default-model p {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+}
+
+.rumi-default-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.rumi-default-model-row button {
+  max-width: 100%;
+  height: auto;
+  min-height: 36px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+div:has(> [data-slot="settings.models.footer"] .rumi-default-model[data-advanced="false"]) > :not([data-slot="settings.models.footer"]) {
+  display: none;
+}
+
+.rumi-voice-settings {
+  display: grid;
+  gap: 8px;
+  padding: 2px 0 8px;
+}
+
+.rumi-voice-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}

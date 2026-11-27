@@ -53,7 +53,6 @@ function prepareCli({ platform, arch }: DesktopTarget): void {
     prepareCommandLink(cli, arch, minimumMacOSVersion())
   }
   cpSync(join(import.meta.dirname, '..', 'lib', 'command-manager-entry.js'), join(cli, 'command-manager.js'))
-  cpSync(join(import.meta.dirname, 'command-path.ps1'), join(cli, 'command-path.ps1'))
 }
 
 /**

@@ -16,13 +16,13 @@ export interface AppBundleSource {
  * manager and the Plugins page reports it as installation-provided.
  */
 export const RUMI_APP_BUNDLES: readonly AppBundleSource[] = [
-  { name: '@rumi/model-picker', directory: join('brand', 'model-picker') },
-  { name: '@rumi/brand', directory: 'brand' },
-  { name: '@rumi/client-events', directory: join('brand', 'client-events') },
-  { name: '@rumi/settings', directory: join('brand', 'settings') },
-  { name: '@rumi/live-voice', directory: join('brand', 'live-voice') },
-  { name: '@rumi/print-studio', directory: join('brand', 'print-studio') },
-  { name: '@rumi/projects', directory: join('brand', 'projects') },
+  { name: '@rumi/model-picker', directory: join('plugins', 'model-picker') },
+  { name: '@rumi/brand', directory: join('plugins', 'brand') },
+  { name: '@rumi/client-events', directory: join('plugins', 'client-events') },
+  { name: '@rumi/settings', directory: join('plugins', 'settings') },
+  { name: '@rumi/live-voice', directory: join('plugins', 'live-voice') },
+  { name: '@rumi/print-studio', directory: join('plugins', 'print-studio') },
+  { name: '@rumi/projects', directory: join('plugins', 'projects') },
 ]
 
 /** Bundle names seeded into every Rumi profile. */

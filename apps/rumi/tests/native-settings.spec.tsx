@@ -12,7 +12,7 @@ it('mounts the stock settings slot and delegates native menu actions', async () 
   type Registration = { name: string; children?: object; inject?: () => Omit<LauncherProps, 'openSettings'> }
   let loaded!: { factory: (require: (name: string) => unknown) => { apply: (ctx: object) => void } }
   vi.stubGlobal('__ModuleLoader__', { load: (entry: typeof loaded) => { loaded = entry } })
-  await import('../brand/settings/client.js')
+  await import('../plugins/settings/client.js')
   let listener!: (page: string) => void
   const off = vi.fn()
   vi.stubGlobal('__RUMI_SETTINGS__', { subscribe: (callback: typeof listener) => { listener = callback; return off } })

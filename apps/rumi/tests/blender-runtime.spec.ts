@@ -37,7 +37,7 @@ it('uses the packaged Blender, honors explicit overrides, and exposes a damaged 
   try {
     const modulePath = join(root, 'app.asar', 'dsh', 'blender', 'host.mjs')
     await mkdir(dirname(modulePath), { recursive: true })
-    await copyFile(new URL('../brand/print-studio/blender/host.js', import.meta.url), modulePath)
+    await copyFile(new URL('../plugins/print-studio/blender/host.js', import.meta.url), modulePath)
     const { blenderStatus } = await import(/* @vite-ignore */ pathToFileURL(modulePath).href)
     const executable = join(root, 'runtime', 'blender', process.platform === 'win32' ? 'Blender/blender.exe' : 'blender')
     await mkdir(dirname(executable), { recursive: true })

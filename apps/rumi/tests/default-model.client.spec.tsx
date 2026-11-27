@@ -1,13 +1,18 @@
 // @vitest-environment jsdom
 /** Exercise the shipped browser entry with real settings forms and menu primitives. */
 import * as React from 'react'
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, expect, it, vi } from 'vitest'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+
+const buildScript = resolve(import.meta.dirname, '../scripts/build-plugins.mjs')
+beforeAll(() => { execFileSync(process.execPath, [buildScript, 'brand']) })
 
 const disposers: (() => void)[] = []
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); disposers.splice(0).reverse().forEach(dispose => dispose()) })
@@ -114,7 +119,7 @@ async function fixture(options: { writable?: boolean; failSave?: boolean; freshB
       throw new Error(id)
     }).apply(context)
   } }
-  new Function('window', readFileSync('apps/rumi/brand/client.js', 'utf8'))({ __ModuleLoader__: loader, addEventListener() {}, removeEventListener() {} })
+  new Function('window', readFileSync('apps/rumi/plugins/brand/lib/client.js', 'utf8'))({ __ModuleLoader__: loader, addEventListener() {}, removeEventListener() {} })
   function View() {
     return <Component {...injected}
       useForm={select => select(React.useSyncExternalStore(injected.hooks.form.subscribe, injected.hooks.form.getSnapshot))}

@@ -17,7 +17,7 @@ The table is the complete allowed-change set; everything else is shared upstream
 | Path | Why |
 |---|---|
 | `apps/rumi/**` | the app: identity, profile bootstrap, icons, welcome window |
-| `apps/rumi/brand/**` | **new** plugin packages we add — brand now, the custom UI bundles later |
+| `apps/rumi/plugins/**` | **new** bundled plugin packages we add — brand, projects, print studio, live voice, settings, model picker, client events |
 | root `package.json` (only the `*:rumi` scripts) | build entry points |
 | `packages/client/web/src/boot-page.ts` (only the wordmark text) | boot splash — no slot for it |
 | `packages/client/ui-settings-account/` | locale copy, plus the Plugins and Automation task rows in the account menu — the single bottom More control Rumi keeps |
@@ -32,7 +32,7 @@ The table is the complete allowed-change set; everything else is shared upstream
 - `packages/**` except the boot-page wordmark line above — published upstream packages.
 - Renaming or deleting upstream files, or gating upstream behaviour behind a fork flag.
 
-If a change seems to need one of these, build it as a package under `apps/rumi/brand/`-style directories and compose it into Rumi's profile. The slot system exists for this: `ctx.slots` replaces UI, a bundle patch replaces loader rows, and neither needs a fork.
+If a change seems to need one of these, build it as a package under `apps/rumi/plugins/` and compose it into Rumi's profile. The slot system exists for this: `ctx.slots` replaces UI, a bundle patch replaces loader rows, and neither needs a fork.
 
 ### Product facts
 
@@ -40,7 +40,7 @@ If a change seems to need one of these, build it as a package under `apps/rumi/b
 
 ### Plugin UI
 
-Before changing `apps/rumi/brand/**`, read and follow [Rumi's plugin UI requirements](RUMI.md#plugin-ui-requirements).
+Before changing `apps/rumi/plugins/**`, read and follow [Rumi's plugin UI requirements](RUMI.md#plugin-ui-requirements).
 
 ### Build and verification
 

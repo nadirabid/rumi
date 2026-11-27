@@ -95,7 +95,7 @@ export async function prepareBulletRuntime(
     if (build.platform === 'darwin') chmodSync(cmake, 0o755)
     const output = join(work, 'build')
     const options = { encoding: 'utf8' as const, env: buildEnvironment(), timeout: 900_000, maxBuffer: 32 * 1024 * 1024 }
-    execFileSync(cmake, ['-S', join(import.meta.dirname, '..', 'brand', 'print-studio', 'bullet'), '-B', output,
+    execFileSync(cmake, ['-S', join(import.meta.dirname, '..', 'plugins', 'print-studio', 'bullet'), '-B', output,
       `-DBULLET_SOURCE_DIR=${source}`, `-DNLOHMANN_INCLUDE_DIR=${include}`, '-DCMAKE_BUILD_TYPE=Release',
       ...build.arguments], options)
     execFileSync(cmake, ['--build', output, '--config', 'Release', '--target', 'rumi-bullet', '--parallel', '4'], options)

@@ -15,11 +15,11 @@ import { Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
-import { createValidation } from '../brand/print-studio/viewer/validation.js'
-import { registerValidationTools } from '../brand/print-studio/viewer/validation-tools.js'
-import { createProjectScope } from '../brand/projects/isolation/scope-provider.js'
-import { createProjectPolicy } from '../brand/projects/isolation/policy-provider.js'
-import { createProjectFileSystem } from '../brand/projects/isolation/filesystem-provider.js'
+import { createValidation } from '../plugins/print-studio/viewer/validation.js'
+import { registerValidationTools } from '../plugins/print-studio/viewer/validation-tools.js'
+import { createProjectScope } from '../plugins/projects/isolation/scope-provider.js'
+import { createProjectPolicy } from '../plugins/projects/isolation/policy-provider.js'
+import { createProjectFileSystem } from '../plugins/projects/isolation/filesystem-provider.js'
 const ProjectScope = createProjectScope({ Service, z })
 const ProjectPolicy = createProjectPolicy({ SandboxPolicyService })
 const ProjectFileSystem = createProjectFileSystem({ LocalFileSystem })
@@ -115,9 +115,9 @@ it.skipIf(process.platform !== 'darwin')('confines actual shell and direct searc
   const { SandboxProvider } = await import('@deepseek-ai/dsh-sandbox')
   const { SandboxBashExecutor } = await import('@deepseek-ai/dsh-bash-sandbox')
   const { LocalSubprocessRuntime } = await import('@deepseek-ai/dsh-subprocess-local')
-  const { createProjectSandbox } = await import('../brand/projects/isolation/sandbox-provider.js')
-  const { createProjectShell } = await import('../brand/projects/isolation/shell-provider.js')
-  const { createProjectSubprocess } = await import('../brand/projects/isolation/subprocess-provider.js')
+  const { createProjectSandbox } = await import('../plugins/projects/isolation/sandbox-provider.js')
+  const { createProjectShell } = await import('../plugins/projects/isolation/shell-provider.js')
+  const { createProjectSubprocess } = await import('../plugins/projects/isolation/subprocess-provider.js')
   const f = await fixture(['/System', '/usr', '/bin', '/opt/homebrew'])
   await f.ctx.plugin(createProjectSandbox({ SandboxProvider }))
   await f.ctx.plugin(createProjectSubprocess({ LocalSubprocessRuntime }))
@@ -156,16 +156,15 @@ it.skipIf(process.platform !== 'darwin')('keeps concurrent sessions bound to the
 
 it.skipIf(process.platform !== 'darwin')('logs only the owning project instructions and rejects an external instruction link', async () => {
   const f = await fixture()
-  const template = await readFile(new URL('../brand/projects/AGENTS_TEMPLATE.md', import.meta.url), 'utf8')
+  const template = await readFile(new URL('../plugins/projects/AGENTS_TEMPLATE.md', import.meta.url), 'utf8')
   await writeFile(join(f.root, 'AGENTS.md'), `${template}\nUse blue wheels in this project.\n`)
   await writeFile(join(f.workspace, 'AGENTS.md'), 'Private parent instructions.')
   f.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Read the project file.' }] }))
   await f.agent.whenIdle()
   const events = JSON.stringify(f.agent.session.snapshotEvents())
   expect(events).toContain('Use blue wheels in this project.')
-  const instructions = f.agent.session.snapshotEvents().flatMap(event => event.type === 'user/message'
-    && event.data.source.kind === 'runtime-context' && event.data.source.form === 'snapshot'
-    ? event.data.source.sections.filter(section => section.name === 'rumi:project-instructions') : [])
+  const instructions = f.agent.session.snapshotEvents().flatMap(event => event.type === 'system/message'
+    ? event.data.message.content.filter(block => block.type === 'text' && block.text.includes('## This project')).map(block => ({ name: 'rumi:project-instructions', text: block.text })) : [])
   expect(instructions).toMatchSnapshot()
   expect(events).not.toContain('Private parent instructions.')
   expect(JSON.stringify(f.adapter.requests)).not.toContain('Private parent instructions.')

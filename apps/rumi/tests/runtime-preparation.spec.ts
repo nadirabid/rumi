@@ -82,26 +82,23 @@ afterEach(async () => {
   await rm(state.root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
 })
 
-it.each(['mac-arm64', 'mac-x64', 'win-x64'] as const)('prepares %s with one pnpm distribution and its CLI resources', async (target) => {
+it.each(['mac-arm64', 'mac-x64'] as const)('prepares %s with one pnpm distribution and its CLI resources', async (target) => {
   state.target = target
-  const windows = target === 'win-x64'
   const runtime = join(state.root, 'runtime')
   mkdirSync(join(runtime, 'pnpm'), { recursive: true })
   const { prepareDesktopRuntime } = await import('../scripts/prepare-runtime.ts')
-  await prepareDesktopRuntime(windows)
+  await prepareDesktopRuntime(false)
   expect(existsSync(join(runtime, 'pnpm'))).toBe(false)
   expect(existsSync(join(runtime, 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.mjs'))).toBe(true)
   expect(existsSync(join(runtime, 'bin', 'node'))).toBe(true)
-  expect(existsSync(join(runtime, 'cli', 'bin', windows ? 'dsh.cmd' : 'dsh'))).toBe(true)
+  expect(existsSync(join(runtime, 'cli', 'bin', 'dsh'))).toBe(true)
   expect(readFileSync(join(runtime, 'cli', 'command-manager.js'), 'utf8')).toBe('command manager fixture')
-  expect(existsSync(join(runtime, 'cli', 'command-path.ps1'))).toBe(true)
   expect(JSON.parse(readFileSync(join(runtime, 'versions.json'), 'utf8'))).toEqual({
     schemaVersion: 1, node: '24.18.1', pnpm: '11.7.0',
   })
-  expect(state.preparePrimary).toHaveBeenCalledWith({ deferSmoke: windows })
-  expect(state.prepareBullet).toHaveBeenCalledWith(target, runtime, join(state.root, 'downloads'), windows ? undefined : '12.0')
-  if (windows) expect(state.commandLink).not.toHaveBeenCalled()
-  else expect(state.commandLink).toHaveBeenCalledWith(join(runtime, 'cli'), target === 'mac-arm64' ? 'arm64' : 'x64', '12.0')
+  expect(state.preparePrimary).toHaveBeenCalledWith({ deferSmoke: false })
+  expect(state.prepareBullet).toHaveBeenCalledWith(target, runtime, join(state.root, 'downloads'), '12.0')
+  expect(state.commandLink).toHaveBeenCalledWith(join(runtime, 'cli'), target === 'mac-arm64' ? 'arm64' : 'x64', '12.0')
 })
 
 it.each([

@@ -3,7 +3,7 @@
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
-import { installViewer } from '../brand/print-studio/viewer/client.js'
+import { installViewer } from '../plugins/print-studio/viewer/client.js'
 
 type Snapshot = { scene: unknown; view: unknown }
 type SceneHook = { subscribe: (listener: () => void) => () => void; getSnapshot: () => Snapshot }
@@ -12,8 +12,8 @@ type PaneProps = { useScene: <T>(selector: (state: Snapshot) => T) => T; t: (key
 type PaneRegistration = { name: string; inject: (session: string) => Injection }
 
 const renderer = vi.hoisted(() => ({ fail: false }))
-vi.mock('../brand/print-studio/viewer/viewer.module.css', () => ({ default: '' }))
-vi.mock('../brand/print-studio/viewer/viewport/index.js', () => ({
+vi.mock('../plugins/print-studio/viewer/viewer.module.css', () => ({ default: '' }))
+vi.mock('../plugins/print-studio/viewer/viewport/index.js', () => ({
   createViewport: () => ({
     apply() {}, dispose() {}, setActivity() {}, setCursorMode() {}, shapeMetrics: () => ({}), modelParameters: () => ({}), motionControls: () => null,
     applyDesign: async () => ({ status: 'ok' }), regionResolution: () => ({ key: null, unresolvedIds: [] }),

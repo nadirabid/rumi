@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
-import * as events from '../brand/client-events/index.js'
+import * as events from '../plugins/client-events/index.js'
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks() })
 
@@ -37,7 +37,7 @@ async function mount(watchBundles = false, bundle?: string) {
   await ctx.plugin(Loader)
   ctx.loader.internal = { version: 'client', import: async () => events } as never
   vi.stubEnv('RUMI_DEVELOPMENT', watchBundles ? '1' : '0')
-  const patches = loadOptionalPatches('rumi', fileURLToPath(new URL('../brand/client-events/cordis.patch.yml', import.meta.url)))!
+  const patches = loadOptionalPatches('rumi', fileURLToPath(new URL('../plugins/client-events/cordis.patch.yml', import.meta.url)))!
   const rows = composeEntries([[{ insert: [
     { id: 'client-hmr', name: '@deepseek-ai/dsh-client-hmr' },
     { id: 'typert-loader', name: '@deepseek-ai/dsh-typert-loader' },

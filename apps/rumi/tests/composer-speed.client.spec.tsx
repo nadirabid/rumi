@@ -2,8 +2,9 @@
 /** Exercise the speed bundle through the stock model menu's extension seats. */
 import * as React from 'react'
 import * as JSX from 'react/jsx-runtime'
-import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeAll, expect, it, vi } from 'vitest'
 import * as ui from '@deepseek-ai/dsh-client-ui-primitives'
@@ -12,7 +13,8 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { ModelSelect } from '../../../packages/client/ui-model-selection/src/client/ModelSelect.tsx'
 import { en } from '../../../packages/client/ui-model-selection/src/client/locales.ts'
 
-beforeAll(() => execFileSync(process.execPath, ['apps/rumi/brand/model-picker/build.mjs']))
+const buildScript = resolve(import.meta.dirname, '../scripts/build-plugins.mjs')
+beforeAll(() => { execFileSync(process.execPath, [buildScript, 'model-picker']) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 function fixture(provider = 'rumi-chatgpt') {
@@ -43,7 +45,7 @@ function fixture(provider = 'rumi-chatgpt') {
   const modules: Record<string, object> = { react: React, 'react/jsx-runtime': JSX, '@deepseek-ai/dsh-client-ui-primitives': ui }
   const disposers: (() => void)[] = []
   let copy: Record<string, string>
-  const source = readFileSync('apps/rumi/brand/model-picker/lib/client.js', 'utf8')
+  const source = readFileSync('apps/rumi/plugins/model-picker/lib/client.js', 'utf8')
   new Function('window', source)({ __ModuleLoader__: {
     load(entry: { factory: (get: (id: string) => object) => { inject: readonly string[]; apply: (context: object) => void } }) {
       const plugin = entry.factory(id => modules[id]!)

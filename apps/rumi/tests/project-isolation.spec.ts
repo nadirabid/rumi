@@ -1,4 +1,4 @@
-import { projectInstructionsFor } from '../brand/projects/index.js'
+import { projectInstructionsFor } from '../plugins/projects/index.js'
 /** Project data confinement rejects sibling paths and inherited subprocess escapes. */
 import { afterEach, expect, it } from 'vitest'
 import { mkdtemp, mkdir, writeFile, readFile, symlink, rm } from 'node:fs/promises'
@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { canonical, checkedPath, contains, PROJECT_DIAGNOSTICS_DIRECTORY, projectRoot, seatbeltProfile } from '../brand/projects/isolation/paths.js'
+import { canonical, checkedPath, contains, PROJECT_DIAGNOSTICS_DIRECTORY, projectRoot, seatbeltProfile } from '../plugins/projects/isolation/paths.js'
 const execute = promisify(execFile)
 const directories: string[] = []
 afterEach(async () => { for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true }) })

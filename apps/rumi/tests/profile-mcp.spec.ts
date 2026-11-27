@@ -15,8 +15,8 @@ it('retains shared resources and question dependencies for existing sessions', (
     createPluginProfile(profileDir)
     const scopeDir = join(profileDir, 'node_modules', '@rumi')
     mkdirSync(scopeDir, { recursive: true })
-    symlinkSync(fileURLToPath(new URL('../brand', import.meta.url)), join(scopeDir, 'brand'))
-    symlinkSync(fileURLToPath(new URL('../brand/client-events', import.meta.url)), join(scopeDir, 'client-events'))
+    symlinkSync(fileURLToPath(new URL('../plugins/brand', import.meta.url)), join(scopeDir, 'brand'))
+    symlinkSync(fileURLToPath(new URL('../plugins/client-events', import.meta.url)), join(scopeDir, 'client-events'))
     const installAnchor = fileURLToPath(new URL('../../cli/package.json', import.meta.url))
     const profile = loadProfileDirectory('dsh desktop', profileDir, installAnchor)
     const warnings: string[] = []
@@ -54,7 +54,7 @@ it('retains shared resources and question dependencies for existing sessions', (
 })
 
 it('registers the configured compaction threshold on every active Rumi preset', async () => {
-  const { apply, Config } = await import('../brand/preset.js')
+  const { apply, Config } = await import('../plugins/brand/preset.js')
   const registered: string[] = []
   const ctx = { agentPresets: { register(preset: { id: string; plugins: { id: string; config: { name: string; config: object }[] }[] }) {
     const group = preset.plugins.find(row => row.id === 'compaction')!
@@ -69,7 +69,7 @@ it('retains saved preset identities and confines their prompts and available too
   const { createRequire } = await import('node:module')
   const { loadOptionalPatches } = await import('@deepseek-ai/dsh-app-boot')
   const require = createRequire(fileURLToPath(new URL('../../cli/package.json', import.meta.url)))
-  const { configurePreset } = await import('../brand/preset.js')
+  const { configurePreset } = await import('../plugins/brand/preset.js')
   for (const id of ['standard', 'ptc', 'minimal', 'cordis']) {
     const patches = loadOptionalPatches('rumi', require.resolve(`@deepseek-ai/dsh-web-app/presets/${id}.patch.yml`))
     const rows = composeEntries([patches!])

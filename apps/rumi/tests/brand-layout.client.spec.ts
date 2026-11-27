@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { afterEach, expect, it, vi } from 'vitest'
+import { resolve } from 'node:path'
+import { afterEach, beforeAll, expect, it, vi } from 'vitest'
+
+const buildScript = resolve(import.meta.dirname, '../scripts/build-plugins.mjs')
+beforeAll(() => { execFileSync(process.execPath, [buildScript, 'brand']) })
 
 let dispose: (() => void) | undefined
 function mountEffect(effectLabel: string) {
-  const source = readFileSync('apps/rumi/brand/client.js', 'utf8')
+  const source = readFileSync('apps/rumi/plugins/brand/lib/client.js', 'utf8')
   const context = {
     effect(effect: () => (() => void), label: string) {
       if (label === effectLabel) dispose = effect()

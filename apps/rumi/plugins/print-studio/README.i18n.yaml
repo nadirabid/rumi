@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/rumi/plugins/print-studio/README.md
+/print-studio:
+  en: c39ceba195e54fa1
+  zh: e6b7376b1c21aa7c
+/print-studio/where-to-make-a-change:
+  en: f9c2cfb2e78c6254
+  zh: 0e6320b211cf67dc
+/print-studio/mechanical-badges:
+  en: 9569cf9d434c812c
+  zh: 45a36066cae4e886
+/print-studio/skill-reminders:
+  en: 77a7d0d7ba88eddc
+  zh: 5e40ab8efae24191
+/print-studio/build-and-test:
+  en: c4c9040c3e3b796a
+  zh: 7e56f80ee07525ab

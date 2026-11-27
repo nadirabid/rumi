@@ -12,8 +12,6 @@ import { desktopArtifactOutput, desktopTargetBuildPaths } from './desktop-build-
 import { packageMacOSArtifacts, type DesktopPrepackagedArtifact } from './package-macos.ts'
 import { loadDesktopPackageEnvironment, localMacOSPackageEnvironment, validateDesktopPackageEnvironment } from './desktop-package-environment.mjs'
 import { createPackagingRun, recordPackagingEvent } from './packaging-run.mjs'
-import { withWindowsSigningStage } from './windows-signing-stage.mjs'
-import { prepareWindowsSignatureCacheDirectory, resolveWindowsSignatureCacheDirectory } from './windows-signature-cache-directory.mjs'
 import { withMacOSSigningKeychain } from './macos-signing-keychain.mjs'
 import { macOSDownloadEnvironment, resolveMacOSPackageSettings } from './macos-package-settings.mjs'
 import { packagingErrorDetails, packagingStep } from './packaging-step.mjs'
@@ -27,15 +25,6 @@ import { withMacOSNotarizationProxy } from './macos-notarization-proxy.ts'
 
 const APP_ROOT = resolve(import.meta.dirname, '..')
 const REPOSITORY_ROOT = resolve(APP_ROOT, '..', '..')
-const WINDOWS_SIGNING_ENV_PREFIX = 'DSH_DESKTOP_WINDOWS_'
-const WINDOWS_SIGNING_ENV_NAMES = [
-  'DSH_DESKTOP_WINDOWS_CER_FILE',
-  'DSH_DESKTOP_WINDOWS_KEY_CONTAINER',
-  'DSH_DESKTOP_WINDOWS_SIGNTOOL',
-  'DSH_DESKTOP_WINDOWS_TOKEN_PIN',
-  'DSH_DESKTOP_WINDOWS_SIGNATURE_CACHE_DIR',
-  'DSH_DESKTOP_WINDOWS_SIGNATURE_CACHE_CONCURRENCY',
-] as const
 const DESKTOP_UPLOAD_CREDENTIAL_ENV_NAMES = new Set([
   'DOWNLOAD_TEST_COS_SECRET_ID',
   'DOWNLOAD_TEST_COS_SECRET_KEY',
@@ -46,15 +35,15 @@ const DESKTOP_UPLOAD_CREDENTIAL_ENV_NAMES = new Set([
 /** `--build-version` value that numbers a build after the ones already taken. */
 const AUTOMATIC_BUILD_VERSION = 'auto'
 
-/** Fixed platform and architecture identifiers exposed by package scripts. */
-export type DesktopPackageTargetName = 'mac-arm64' | 'mac-x64' | 'win-x64'
+/** Fixed macOS architecture identifiers exposed by package scripts. */
+export type DesktopPackageTargetName = 'mac-arm64' | 'mac-x64'
 
-/** One supported release target and its electron-builder selectors. */
+/** One supported macOS release target and its electron-builder selectors. */
 export interface DesktopPackageTarget {
   readonly name: DesktopPackageTargetName
-  readonly platform: 'darwin' | 'win32'
+  readonly platform: 'darwin'
   readonly arch: 'arm64' | 'x64'
-  readonly builderPlatform: '--mac' | '--win'
+  readonly builderPlatform: '--mac'
   readonly builderArch: '--arm64' | '--x64'
 }
 
@@ -73,23 +62,6 @@ const TARGETS: Record<DesktopPackageTargetName, DesktopPackageTarget> = {
     builderPlatform: '--mac',
     builderArch: '--x64',
   },
-  'win-x64': {
-    name: 'win-x64',
-    platform: 'win32',
-    arch: 'x64',
-    builderPlatform: '--win',
-    builderArch: '--x64',
-  },
-}
-
-/**
- * Remove Windows signing configuration from package preparation subprocesses.
- * @param environment - Packaging command environment.
- * @returns A copy without Windows signing fields.
- */
-export function withoutWindowsSigningEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(environment)
-    .filter(([name]) => !name.startsWith(WINDOWS_SIGNING_ENV_PREFIX)))
 }
 
 /**
@@ -100,11 +72,9 @@ export function withoutWindowsSigningEnvironment(environment: NodeJS.ProcessEnv)
  */
 export function desktopElectronBuilderEnvironment(environment: NodeJS.ProcessEnv, unsigned: boolean): NodeJS.ProcessEnv {
   const selected: NodeJS.ProcessEnv = { ...environment, DSH_DESKTOP_UNSIGNED: unsigned ? '1' : '0' }
-  // The bundled NSIS decoder cannot extract 7-Zip's automatic ARM64-filtered entries.
-  if (environment.DSH_DESKTOP_TARGET_PLATFORM === 'win32') selected.ELECTRON_BUILDER_7Z_FILTER = 'BCJ'
   if (!unsigned) return selected
   return {
-    ...Object.fromEntries(Object.entries(withoutWindowsSigningEnvironment(selected))
+    ...Object.fromEntries(Object.entries(selected)
       .filter(([name]) => !/^(?:(?:WIN_)?CSC_|APPLE_|DSH_DESKTOP_MACOS_(?:SIGNING_|TEAM_ID$))/iu.test(name))),
     CSC_IDENTITY_AUTO_DISCOVERY: 'false',
     DSH_DESKTOP_UNSIGNED: '1',
@@ -177,10 +147,7 @@ export function resolveDesktopPackageTarget(
     throw new Error(`desktop package: unsupported target ${JSON.stringify(name)}; expected ${Object.keys(TARGETS).join(', ')}`)
   }
   const target = TARGETS[name]
-  if (target.platform === 'win32' && (hostPlatform !== 'win32' || hostArch !== 'x64')) {
-    throw new Error('desktop package: win-x64 requires a Windows x64 build host')
-  }
-  if (target.platform === 'darwin' && hostPlatform !== 'darwin') {
+  if (hostPlatform !== 'darwin') {
     throw new Error(`desktop package: ${name} requires a macOS build host`)
   }
   if (name === 'mac-arm64' && hostArch !== 'arm64') {
@@ -205,7 +172,7 @@ interface DesktopPackageInvocation {
 }
 
 function hostTargetName(platform: NodeJS.Platform, arch: string): DesktopPackageTargetName {
-  const name = `${platform === 'darwin' ? 'mac' : platform === 'win32' ? 'win' : platform}-${arch}`
+  const name = `${platform === 'darwin' ? 'mac' : platform}-${arch}`
   if (!isTargetName(name)) throw new Error(`desktop package: unsupported build host ${platform}-${arch}`)
   return name
 }
@@ -240,7 +207,7 @@ export function parseDesktopPackageInvocation(
   if (positionals.length > 1) throw new Error('desktop package: expected at most one target')
   const name = positionals[0] ?? hostTargetName(hostPlatform, hostArch)
   if (values.unsigned && values['prepare-only']) throw new Error('desktop package: --unsigned cannot use --prepare-only')
-  if (values['skip-notarization'] && (name === 'win-x64' || values.unsigned || values['prepare-only'])) {
+  if (values['skip-notarization'] && (values.unsigned || values['prepare-only'])) {
     throw new Error('desktop package: --skip-notarization requires a signed macOS build, without --prepare-only')
   }
   const requestedBuildVersion = values['build-version']?.trim()
@@ -380,17 +347,13 @@ async function main(): Promise<void> {
   try {
     await packagingStep(run.directory, 'configuration', async () => { validateDesktopPackageEnvironment(environment, target, invocation) }, secrets)
     await packagingStep(run.directory, 'toolchain', () => requireDesktopToolchain(target.platform, environment), secrets)
-    if (target.platform === 'darwin') {
-      const settings = resolveMacOSPackageSettings(environment)
-      recordPackagingEvent(run.directory, { type: 'macos-settings', packConcurrency: settings.packConcurrency,
-        downloadProxyConfigured: settings.downloadProxy !== undefined,
-        notarizationProxyConfigured: settings.notarizationProxy !== undefined })
-      await packagingStep(run.directory, 'macos-package', () => invocation.unsigned
-        ? packageTarget(invocation, environment, run)
-        : withMacOSSigningKeychain(environment, signingEnvironment => packageTarget(invocation, signingEnvironment, run)), secrets)
-    } else {
-      await packagingStep(run.directory, 'windows-package', () => packageTarget(invocation, environment, run), secrets)
-    }
+    const settings = resolveMacOSPackageSettings(environment)
+    recordPackagingEvent(run.directory, { type: 'macos-settings', packConcurrency: settings.packConcurrency,
+      downloadProxyConfigured: settings.downloadProxy !== undefined,
+      notarizationProxyConfigured: settings.notarizationProxy !== undefined })
+    await packagingStep(run.directory, 'macos-package', () => invocation.unsigned
+      ? packageTarget(invocation, environment, run)
+      : withMacOSSigningKeychain(environment, signingEnvironment => packageTarget(invocation, signingEnvironment, run)), secrets)
     success = true
   } catch (error) {
     process.stderr.write(`${packagingErrorDetails(error, secrets)}\n`)
@@ -401,7 +364,7 @@ async function main(): Promise<void> {
     else process.env.DSH_DESKTOP_PACKAGING_RUN_DIR = previousDirectory
     run.finish(success)
   }
-  if (success && target.platform === 'darwin' && !invocation.directory && !invocation.prepareOnly) {
+  if (success && !invocation.directory && !invocation.prepareOnly) {
     const paths = desktopTargetBuildPaths(target.name)
     const output = desktopArtifactOutput(paths, invocation)
     const filename = `rumi-${buildVersion}-mac-${target.arch}${output.suffix}.dmg`
@@ -410,10 +373,10 @@ async function main(): Promise<void> {
 }
 
 /**
- * Prepare one release only after its signing preflight, without publishing from the builder.
+ * Prepare one macOS release after preflight, without publishing from the builder.
  * @param invocation Validated host, target and packaging mode.
  * @param environment File-owned release configuration.
- * @param run Persistent stage supervisor; required for signed Windows packaging and enabled for all release commands.
+ * @param run Persistent stage supervisor.
  * @returns Resolves after preparation or complete packaging; any failed stage prevents a release record.
  */
 export async function packageTarget(
@@ -423,10 +386,10 @@ export async function packageTarget(
 ): Promise<void> {
   const { target } = invocation
   const execute = (args: readonly string[], env: NodeJS.ProcessEnv, cwd: string = APP_ROOT) => runPnpm(args, env, cwd, run)
-  const journal = target.platform === 'darwin' ? process.env.DSH_DESKTOP_PACKAGING_RUN_DIR : undefined
+  const journal = process.env.DSH_DESKTOP_PACKAGING_RUN_DIR
   const proxyEvent = (status: string) => { if (journal) recordPackagingEvent(journal, { type: 'notarization-proxy', status }) }
-  const mac = target.platform === 'darwin' ? resolveMacOSPackageSettings(environment) : undefined
-  const packArguments = mac === undefined ? [] : ['--concurrency', String(mac.packConcurrency)]
+  const mac = resolveMacOSPackageSettings(environment)
+  const packArguments = ['--concurrency', String(mac.packConcurrency)]
   const buildPaths = desktopTargetBuildPaths(target.name)
   const releaseRecordPath = join(buildPaths.artifacts, desktopBuildRecordFilename(target.name))
   if (!invocation.prepareOnly && !invocation.unsigned && !invocation.skipNotarization) {
@@ -434,48 +397,15 @@ export async function packageTarget(
     rmSync(`${releaseRecordPath}.tmp`, { force: true })
   }
   const artifactsRoot = desktopArtifactOutput(buildPaths, invocation).directory
-  const buildEnv = withoutWindowsSigningEnvironment(withoutDesktopUploadCredentials(
-    desktopElectronBuilderEnvironment(environment, invocation.unsigned)))
+  const buildEnv = desktopElectronBuilderEnvironment(withoutDesktopUploadCredentials(environment), invocation.unsigned)
   const targetEnv: NodeJS.ProcessEnv = {
     ...buildEnv,
     DSH_DESKTOP_MACOS_SKIP_NOTARIZATION: invocation.skipNotarization ? '1' : '0',
     DSH_DESKTOP_TARGET_PLATFORM: target.platform,
     DSH_DESKTOP_TARGET_ARCH: target.arch,
   }
-  const downloadEnv = macOSDownloadEnvironment(targetEnv, mac?.downloadProxy)
+  const downloadEnv = macOSDownloadEnvironment(targetEnv, mac.downloadProxy)
   const electronBuilderEnv = desktopElectronBuilderEnvironment(downloadEnv, invocation.unsigned)
-  for (const name of WINDOWS_SIGNING_ENV_NAMES) {
-    if (!invocation.unsigned && environment[name] !== undefined) electronBuilderEnv[name] = environment[name]
-  }
-  const signPrimaryRuntime = target.platform === 'win32' && !invocation.unsigned && !invocation.prepareOnly
-  const signedStage = async (stage: string, operation: () => Promise<void>): Promise<void> => {
-    if (!signPrimaryRuntime) return operation()
-    if (run === undefined) throw new Error('desktop package: signed Windows packaging requires a supervised run')
-    const controller = new AbortController()
-    const interrupted = (): void => controller.abort()
-    const detach = (): void => {
-      process.removeListener('SIGINT', interrupted)
-      process.removeListener('SIGTERM', interrupted)
-    }
-    process.once('SIGINT', interrupted)
-    process.once('SIGTERM', interrupted)
-    try {
-      const options = { stage, signal: controller.signal, record: (event: object): void => recordPackagingEvent(run.directory, event) }
-      await withWindowsSigningStage(options, async () => {
-        detach()
-        await operation()
-      })
-    } finally { detach() }
-  }
-  if (signPrimaryRuntime) {
-    if (run === undefined) throw new Error('desktop package: signed Windows packaging requires a supervised run')
-    await signedStage('preflight', async () => {
-      await prepareWindowsSignatureCacheDirectory(resolveWindowsSignatureCacheDirectory(environment))
-      await run.run('preflight:windows-signing', process.execPath,
-        ['--import', 'tsx/esm', join(APP_ROOT, 'scripts/windows-signing-preflight.ts')],
-        { cwd: APP_ROOT, env: electronBuilderEnv, timeoutMs: 60_000 })
-    })
-  }
   if (!invocation.reuseOfficialBuild) await execute(['run', 'build:official'], buildEnv, REPOSITORY_ROOT)
   const packWorkspace = async (): Promise<void> => {
     await execute(['run', 'release:pack', '--family', 'dsh', '--out', buildPaths.packedDsh, ...packArguments], buildEnv, REPOSITORY_ROOT)
@@ -487,31 +417,23 @@ export async function packageTarget(
     await execute(['--dir', 'native/system/packages/entry', 'pack', '--pack-destination', buildPaths.packedLandlock], buildEnv, REPOSITORY_ROOT)
   }
   const prepareRuntime = async (): Promise<void> => {
-    const deferPrimaryRuntimeSmoke = target.platform === 'darwin' || signPrimaryRuntime
-    await execute(['run', 'prepare:runtime', ...(deferPrimaryRuntimeSmoke ? ['--defer-primary-runtime-smoke'] : [])], downloadEnv)
+    await execute(['run', 'prepare:runtime', '--defer-primary-runtime-smoke'], downloadEnv)
   }
-  if (target.platform === 'darwin') {
-    const results = await Promise.allSettled([packWorkspace(), prepareRuntime()])
-    const failures = results.filter(result => result.status === 'rejected')
-    if (failures.length > 0) {
-      throw new AggregateError(failures.map(result => result.reason), 'desktop macOS packaging: preparation failed')
-    }
-  } else {
-    await packWorkspace()
-    await prepareRuntime()
+  const results = await Promise.allSettled([packWorkspace(), prepareRuntime()])
+  const failures = results.filter(result => result.status === 'rejected')
+  if (failures.length > 0) {
+    throw new AggregateError(failures.map(result => result.reason), 'desktop macOS packaging: preparation failed')
   }
-  if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime'], electronBuilderEnv)
   await execute(['run', 'prepare:packages'], targetEnv)
-  await execute(['run', 'prepare:dsh', ...(signPrimaryRuntime ? ['--defer-runtime-smoke'] : [])], downloadEnv)
-  if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime', '--dsh'], electronBuilderEnv)
+  await execute(['run', 'prepare:dsh'], downloadEnv)
   if (invocation.prepareOnly) return
-  if (target.platform === 'darwin' && !invocation.unsigned && !invocation.skipNotarization && !invocation.directory) {
+  if (!invocation.unsigned && !invocation.skipNotarization && !invocation.directory) {
     await execute([
       ...desktopElectronBuilderArguments(target, true),
       '--config.mac.notarize=false',
     ], electronBuilderEnv)
     const verifyApplication = () => execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts'], targetEnv)
-    const notaryProxy = mac?.notarizationProxy
+    const notaryProxy = mac.notarizationProxy
     if (notaryProxy !== undefined) await verifyApplication()
     const zipBuilderEnv = {
       ...electronBuilderEnv,
@@ -526,14 +448,14 @@ export async function packageTarget(
       ...(notaryProxy === undefined ? { verifyApplication } : {}),
     }, artifact => execute(desktopElectronBuilderArguments(target, false, artifact),
       artifact.format === 'zip' ? zipBuilderEnv : electronBuilderEnv)), undefined, undefined, proxyEvent)
-  } else if (target.platform === 'darwin' && !invocation.unsigned && !invocation.skipNotarization) {
+  } else if (!invocation.unsigned && !invocation.skipNotarization) {
     await execute([...desktopElectronBuilderArguments(target, true), '--config.mac.notarize=false'], electronBuilderEnv)
     await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts'], targetEnv)
     const appPath = join(buildPaths.artifacts, target.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Rumi.app')
-    await withMacOSNotarizationProxy(mac?.notarizationProxy,
+    await withMacOSNotarizationProxy(mac.notarizationProxy,
       () => notarizeMacOS({ appPath, ...resolveMacOSNotarizationEnvironment(environment) }), undefined, undefined, proxyEvent)
   } else {
-    await signedStage('artifacts', () => execute(desktopElectronBuilderArguments(target, invocation.directory), electronBuilderEnv))
+    await execute(desktopElectronBuilderArguments(target, invocation.directory), electronBuilderEnv)
     await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts',
       ...(invocation.unsigned ? ['--unsigned'] : []), ...(invocation.skipNotarization ? ['--skip-notarization'] : [])], targetEnv)
   }

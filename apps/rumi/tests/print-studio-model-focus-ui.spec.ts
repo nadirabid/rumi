@@ -3,8 +3,8 @@
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
-import { createModelSelector } from '../brand/print-studio/viewer/model-selector.js'
-import { en } from '../brand/print-studio/viewer/locales.js'
+import { createModelSelector } from '../plugins/print-studio/viewer/model-selector.js'
+import { en } from '../plugins/print-studio/viewer/locales.js'
 
 it('marks the working model independently of selection and removes the dot when work clears', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)

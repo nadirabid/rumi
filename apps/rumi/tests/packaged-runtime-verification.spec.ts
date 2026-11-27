@@ -1,36 +1,28 @@
 import { describe, expect, it, vi } from 'vitest'
 
-const { verifyDesktopRuntime } = vi.hoisted(() => ({
+const { verifyDesktopRuntime, scopeMacOSExecutableIdentities } = vi.hoisted(() => ({
   verifyDesktopRuntime: vi.fn<(root: string, expected: string) => Promise<void>>(async () => undefined),
+  scopeMacOSExecutableIdentities: vi.fn(async () => undefined),
 }))
-// The hook imports the built tree, which a clean checkout has not produced; this is the path it resolves.
-vi.mock('/apps/desktop/lib/types/runtime-tree.js', () => ({ verifyDesktopRuntime }))
-vi.mock('../scripts/windows-asar-unpack.mjs', async importOriginal => ({
-  ...await importOriginal<typeof import('../scripts/windows-asar-unpack.mjs')>(),
-  verifyWindowsAsarUnpack: async () => undefined,
-}))
+vi.mock('../lib/types/runtime-tree.js', () => ({ verifyDesktopRuntime }))
+vi.mock('../scripts/macos-executable-identity.mjs', () => ({ scopeMacOSExecutableIdentities }))
 
 const ENVIRONMENT = {
-  DSH_DESKTOP_APP_ID: 'com.example.installer',
-  DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN: 'https://policy.example.com',
-  DSH_DESKTOP_MANDATORY_UPDATE_CONFIG: JSON.stringify({ allowedAuthOrigins: ['https://login.example.com'] }),
-  DSH_DESKTOP_TARGET_PLATFORM: 'win32',
-  DSH_DESKTOP_TARGET_ARCH: 'x64',
+  DSH_DESKTOP_APP_ID: 'com.nadirmuzaffar.rumi',
+  DSH_DESKTOP_TARGET_PLATFORM: 'darwin',
+  DSH_DESKTOP_TARGET_ARCH: 'arm64',
   DSH_DESKTOP_UNSIGNED: '1',
-  DOWNLOAD_TEST_ORIGIN: 'https://desktop-updates.example.com',
-  DOWNLOAD_TEST_RELEASE_ID: '0123456789abcdef0123456789abcdef',
 }
 
-const CONTEXT = { appOutDir: 'out', packager: { getResourcesDir: () => 'out/resources' } }
+const CONTEXT = {
+  appOutDir: 'out',
+  packager: { getResourcesDir: () => 'out/Rumi.app/Contents/Resources', appInfo: { productFilename: 'Rumi', updaterCacheDirName: 'rumi-updater' } },
+}
 
-/**
- * Run the packaging hook that verifies the bundled runtime.
- * @returns The version that hook required the runtime to declare.
- */
 async function requiredRuntimeVersion(preparedRuntime?: string, preparedRuntimeVersion?: string): Promise<unknown> {
   verifyDesktopRuntime.mockClear()
   const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
-  const config = createElectronBuilderConfig(ENVIRONMENT, 'win32', 'x64', preparedRuntime, preparedRuntimeVersion)
+  const config = createElectronBuilderConfig(ENVIRONMENT, 'darwin', 'arm64', preparedRuntime, preparedRuntimeVersion)
   await config.afterPack(CONTEXT as never)
   return verifyDesktopRuntime.mock.calls[0]?.[1]
 }
@@ -43,9 +35,8 @@ describe('packaged runtime verification', () => {
     expect(await requiredRuntimeVersion()).toBe(productVersion)
   })
 
-  it('requires the version installed-update qualification wrote into its private runtime', async () => {
-    // Qualification rewrites the runtime's own version, so comparing against the product version would always fail.
-    expect(await requiredRuntimeVersion('/qualification/dsh', '0.1.6-alpha.2.20260921.1')).toBe('0.1.6-alpha.2.20260921.1')
+  it('accepts an explicit prepared runtime version override', async () => {
+    expect(await requiredRuntimeVersion('/custom/dsh', '0.1.6-alpha.2.20260921.1')).toBe('0.1.6-alpha.2.20260921.1')
   })
 
   it('does not let a build version change what the bundled runtime must declare', async () => {
@@ -55,7 +46,7 @@ describe('packaged runtime verification', () => {
     const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
     verifyDesktopRuntime.mockClear()
     const config = createElectronBuilderConfig(
-      { ...ENVIRONMENT, DSH_DESKTOP_BUILD_VERSION: `${productVersion}.20260921.1` }, 'win32', 'x64')
+      { ...ENVIRONMENT, DSH_DESKTOP_BUILD_VERSION: `${productVersion}.20260921.1` }, 'darwin', 'arm64')
     expect(config.extraMetadata).toMatchObject({ version: `${productVersion}.20260921.1` })
     await config.afterPack(CONTEXT as never)
     expect(verifyDesktopRuntime.mock.calls[0]?.[1]).toBe(productVersion)

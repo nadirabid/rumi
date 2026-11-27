@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
-import { createAnalogPanel } from '../brand/print-studio/viewer/analog/controls.js'
-import { INITIAL_VALUES } from '../brand/print-studio/viewer/analog/spec.js'
+import { createAnalogPanel } from '../plugins/print-studio/viewer/analog/controls.js'
+import { INITIAL_VALUES } from '../plugins/print-studio/viewer/analog/spec.js'
 
 it('drags the centered curve handle vertically through its range and resets it', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -189,7 +189,7 @@ it('tracks dirty reset triggers, groups adjacent spatial wells, and supports dou
 })
 
 it('hides occluded joint pins even though visible pins use grid centering', () => {
-  const css = readFileSync(resolve(__dirname, '../brand/print-studio/viewer/viewer.module.css'), 'utf8')
+  const css = readFileSync(resolve(__dirname, '../plugins/print-studio/viewer/viewer.module.css'), 'utf8')
   const style = document.createElement('style')
   style.textContent = css
   const viewer = document.createElement('section')

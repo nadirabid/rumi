@@ -5,7 +5,7 @@ import { packagingStep } from './packaging-step.mjs'
 import { spawn } from 'node:child_process'
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, delimiter, join, relative, resolve, sep } from 'node:path'
+import { basename, delimiter, join, relative, resolve } from 'node:path'
 import { desktopNodeEnvironment } from '../src/node-environment.ts'
 import { appBundleSources } from '../src/app-bundles.ts'
 import { createRuntimeProjectMetadata } from '../src/project-manager.ts'
@@ -127,14 +127,7 @@ async function main(): Promise<void> {
       const stagedBundles = join(BUILD_ROOT, 'app-bundles')
       mkdirSync(stagedBundles, { recursive: true })
       for (const bundle of appBundles) {
-        // A nested bundle package is staged on its own; keep it out of this package's files.
-        const nested = appBundles
-          .filter(other => other !== bundle && other.directory.startsWith(`${bundle.directory}${sep}`))
-          .map(other => other.directory)
-        cpSync(bundle.directory, join(stagedBundles, basename(bundle.directory)), {
-          recursive: true,
-          filter: source => !nested.some(directory => source === directory || source.startsWith(`${directory}${sep}`)),
-        })
+        cpSync(bundle.directory, join(stagedBundles, basename(bundle.directory)), { recursive: true })
       }
       createRuntimeProjectMetadata(BUILD_ROOT, release, appBundles.map(bundle => ({
         name: bundle.name,

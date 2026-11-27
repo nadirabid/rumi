@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 
 const fixture = vi.hoisted(() => ({ root: '', installed: false, calls: 0,
   release: null as null | (() => void) }))
-vi.mock('../brand/print-studio/probe.js', () => ({
+vi.mock('../plugins/print-studio/printer/probe.js', () => ({
   managedAppRoot: () => fixture.root,
   findBambuStudio: () => fixture.installed ? '/existing/BambuStudio.app' : null,
 }))
@@ -19,7 +19,7 @@ vi.mock('node:child_process', () => ({
 }))
 // The plugin is shipped as JavaScript and has no generated declarations.
 // @ts-expect-error JavaScript plugin module
-import { createAppSetup, verifyArchive } from '../brand/print-studio/app-setup.js'
+import { createAppSetup, verifyArchive } from '../plugins/print-studio/printer/app-setup.js'
 
 afterEach(async () => {
   if (fixture.root) await rm(fixture.root, { recursive: true, force: true })

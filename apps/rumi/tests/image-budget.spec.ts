@@ -6,7 +6,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import * as offload from '@deepseek-ai/dsh-compaction-image-offload'
 import { expect, it } from 'vitest'
-import * as budget from '../brand/image-budget.js'
+import * as budget from '../plugins/brand/image-budget.js'
 
 class Adapter extends LlmAdapter {
   requests: GenerateOptions[] = []

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createProjectStore, createProjectTypes, projectInstructionsFor, renderProjectInstructions } from '../brand/projects/index.js'
+import { createProjectStore, createProjectTypes, projectInstructionsFor, renderProjectInstructions } from '../plugins/projects/index.js'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })

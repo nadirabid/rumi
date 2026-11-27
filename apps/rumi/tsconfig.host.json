@@ -39,7 +39,7 @@
       "path": "../../packages/boot/plugin-manager"
     },
     {
-      "path": "./brand/print-studio/tsconfig.desktop.json"
+      "path": "./plugins/print-studio/tsconfig.desktop.json"
     }
   ],
   "exclude": [

@@ -79,9 +79,9 @@ open -a /Applications/Rumi.app
 
 - [`RUMI.md`](RUMI.md) — Architecture, bundled runtimes, signing/notarization, release pipeline, and build constraints.
 - [`AGENTS.md`](AGENTS.md) — Fork boundaries, allowed paths, and contributor rules.
-- [`apps/rumi/brand/print-studio/README.md`](apps/rumi/brand/print-studio/README.md) — Print Studio modeling, viewer, validation, badges, and printer handoff.
-- [`apps/rumi/brand/projects/README.md`](apps/rumi/brand/projects/README.md) — Project gallery, isolation policy, and session routing.
-- [`apps/rumi/brand/live-voice/README.md`](apps/rumi/brand/live-voice/README.md) — Live Voice transport, delegation, and visual capture.
+- [`apps/rumi/plugins/print-studio/README.md`](apps/rumi/plugins/print-studio/README.md) — Print Studio modeling, viewer, validation, badges, and printer handoff.
+- [`apps/rumi/plugins/projects/README.md`](apps/rumi/plugins/projects/README.md) — Project gallery, isolation policy, and session routing.
+- [`apps/rumi/plugins/live-voice/README.md`](apps/rumi/plugins/live-voice/README.md) — Live Voice transport, delegation, and visual capture.
 
 ## License
 

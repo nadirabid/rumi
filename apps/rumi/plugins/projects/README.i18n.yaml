@@ -1,0 +1,25 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/rumi/plugins/projects/README.md
+/rumi-projects:
+  en: 30c86a5eda78b862
+  zh: 102829da16776a66
+/rumi-projects/what-a-project-is:
+  en: 0e6edeb44e3319c0
+  zh: 04e78abb20e43694
+/rumi-projects/surfaces:
+  en: 82f552149e1a2539
+  zh: e9d680fe6f4cabfc
+/rumi-projects/routes:
+  en: c6a43207ba52e343
+  zh: c1624d563abaabd1
+/rumi-projects/boundaries:
+  en: 435a4af29e2ffbb6
+  zh: 9eee7530bc5e2aaa
+/rumi-projects/project-isolation:
+  en: 4f3bfe295e30cd2d
+  zh: 6e7652c43a2a5ad0
+/rumi-projects/gallery-appearance:
+  en: f5458bf1a0417723
+  zh: c9230c08e153e784

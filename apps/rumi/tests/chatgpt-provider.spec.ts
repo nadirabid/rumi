@@ -1,7 +1,7 @@
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import type { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import { expect, it, vi } from 'vitest'
-import * as ChatGPT from '../brand/chatgpt.js'
+import * as ChatGPT from '../plugins/brand/chatgpt.js'
 
 it('uses the resolved request byte budget for images on the saved ChatGPT route', async () => {
   const registerAdapter = vi.fn<(providers: string[], adapter: LlmAdapter) => void>()

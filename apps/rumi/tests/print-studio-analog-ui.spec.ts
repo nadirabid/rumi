@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 /** Local input remains authoritative while delayed host state arrives. */
 import React, { act } from 'react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 import { createAnalogPanel } from '../brand/print-studio/viewer/analog/controls.js'
@@ -184,4 +186,26 @@ it('tracks dirty reset triggers, groups adjacent spatial wells, and supports dou
     expect(resetHeight.dataset.dirty).toBe('false')
     expect(released).toHaveBeenLastCalledWith({ height: 0, peakX: .5, peakY: .5, curve: .5 })
   } finally { await act(async () => { root.unmount() }); vi.unstubAllGlobals() }
+})
+
+it('hides occluded joint pins even though visible pins use grid centering', () => {
+  const css = readFileSync(resolve(__dirname, '../brand/print-studio/viewer/viewer.module.css'), 'utf8')
+  const style = document.createElement('style')
+  style.textContent = css
+  const viewer = document.createElement('section')
+  viewer.className = 'rumi-print-viewer'
+  const pin = document.createElement('button')
+  pin.className = 'pv-joint-target'
+  pin.hidden = true
+  viewer.append(pin)
+  document.head.append(style)
+  document.body.append(viewer)
+  try {
+    expect(getComputedStyle(pin).display).toBe('none')
+    pin.hidden = false
+    expect(getComputedStyle(pin).display).toBe('grid')
+  } finally {
+    viewer.remove()
+    style.remove()
+  }
 })

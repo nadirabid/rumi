@@ -659,6 +659,7 @@ body[data-ds-dark-theme] .rumi-print-viewer {
   display: grid; place-items: center;
   cursor: pointer; pointer-events: auto;
 }
+.rumi-print-viewer .pv-joint-target[hidden] { display: none; }
 .rumi-print-viewer .pv-joint-orb {
   width: 20px;
   height: 20px;

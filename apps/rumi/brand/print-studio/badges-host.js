@@ -1,9 +1,9 @@
-/** Evaluate completed print turns outside the agent loop and expose the owner's badge collection. */
+/** Evaluate completed project turns outside the agent loop and expose the owner's badge collection. */
 import { owningProject, projectById } from './print-project.js'
-import { join, relative, resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import { createBadgeEvents } from './badges-events.js'
 import { openBadgeStore } from './badges-store.js'
-import { PRINT_BADGE_KINDS } from './badges-kinds.js'
+import { HABIT_BADGE_KINDS, PRINT_BADGE_KINDS } from './badges-kinds.js'
 
 function validationPath(event, project) {
   if (event.data.name !== 'validation_mechanics' || event.data.isError) return null
@@ -15,32 +15,54 @@ function validationPath(event, project) {
   return typeof args?.path === 'string' ? relative(project.path, resolve(project.path, args.path)).split('\\').join('/') : null
 }
 
-function turnEvents(observation, endSeq) {
+function verifiedCompletedEnd(observation, endSeq) {
   const { events, inheritedEventCount } = observation
   const end = events[endSeq]
   if (!end || end.seq !== endSeq || end.type !== 'turn/end' || end.data.reason.kind !== 'completed' || endSeq < inheritedEventCount) {
     throw new Error('The saved badge review does not reference a completed project turn')
   }
+  return { events, inheritedEventCount }
+}
+
+function turnEvents(observation, endSeq) {
+  const { events, inheritedEventCount } = verifiedCompletedEnd(observation, endSeq)
   let first = endSeq
   while (first > inheritedEventCount && events[first - 1].type !== 'turn/end') first--
   return events.slice(first, endSeq + 1)
 }
 
-function eligibleAwards(results, targets) {
+function projectEvents(observation, endSeq) {
+  const { events, inheritedEventCount } = verifiedCompletedEnd(observation, endSeq)
+  return events.slice(inheritedEventCount, endSeq + 1)
+}
+
+function eligibleMechanicalAwards(results, targets) {
   return results.map(({ kind, evidence, evidenceRefs, modelPath, revision, sourceHash, working }) => {
     if (!PRINT_BADGE_KINDS.includes(kind) || !targets.some(target => target.modelPath === modelPath && (target.changed || working === true)) || !evidence?.trim()
       || typeof working !== 'boolean' || !revision || !/^[\da-f]{64}$/u.test(sourceHash)
       || !Array.isArray(evidenceRefs) || !evidenceRefs.every(ref => typeof ref === 'string')) throw new Error('Invalid badge review result')
-    return { kind, evidence, evidenceRefs, modelPath, revision, sourceHash, working }
+    return { kind, category: 'mechanical', evidence, evidenceRefs, modelPath, revision, sourceHash, working }
   })
 }
 
-/** Observe revision changes at turn boundaries and run each project's review queue until disposal.
+function eligibleHabitAwards(results, unearnedKinds) {
+  const allowed = new Set(unearnedKinds)
+  return results.map(({ kind, path, signals, evidence, evidenceRefs }) => {
+    if (!HABIT_BADGE_KINDS.includes(kind) || !allowed.has(kind)
+      || !['practice', 'growth'].includes(path)
+      || !Array.isArray(signals) || signals.length === 0 || !signals.every(code => typeof code === 'string')
+      || !evidence?.trim()
+      || !Array.isArray(evidenceRefs) || !evidenceRefs.every(ref => typeof ref === 'string')) throw new Error('Invalid badge review result')
+    return { kind, category: 'habit', path, signals, evidence, evidenceRefs }
+  })
+}
+
+/** Observe revision and turn changes at turn boundaries and run each project's review queue until disposal.
  * @param {object} ctx Scoped Print Studio host services.
- * @param {object} options Configured evaluator, revision inspector, and profile database path.
+ * @param {object} options Configured evaluators, revision inspector, and profile database path.
  * @returns {object} Owner-only gallery, live announcements, explicit retry, and quiescence operations.
  */
-export function createBadgeHost(ctx, { databasePath, config, capture, review }) {
+export function createBadgeHost(ctx, { databasePath, config, capture, review, reviewHabits = null }) {
   const store = openBadgeStore(databasePath)
   const reveals = createBadgeEvents()
   const lifetime = new AbortController()
@@ -57,18 +79,31 @@ export function createBadgeHost(ctx, { databasePath, config, capture, review }) 
       const session = { id: observed.header.id, header: observed.header }
       const project = owningProject(ctx.rumiProjectScope, session)
       if (!project || project.id !== job.projectId || session.id !== job.sessionId) return []
+      const recordRequest = async record => {
+        signal.throwIfAborted()
+        if (!owningProject(ctx.rumiProjectScope, session)) throw new Error('The review project is no longer registered')
+        store.recordRequest(job, record)
+      }
+      if (job.scope === 'habit') {
+        if (!reviewHabits) return []
+        const earned = new Set(store.earnedKinds(job.projectId))
+        const unearnedKinds = HABIT_BADGE_KINDS.filter(kind => !earned.has(kind))
+        if (unearnedKinds.length === 0) return []
+        const events = projectEvents(observed, job.turnEndSeq)
+        const results = await reviewHabits(ctx, {
+          session, project, events, turnEndSeq: job.turnEndSeq, unearnedKinds, signal, recordRequest,
+        }, config)
+        signal.throwIfAborted()
+        if (!owningProject(ctx.rumiProjectScope, session)) return []
+        return eligibleHabitAwards(results, unearnedKinds)
+      }
       const events = turnEvents(observed, job.turnEndSeq)
       const results = await review(ctx, {
-        session, project, events, turnEndSeq: job.turnEndSeq, targets: job.targets, signal,
-        recordRequest: async record => {
-          signal.throwIfAborted()
-          if (!owningProject(ctx.rumiProjectScope, session)) throw new Error('The review project is no longer registered')
-          store.recordRequest(job, record)
-        },
+        session, project, events, turnEndSeq: job.turnEndSeq, targets: job.targets, signal, recordRequest,
       }, config)
       signal.throwIfAborted()
       if (!owningProject(ctx.rumiProjectScope, session)) return []
-      return eligibleAwards(results, job.targets)
+      return eligibleMechanicalAwards(results, job.targets)
     } finally { observed[Symbol.dispose]() }
   }
 
@@ -116,11 +151,19 @@ export function createBadgeHost(ctx, { databasePath, config, capture, review }) 
   function observe(session, event) {
     if (event.type === 'turn/start') {
       const project = owningProject(ctx.rumiProjectScope, session)
-      if (project) turns.set(session, { project, turn: event.data.turn, baseline: new Map(capture(project.path).map(item => [item.modelPath, item.statKey])), checked: new Set() })
+      if (project) turns.set(session, {
+        project, turn: event.data.turn, hadUserMessage: false,
+        baseline: new Map(capture(project.path).map(item => [item.modelPath, item.statKey])), checked: new Set(),
+      })
       return
     }
     const state = turns.get(session)
-    if (!state || (event.type !== 'tool/ptc-dispatch' && event.data.turn !== state.turn)) return
+    if (!state) return
+    if (event.type === 'user/message' && event.data?.source?.kind === 'user') {
+      state.hadUserMessage = true
+      return
+    }
+    if (event.type !== 'tool/ptc-dispatch' && event.data.turn !== state.turn) return
     if (event.type === 'tool/call' || event.type === 'tool/ptc-dispatch') {
       const path = validationPath(event, state.project)
       if (path) state.checked.add(path)
@@ -133,10 +176,20 @@ export function createBadgeHost(ctx, { databasePath, config, capture, review }) 
       const changed = state.baseline.get(item.modelPath) !== item.statKey
       if (changed || state.checked.has(item.modelPath)) targets.push({ ...item, changed })
     }
+    let queued = false
     if (targets.length) {
-      store.enqueue(state.project.id, session.id, event.seq, targets)
-      schedule(state.project.id)
+      store.enqueue(state.project.id, session.id, event.seq, targets, 'mechanical')
+      queued = true
     }
+    if (reviewHabits && (state.hadUserMessage || targets.length > 0)) {
+      const earned = new Set(store.earnedKinds(state.project.id))
+      const unearnedKinds = HABIT_BADGE_KINDS.filter(kind => !earned.has(kind))
+      if (unearnedKinds.length > 0) {
+        store.enqueue(state.project.id, session.id, event.seq, { kinds: unearnedKinds }, 'habit')
+        queued = true
+      }
+    }
+    if (queued) schedule(state.project.id)
   }
 
   function collection(projectId) {

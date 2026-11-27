@@ -1,6 +1,6 @@
 /** Project awards and their supporting evidence in Rumi's global badge collection. */
 import stylesheet from './collection.css?inline'
-import { PRINT_BADGE_KINDS as kinds } from '../badges-kinds.js'
+import { ALL_BADGE_KINDS as allKinds, HABIT_BADGE_KINDS as habitKinds, PRINT_BADGE_KINDS as mechanicalKinds } from '../badges-kinds.js'
 import { createBadgeAwardFeed } from './award-feed.js'
 
 const PANEL = 'print-studio-badges'
@@ -10,28 +10,34 @@ const REVEAL_HOLD_MS = 3_700
 const REVEAL_FADE_MS = 600
 
 const en = {
-  title: 'Badges', empty: 'Build a mechanism in a project to earn its badge.',
-  progress: '{count} of {total} mechanical badges earned',
-  pending: 'Checking your latest designs…', failed: 'Some designs still need a badge check.',
+  title: 'Badges', empty: 'Build mechanisms and grow your maker habits in a project to earn badges.',
+  progress: '{count} of {total} badges earned',
+  pending: 'Checking your latest work…', failed: 'Some projects still need a badge check.',
   loadError: 'Your badges couldn’t be loaded.', retryError: 'The badge check couldn’t be restarted.',
   retry: 'Try again', oneProject: '1 project', projects: '{count} projects',
   movementChecked: 'Movement checked',
   earnedAnnouncement: 'You earned the {badge} badge in {project}.',
   dismissReveal: 'Dismiss badge reveal',
+  mechanicalGroup: 'Mechanical',
+  habitsGroup: 'Maker habits',
   'barrel-hinge': 'Barrel hinge', 'living-hinge': 'Living hinge', 'wheel-and-axle': 'Wheel and axle',
   'dovetail-slide': 'Dovetail slide', 'gear-pair': 'Gear pair', 'rack-and-pinion': 'Rack and pinion',
+  language: 'Language', patience: 'Patience', persistence: 'Persistence',
 }
 const zh = {
-  title: '徽章', empty: '在项目中设计机械结构，即可获得相应的徽章。',
-  progress: '已获得 {count} 枚机械徽章，共 {total} 枚',
-  pending: '正在检查最新设计…', failed: '部分设计仍需进行徽章检查',
+  title: '徽章', empty: '在项目中设计机械结构、培养制作习惯，即可获得徽章。',
+  progress: '已获得 {count} 枚徽章，共 {total} 枚',
+  pending: '正在检查最新进展…', failed: '部分项目仍需进行徽章检查',
   loadError: '徽章未能加载', retryError: '未能重新开始徽章检查',
   retry: '再试一次', oneProject: '1 个项目', projects: '{count} 个项目',
   movementChecked: '已检查活动情况',
   earnedAnnouncement: '你在{project}项目中获得了{badge}徽章。',
   dismissReveal: '关闭徽章提示',
+  mechanicalGroup: '机械结构',
+  habitsGroup: '制作习惯',
   'barrel-hinge': '圆筒铰链', 'living-hinge': '柔性铰链', 'wheel-and-axle': '车轮与轮轴',
   'dovetail-slide': '燕尾导轨', 'gear-pair': '齿轮组', 'rack-and-pinion': '齿轮齿条',
+  language: '清晰表达', patience: '耐心等待', persistence: '坚持不懈',
 }
 
 /** Unified 48x48 dual-layer emblems shared by every earned badge, unearned badge, and reveal. */
@@ -59,6 +65,18 @@ const emblems = {
   'rack-and-pinion': {
     fill: 'M21.8 6h4.4l.9 2.9 2.2.9 2.7-1.3 3.1 3.1-1.3 2.7.9 2.2 2.9.9v4.4l-2.9.9-.9 2.2 1.3 2.7-3.1 3.1-2.7-1.3-2.2.9-.9 2.9h-4.4l-.9-2.9-2.2-.9-2.7 1.3-3.1-3.1 1.3-2.7-.9-2.2-2.9-.9v-4.4l2.9-.9.9-2.2-1.3-2.7 3.1-3.1 2.7 1.3 2.2-.9z M6 40.5v-5h3.5l1.5 2.5h3.5l1.5-2.5h3.5l1.5 2.5h3.5l1.5-2.5h3.5l1.5 2.5h3.5l1.5-2.5H42v5a1.5 1.5 0 0 1-1.5 1.5h-33A1.5 1.5 0 0 1 6 40.5z',
     stroke: 'M21.8 6h4.4l.9 2.9 2.2.9 2.7-1.3 3.1 3.1-1.3 2.7.9 2.2 2.9.9v4.4l-2.9.9-.9 2.2 1.3 2.7-3.1 3.1-2.7-1.3-2.2.9-.9 2.9h-4.4l-.9-2.9-2.2-.9-2.7 1.3-3.1-3.1 1.3-2.7-.9-2.2-2.9-.9v-4.4l2.9-.9.9-2.2-1.3-2.7 3.1-3.1 2.7 1.3 2.2-.9z M28.2 19.6a4.2 4.2 0 1 1-8.4 0 4.2 4.2 0 1 1 8.4 0z M6 40.5v-5h3.5l1.5 2.5h3.5l1.5-2.5h3.5l1.5 2.5h3.5l1.5-2.5h3.5l1.5 2.5h3.5l1.5-2.5H42v5a1.5 1.5 0 0 1-1.5 1.5h-33A1.5 1.5 0 0 1 6 40.5z',
+  },
+  language: {
+    fill: 'M10 9.5h28a4 4 0 0 1 4 4v16.5a4 4 0 0 1-4 4H21.5L12 40.5V34h-2a4 4 0 0 1-4-4V13.5a4 4 0 0 1 4-4z',
+    stroke: 'M10 9.5h28a4 4 0 0 1 4 4v16.5a4 4 0 0 1-4 4H21.5L12 40.5V34h-2a4 4 0 0 1-4-4V13.5a4 4 0 0 1 4-4z M13.5 17.5h15.5 M13.5 22.8h21 M13.5 28h11.5 M33.5 15l1 2.4 2.4 1-2.4 1-1 2.4-1-2.4-2.4-1 2.4-1z',
+  },
+  patience: {
+    fill: 'M13.5 8h21v4.2c0 4.4-4 7.7-8.1 10.6h-4.8C17.5 19.9 13.5 16.6 13.5 12.2z M13.5 40h21v-4.2c0-4.4-4-7.7-8.1-10.6h-4.8c-4.1 2.9-8.1 6.2-8.1 10.6z',
+    stroke: 'M10.5 8h27 M10.5 40h27 M13.5 8v4.2c0 4.6 4.4 8 8.7 10.8 1.2.7 1.2 1.3 0 2-4.3 2.8-8.7 6.2-8.7 10.8V40 M34.5 8v4.2c0 4.6-4.4 8-8.7 10.8-1.2.7-1.2 1.3 0 2 4.3 2.8 8.7 6.2 8.7 10.8V40 M17.5 14h13 M17 36.2c2.5-2.5 4.8-3.8 7-3.8s4.5 1.3 7 3.8 M24 25.5v4.5',
+  },
+  persistence: {
+    fill: 'M6.5 39 20 16.5 27.5 28l4.5-6.8L41.5 39z M20 16.5V8.5l8.5 3-8.5 3z',
+    stroke: 'M6.5 39 20 16.5 27.5 28l4.5-6.8L41.5 39H6.5z M20 16.5V8.5l8.5 3-8.5 3 M13 39c2.5-3.4 4.8-5.3 8.2-6.2 2.4-.6 3.5-2.1 2.2-4.1-1.2-1.8-.3-3.8 2.4-4.7',
   },
   medal: {
     fill: 'M37 19a13 13 0 1 1-26 0 13 13 0 1 1 26 0z M16 29.5 13 42l8.5-4.8L25.5 42l1.2-11.5 M32 29.5 36.2 42l-8.8-4.8',
@@ -210,7 +228,7 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
             setData(result)
             setError(current => current === 'loadError' ? null : current)
           }
-        } catch (error) {
+        } catch (_loadError) {
           if (!controller.signal.aborted) setError('loadError')
         } finally {
           loading = false
@@ -242,7 +260,7 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
           setError(null)
           setRefresh(value => value + 1)
         }
-      } catch (error) {
+      } catch (_retryError) {
         if (!controller.signal.aborted) setError('retryError')
       } finally {
         retryRequest.current = null
@@ -250,7 +268,7 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
       }
     }
 
-    const cards = kinds.map(kind => {
+    const cards = allKinds.map(kind => {
       const awards = data?.awards.filter(award => award.kind === kind) ?? []
       const firstEarnedAt = awards.reduce((first, award) => {
         const earnedAt = Date.parse(award.earnedAt)
@@ -258,26 +276,36 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
       }, Number.MAX_SAFE_INTEGER)
       return { kind, awards, earned: awards.length > 0, firstEarnedAt }
     })
+    const cardByKind = new Map(cards.map(card => [card.kind, card]))
     const earnedCards = cards.filter(card => card.earned)
       .sort((left, right) => left.firstEarnedAt - right.firstEarnedAt)
-    const unearnedCards = cards.filter(card => !card.earned)
+    const unearnedGroups = [
+      { id: 'mechanical', labelKey: 'mechanicalGroup', items: mechanicalKinds.map(kind => cardByKind.get(kind)).filter(card => !card.earned) },
+      { id: 'habits', labelKey: 'habitsGroup', items: habitKinds.map(kind => cardByKind.get(kind)).filter(card => !card.earned) },
+    ].filter(group => group.items.length > 0)
     const notice = error || (data?.failed ? 'failed' : null)
     return h('section', { className: 'rumi-badges', 'aria-label': t('title') },
       h('header', { className: 'rumi-badges-heading' }, h('h1', null, t('title')),
-        data && h('p', null, earnedCards.length ? t('progress', { count: earnedCards.length, total: kinds.length }) : t('empty'))),
+        data && h('p', null, earnedCards.length ? t('progress', { count: earnedCards.length, total: allKinds.length }) : t('empty'))),
       notice && h('div', { className: 'rumi-badges-notice', role: 'alert' }, t(notice),
         h(Button, { variant: 'outline', size: 'sm', disabled: retrying, onClick: retry }, t('retry'))),
       data?.pending > 0 && h('p', { className: 'rumi-badges-pending', role: 'status' }, t('pending')),
       data ? h('div', { className: 'rumi-badges-groups' },
         earnedCards.length > 0 && h('div', { className: 'rumi-badges-grid rumi-badges-earned' },
           earnedCards.map(({ kind, awards }) => h(Card, { key: kind, kind, awards, t }))),
-        earnedCards.length > 0 && unearnedCards.length > 0 && h('div', {
+        earnedCards.length > 0 && unearnedGroups.length > 0 && h('div', {
           className: 'rumi-badges-divider', role: 'separator', 'aria-hidden': true,
         }),
-        unearnedCards.length > 0 && h('div', { className: 'rumi-badges-grid rumi-badges-unearned' },
-          unearnedCards.map(({ kind, awards }) => h(Card, { key: kind, kind, awards, t }))))
+        unearnedGroups.length > 0 && h('div', { className: 'rumi-badges-unearned-groups' },
+          unearnedGroups.map(group => h('section', {
+            key: group.id, className: 'rumi-badges-category', 'data-category': group.id,
+            'aria-labelledby': `rumi-badges-category-${group.id}`,
+          },
+          h('div', { id: `rumi-badges-category-${group.id}`, className: 'rumi-badges-category-label' }, t(group.labelKey)),
+          h('div', { className: 'rumi-badges-grid rumi-badges-unearned' },
+            group.items.map(({ kind, awards }) => h(Card, { key: kind, kind, awards, t })))))))
         : !error && h('div', { className: 'rumi-badges-grid rumi-badges-earned', 'aria-busy': true },
-          kinds.map(kind => h('div', { key: kind, className: 'rumi-badges-skeleton' }))))
+          allKinds.map(kind => h('div', { key: kind, className: 'rumi-badges-skeleton' }))))
   }
 
   ctx.slots.inject('rumi.projects.toolbar', () => ctx.slots.register({

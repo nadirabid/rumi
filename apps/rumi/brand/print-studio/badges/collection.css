@@ -49,6 +49,22 @@
   grid-template-columns: repeat(auto-fill, min(100%, var(--badge-unearned-width)));
   gap: 16px;
 }
+.rumi-badges-unearned-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.rumi-badges-category {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.rumi-badges-category-label {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -.01em;
+}
 .rumi-badges-divider {
   block-size: 1px;
   margin: 40px 0 32px;
@@ -132,6 +148,21 @@
   --badge-tint-soft: color-mix(in srgb, var(--dsw-static-red-400) 58%, var(--dsw-static-amber-400));
   --badge-ink: color-mix(in srgb, var(--dsw-static-red-500) 72%, var(--dsw-static-amber-600));
 }
+[data-kind='language'] {
+  --badge-tint: color-mix(in srgb, var(--dsw-static-blue-400) 56%, var(--dsw-static-green-500));
+  --badge-tint-soft: color-mix(in srgb, var(--dsw-static-blue-300) 56%, var(--dsw-static-green-400));
+  --badge-ink: color-mix(in srgb, var(--dsw-static-blue-600) 56%, var(--dsw-static-green-500));
+}
+[data-kind='patience'] {
+  --badge-tint: color-mix(in srgb, var(--dsw-static-deepseek-500) 54%, var(--dsw-static-violet-600));
+  --badge-tint-soft: color-mix(in srgb, var(--dsw-static-deepseek-300) 54%, var(--dsw-static-violet-400));
+  --badge-ink: color-mix(in srgb, var(--dsw-static-deepseek-600) 54%, var(--dsw-static-violet-600));
+}
+[data-kind='persistence'] {
+  --badge-tint: color-mix(in srgb, var(--dsw-static-red-500) 58%, var(--dsw-static-violet-600));
+  --badge-tint-soft: color-mix(in srgb, var(--dsw-static-red-400) 58%, var(--dsw-static-violet-400));
+  --badge-ink: color-mix(in srgb, var(--dsw-static-red-500) 64%, var(--dsw-static-violet-600));
+}
 
 [data-ds-dark-theme] [data-kind='barrel-hinge'] { --badge-ink: var(--dsw-static-blue-300); }
 [data-ds-dark-theme] [data-kind='living-hinge'] { --badge-ink: var(--dsw-static-green-400); }
@@ -140,6 +171,15 @@
 [data-ds-dark-theme] [data-kind='gear-pair'] { --badge-ink: var(--dsw-static-violet-400); }
 [data-ds-dark-theme] [data-kind='rack-and-pinion'] {
   --badge-ink: color-mix(in srgb, var(--dsw-static-red-400) 64%, var(--dsw-static-amber-400));
+}
+[data-ds-dark-theme] [data-kind='language'] {
+  --badge-ink: color-mix(in srgb, var(--dsw-static-blue-300) 56%, var(--dsw-static-green-400));
+}
+[data-ds-dark-theme] [data-kind='patience'] {
+  --badge-ink: color-mix(in srgb, var(--dsw-static-deepseek-300) 54%, var(--dsw-static-violet-400));
+}
+[data-ds-dark-theme] [data-kind='persistence'] {
+  --badge-ink: color-mix(in srgb, var(--dsw-static-red-400) 58%, var(--dsw-static-violet-400));
 }
 
 .rumi-badge-reveal {

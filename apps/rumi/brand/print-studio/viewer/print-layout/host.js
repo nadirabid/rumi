@@ -84,6 +84,10 @@ export function registerPrintLayout(ctx, withSource, options) {
           await writeFile(file, bytes, { flag: 'wx', mode: 0o600 })
           try { await run('/usr/bin/open', ['-a', slicer.path, file], { timeout: 15_000, signal: request.signal, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !/KEY|SECRET|TOKEN|PASSWORD/i.test(key))) }) }
           catch (_error) { return json({ error: 'layoutOpenFailed' }, 502) }
+          try {
+            await writeFileAtomic(join(await realpath(cwd), '.rumi-print-handoff.json'),
+              JSON.stringify({ model, sourceHash: design.contentHash, openedAt: new Date().toISOString() }) + '\n', { mode: 0o600 })
+          } catch (_handoffReceiptError) { /* Handoff already opened in Bambu Studio; keep receipt recording best-effort. */ }
           return json({ ok: true })
         })
       } catch (_error) { return json({ error: 'layoutFailed' }, 409) }

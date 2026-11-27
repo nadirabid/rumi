@@ -25,6 +25,7 @@ import { readPrinterStatus } from './monitor.js'
 import { applyBlender } from './blender/host.js'
 import { applySkillReminders, createProjectSkillReviewStore, skillReviewDomain } from './skill-reminders.js'
 import { createBadgeReviewConfig, capturePrintBadgeRevisions, reviewPrintBadges } from './badge-review.js'
+import { reviewHabitBadges } from './badge-review-habits.js'
 import { createBadgeHost } from './badges-host.js'
 import { registerRegionAudits } from './viewer/region-audit.js'
 import { applyViewer } from './viewer/host.js'
@@ -263,7 +264,7 @@ export async function apply(ctx, config) {
   ctx.inject(['rumiProjectScope', 'llm'], scoped => {
     const badges = createBadgeHost(scoped, {
       databasePath: config.badgeDatabase, config: config.badgeReview,
-      capture: capturePrintBadgeRevisions, review: reviewPrintBadges,
+      capture: capturePrintBadgeRevisions, review: reviewPrintBadges, reviewHabits: reviewHabitBadges,
     })
     scoped.effect(() => scoped.connection.fetch.register({
       path: ROUTE + '/badges/events', methods: ['GET'], requestBody: 'buffered',

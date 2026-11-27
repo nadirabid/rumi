@@ -1,5 +1,5 @@
 /** Live badge awards for the shell reveal and the open collection. */
-import { PRINT_BADGE_KINDS } from '../badges-kinds.js'
+import { ALL_BADGE_KINDS } from '../badges-kinds.js'
 
 const MAX_QUEUED_AWARDS = 8
 const MAX_REMEMBERED_AWARDS = 128
@@ -26,11 +26,11 @@ export function createBadgeAwardFeed(path) {
       throw error
     }
     if (typeof notice?.projectName !== 'string' || !Array.isArray(notice.awards)
-      || notice.awards.length > PRINT_BADGE_KINDS.length) return
+      || notice.awards.length > ALL_BADGE_KINDS.length) return
     const fresh = []
     for (const award of notice.awards) {
       if (typeof award?.id !== 'string' || !award.id || award.id.length > 128
-        || !PRINT_BADGE_KINDS.includes(award.kind) || seen.has(award.id)) continue
+        || !ALL_BADGE_KINDS.includes(award.kind) || seen.has(award.id)) continue
       seen.add(award.id)
       if (seen.size > MAX_REMEMBERED_AWARDS) seen.delete(seen.values().next().value)
       fresh.push({ id: award.id, kind: award.kind, projectName: notice.projectName })

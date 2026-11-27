@@ -224,19 +224,26 @@ it('shares new badge awards as silent context only with active voice for the own
   expect(note.content).toContain('your next relevant reply')
   expect(note.content).not.toContain('project title')
 
+  await award(f.projectPath, 'habit-award', 'patience')
+  await expect.poll(() => f.frames.length).toBe(2)
+  const habitNote = f.frames[1]!
+  expect(habitNote.content).toContain('The user just earned the Patience badge in this project.')
+  expect(habitNote.content).not.toContain('Print readiness requires a separate check.')
+
   const acknowledgment = f.holdProviderClose()
   const closing = f.request('/close', { liveId })
   await acknowledgment.requested
   await award(f.projectPath, 'after-stop', 'rack-and-pinion')
   acknowledgment.release()
   expect((await closing).status).toBe(204)
-  expect(f.frames.map(frame => frame.type)).toEqual(['session.thinking.append', 'session.close'])
+  expect(f.frames.map(frame => frame.type)).toEqual(['session.thinking.append', 'session.thinking.append', 'session.close'])
   expect(f.steered).toEqual([])
   expect(f.injected).toEqual([])
 
   const log = await readFile(join(f.diagnosticsDirectory, `${liveId}.jsonl`), 'utf8')
   expect(log.trim().split('\n').map(line => JSON.parse(line)).filter(row => row.type === 'host.thinking')).toEqual([
     expect.objectContaining({ data: { delegationId: null, eventId: note.event_id, awardIds: ['new-award'], content: note.content } }),
+    expect.objectContaining({ data: { delegationId: null, eventId: habitNote.event_id, awardIds: ['habit-award'], content: habitNote.content } }),
   ])
 })
 

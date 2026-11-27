@@ -1,6 +1,6 @@
 /** Post-commit badge awards available to Rumi's host plugins. */
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { PRINT_BADGE_KINDS } from './badges-kinds.js'
+import type { ALL_BADGE_KINDS } from './badges-kinds.js'
 
 /** A batch of new awards from one registered project's completed review. */
 export interface PrintBadgeEarned {
@@ -9,7 +9,7 @@ export interface PrintBadgeEarned {
   readonly projectName: string
   readonly awards: readonly {
     readonly id: Branded<'RumiPrintBadgeId'>
-    readonly kind: (typeof PRINT_BADGE_KINDS)[number]
+    readonly kind: (typeof ALL_BADGE_KINDS)[number]
   }[]
 }
 

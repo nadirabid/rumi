@@ -79,25 +79,27 @@ it('updates the empty collection with earned badges and shows all contributing p
   }))
   render(page)
   await act(async () => {})
-  expect(screen.getByText('Build a mechanism in a project to earn its badge.')).toBeTruthy()
+  expect(screen.getByText('Build mechanisms and grow your maker habits in a project to earn badges.')).toBeTruthy()
   const cards = screen.getAllByRole('article')
-  expect(cards).toHaveLength(6)
+  expect(cards).toHaveLength(9)
   expect(within(cards[0]!).getByRole('heading', { name: 'Barrel hinge' })).toBeTruthy()
   expect(document.querySelector('.rumi-badges-earned')).toBeNull()
   expect(document.querySelector('.rumi-badges-divider')).toBeNull()
-  expect(document.querySelectorAll('.rumi-badges-unearned article')).toHaveLength(6)
+  expect(document.querySelectorAll('.rumi-badges-unearned article')).toHaveLength(9)
+  expect(screen.getByText('Mechanical')).toBeTruthy()
+  expect(screen.getByText('Maker habits')).toBeTruthy()
   for (const card of cards) {
     expect(within(card).queryByText('Not yet earned')).toBeNull()
     expect(card.querySelector('.rumi-badge-face[data-locked]')).toBeTruthy()
     expect(card.querySelector('details')).toBeNull()
   }
   await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
-  expect(screen.getByText('1 of 6 mechanical badges earned')).toBeTruthy()
+  expect(screen.getByText('1 of 9 badges earned')).toBeTruthy()
   const earnedGroup = document.querySelector('.rumi-badges-earned')!
-  const unearnedGroup = document.querySelector('.rumi-badges-unearned')!
+  const unearnedGroups = document.querySelector('.rumi-badges-unearned-groups')!
   expect(document.querySelector('.rumi-badges-divider')).toBeTruthy()
   expect(within(earnedGroup).getAllByRole('article')).toHaveLength(1)
-  expect(within(unearnedGroup).getAllByRole('article')).toHaveLength(5)
+  expect(within(unearnedGroups).getAllByRole('article')).toHaveLength(8)
   const card = screen.getByRole('heading', { name: 'Wheel and axle' }).closest('article')!
   expect(earnedGroup.contains(card)).toBe(true)
   expect(within(card).queryByText('Badge earned')).toBeNull()
@@ -110,11 +112,14 @@ it('updates the empty collection with earned badges and shows all contributing p
 })
 
 it.each([
-  { kind: 'living-hinge', name: '柔性铰链' },
-  { kind: 'wheel-and-axle', name: '车轮与轮轴' },
-])('displays the earned $kind face identically in the collection and the celebration', async ({ kind, name }) => {
+  { kind: 'living-hinge', name: '柔性铰链', working: true },
+  { kind: 'wheel-and-axle', name: '车轮与轮轴', working: true },
+  { kind: 'language', name: '清晰表达', working: false },
+  { kind: 'patience', name: '耐心等待', working: false },
+  { kind: 'persistence', name: '坚持不懈', working: false },
+])('displays the earned $kind face identically in the collection and the celebration', async ({ kind, name, working }) => {
   const { page, reveal, service, stream } = fixture('zh')
-  const earned = { ...award, kind, working: true }
+  const earned = { ...award, kind, working }
   service.mockImplementation(async () => Response.json({ ...empty, awards: [earned] }))
   render(<>{page}{reveal}</>)
   await act(async () => { stream.earned(earned) })
@@ -129,15 +134,17 @@ it.each([
 
   fireEvent.click(within(card).getByText('1 个项目'))
   expect(card.querySelector('details')?.open).toBe(true)
-  expect(within(card).getByText('已检查活动情况')).toBeTruthy()
+  if (working) expect(within(card).getByText('已检查活动情况')).toBeTruthy()
+  else expect(within(card).queryByText('已检查活动情况')).toBeNull()
 })
 
-it('lists earned badges by their first award across projects before the unearned catalog', async () => {
+it('lists earned mechanical and habit badges together by first award before categorized unearned groups', async () => {
   const { page, service } = fixture()
   service.mockResolvedValueOnce(Response.json({
     ...empty,
     awards: [
       { ...award, id: 'four', earnedAt: '2026-11-24T12:00:00.000Z', projectName: 'Second cart' },
+      { ...award, id: 'five', kind: 'patience', earnedAt: '2026-11-22T18:00:00.000Z', evidence: 'Waited through builds.' },
       { ...award, id: 'three', kind: 'barrel-hinge', earnedAt: '2026-11-23T12:00:00.000Z' },
       { ...award, id: 'two', kind: 'dovetail-slide', earnedAt: '2026-11-23T12:00:00.000Z' },
       award,
@@ -146,8 +153,34 @@ it('lists earned badges by their first award across projects before the unearned
   render(page)
   await act(async () => {})
   expect(screen.getAllByRole('heading', { level: 2 }).map(heading => heading.textContent)).toEqual([
-    'Wheel and axle', 'Barrel hinge', 'Dovetail slide', 'Living hinge', 'Gear pair', 'Rack and pinion',
+    'Wheel and axle', 'Patience', 'Barrel hinge', 'Dovetail slide',
+    'Living hinge', 'Gear pair', 'Rack and pinion',
+    'Language', 'Persistence',
   ])
+  const mechanicalSection = document.querySelector('[data-category="mechanical"]')!
+  const habitsSection = document.querySelector('[data-category="habits"]')!
+  expect(within(mechanicalSection).getAllByRole('heading', { level: 2 }).map(h => h.textContent)).toEqual([
+    'Living hinge', 'Gear pair', 'Rack and pinion',
+  ])
+  expect(within(habitsSection).getAllByRole('heading', { level: 2 }).map(h => h.textContent)).toEqual([
+    'Language', 'Persistence',
+  ])
+})
+
+it('omits an unearned category section once every badge in that category is earned', async () => {
+  const { page, service } = fixture()
+  service.mockResolvedValueOnce(Response.json({
+    ...empty,
+    awards: [
+      { ...award, id: 'h1', kind: 'language', earnedAt: '2026-11-22T10:00:00.000Z' },
+      { ...award, id: 'h2', kind: 'patience', earnedAt: '2026-11-22T11:00:00.000Z' },
+      { ...award, id: 'h3', kind: 'persistence', earnedAt: '2026-11-22T12:00:00.000Z' },
+    ],
+  }))
+  render(page)
+  await act(async () => {})
+  expect(document.querySelector('[data-category="habits"]')).toBeNull()
+  expect(document.querySelector('[data-category="mechanical"]')).toBeTruthy()
 })
 
 it('keeps awards during a failed refresh and retries the correct operation', async () => {
@@ -164,12 +197,12 @@ it('keeps awards during a failed refresh and retries the correct operation', asy
   expect(screen.getByText('1 project')).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
   await act(async () => {})
-  expect(screen.getByRole('alert').textContent).toContain('Some designs still need a badge check.')
+  expect(screen.getByRole('alert').textContent).toContain('Some projects still need a badge check.')
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
   await act(async () => {})
   expect(service.mock.calls[3]?.[0]).toBe('/api/print-studio/badges/retry')
   expect(service.mock.calls[3]?.[1]?.method).toBe('POST')
-  expect(screen.getByRole('status').textContent).toContain('Checking your latest designs')
+  expect(screen.getByRole('status').textContent).toContain('Checking your latest work')
 })
 
 it('announces each new award once, keeps project focus, and advances after dismissal', async () => {
@@ -275,6 +308,6 @@ it('refreshes the open collection as soon as the new award arrives', async () =>
   await act(async () => {})
   expect(service).toHaveBeenCalledTimes(1)
   await act(async () => { stream.earned(award) })
-  expect(screen.getByText('1 of 6 mechanical badges earned')).toBeTruthy()
+  expect(screen.getByText('1 of 9 badges earned')).toBeTruthy()
   expect(screen.getAllByRole('heading', { level: 2 })[0]?.textContent).toBe('Wheel and axle')
 })

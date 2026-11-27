@@ -39,7 +39,11 @@ const PRINT_BADGE_NAMES = new Map([
   ['dovetail-slide', 'Dovetail slide'],
   ['gear-pair', 'Gear pair'],
   ['rack-and-pinion', 'Rack and pinion'],
+  ['language', 'Language'],
+  ['patience', 'Patience'],
+  ['persistence', 'Persistence'],
 ]);
+const HABIT_BADGE_KINDS = new Set(['language', 'patience', 'persistence']);
 
 /** @typedef {{liveId: string, entry?: Awaited<ReturnType<typeof createEntry>>, stopping?: Promise<void>}} VoiceReservation */
 
@@ -472,7 +476,9 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sdp, session
       const awardNote = names.length === 1
         ? `The user just earned the ${names[0]} badge in this project.`
         : `The user just earned these badges in this project. ${names.join(', ')}.`;
-      const content = `${awardNote} You may mention this briefly in your next relevant reply, in the user's language. Wait for a normal chance to speak. Print readiness requires a separate check.`;
+      const hasMechanical = awards.some(award => PRINT_BADGE_NAMES.has(award.kind) && !HABIT_BADGE_KINDS.has(award.kind));
+      const caveat = hasMechanical ? ' Print readiness requires a separate check.' : '';
+      const content = `${awardNote} You may mention this briefly in your next relevant reply, in the user's language. Wait for a normal chance to speak.${caveat}`;
       const eventId = randomUUID();
       journal.record('host.thinking', { delegationId: null, eventId, awardIds: awards.map(award => award.id), content });
       if (!isClosed) live.send({ type: 'session.thinking.append', event_id: eventId, delegation_id: null, content });

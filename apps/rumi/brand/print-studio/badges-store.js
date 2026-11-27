@@ -3,9 +3,10 @@ import { createRequire } from 'node:module'
 import { closeSync, constants, mkdirSync, openSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { badgeCategory } from './badges-kinds.js'
 
 const APPLICATION_ID = 0x52424447 // RBDG
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 /** Open the local badge database. Claims serialize reviews within each project across hosts.
  * @param {string} path Database path in the Rumi home.
@@ -23,9 +24,9 @@ export function openBadgeStore(path) {
     const { user_version: version } = db.prepare('PRAGMA user_version').get()
     if (application === 0 && version === 0 && !db.prepare("SELECT 1 FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get()) {
       db.exec(`CREATE TABLE reviews (
-        sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, projectId TEXT NOT NULL,
-        targets TEXT NOT NULL, status TEXT NOT NULL, worker TEXT, pid INTEGER,
-        PRIMARY KEY (sessionId, turnEndSeq)
+        sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, scope TEXT NOT NULL DEFAULT 'mechanical',
+        projectId TEXT NOT NULL, targets TEXT NOT NULL, status TEXT NOT NULL, worker TEXT, pid INTEGER,
+        PRIMARY KEY (sessionId, turnEndSeq, scope)
       );
       CREATE TABLE awards (
         projectId TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, earnedAt TEXT NOT NULL,
@@ -36,6 +37,17 @@ export function openBadgeStore(path) {
         id INTEGER PRIMARY KEY, sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, payload TEXT NOT NULL
       );
       PRAGMA application_id=${APPLICATION_ID};
+      PRAGMA user_version=${SCHEMA_VERSION}`)
+    } else if (application === APPLICATION_ID && version === 1) {
+      db.exec(`CREATE TABLE reviews_v2 (
+        sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, scope TEXT NOT NULL DEFAULT 'mechanical',
+        projectId TEXT NOT NULL, targets TEXT NOT NULL, status TEXT NOT NULL, worker TEXT, pid INTEGER,
+        PRIMARY KEY (sessionId, turnEndSeq, scope)
+      );
+      INSERT INTO reviews_v2(sessionId, turnEndSeq, scope, projectId, targets, status, worker, pid)
+        SELECT sessionId, turnEndSeq, 'mechanical', projectId, targets, status, worker, pid FROM reviews;
+      DROP TABLE reviews;
+      ALTER TABLE reviews_v2 RENAME TO reviews;
       PRAGMA user_version=${SCHEMA_VERSION}`)
     } else if (application !== APPLICATION_ID || version !== SCHEMA_VERSION) {
       throw new Error('The badge database has an unrecognized schema')
@@ -51,22 +63,23 @@ export function openBadgeStore(path) {
   } catch (error) { db.close(); throw error }
 
   function finish(job, status) {
-    const result = db.prepare('UPDATE reviews SET status=?,worker=NULL,pid=NULL WHERE sessionId=? AND turnEndSeq=? AND worker=?')
-      .run(status, job.sessionId, job.turnEndSeq, owner)
+    const scope = job.scope ?? 'mechanical'
+    const result = db.prepare('UPDATE reviews SET status=?,worker=NULL,pid=NULL WHERE sessionId=? AND turnEndSeq=? AND scope=? AND worker=?')
+      .run(status, job.sessionId, job.turnEndSeq, scope, owner)
     if (result.changes !== 1) throw new Error('Badge review ownership changed')
   }
 
   return {
-    enqueue(projectId, sessionId, turnEndSeq, targets) {
-      db.prepare(`INSERT OR IGNORE INTO reviews(projectId,sessionId,turnEndSeq,targets,status) VALUES(?,?,?,?,'pending')`)
-        .run(projectId, sessionId, turnEndSeq, JSON.stringify(targets))
+    enqueue(projectId, sessionId, turnEndSeq, targets, scope = 'mechanical') {
+      db.prepare(`INSERT OR IGNORE INTO reviews(projectId,sessionId,turnEndSeq,scope,targets,status) VALUES(?,?,?,?,?,'pending')`)
+        .run(projectId, sessionId, turnEndSeq, scope, JSON.stringify(targets))
     },
     take(projectId) {
       const row = db.prepare(`UPDATE reviews SET status='running',worker=?,pid=? WHERE rowid=(
         SELECT rowid FROM reviews WHERE projectId=? AND status='pending'
           AND NOT EXISTS(SELECT 1 FROM reviews WHERE projectId=? AND status='running')
         ORDER BY rowid LIMIT 1
-      ) RETURNING projectId,sessionId,turnEndSeq,targets`).get(owner, process.pid, projectId, projectId)
+      ) RETURNING projectId,sessionId,turnEndSeq,scope,targets`).get(owner, process.pid, projectId, projectId)
       return row ? { ...row, targets: JSON.parse(row.targets) } : null
     },
     recordRequest(job, request) {
@@ -96,11 +109,17 @@ export function openBadgeStore(path) {
     retry(projectId, sessionId) {
       return Number(db.prepare("UPDATE reviews SET status='pending' WHERE status='failed' AND projectId=? AND sessionId=?").run(projectId, sessionId).changes)
     },
+    earnedKinds(projectId) {
+      return db.prepare('SELECT kind FROM awards WHERE projectId=?').all(projectId).map(row => row.kind)
+    },
     pendingByProject() {
       return db.prepare(`SELECT projectId,sessionId,status,count(*) AS count FROM reviews WHERE status!='done' GROUP BY projectId,sessionId,status`).all()
     },
     awards() {
-      return db.prepare('SELECT * FROM awards ORDER BY earnedAt DESC, id').all().map(({ detail, ...row }) => ({ ...JSON.parse(detail), ...row }))
+      return db.prepare('SELECT * FROM awards ORDER BY earnedAt DESC, id').all().map(({ detail, ...row }) => {
+        const parsed = JSON.parse(detail)
+        return { category: badgeCategory(row.kind), ...parsed, ...row }
+      })
     },
     close() {
       try { db.prepare("UPDATE reviews SET status='pending',worker=NULL,pid=NULL WHERE worker=?").run(owner) }

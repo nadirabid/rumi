@@ -33,8 +33,8 @@ export function createProjectScope({ Service, z }) {
       this.workspaceRoot = config.workspaceRoot
       this.runtimeRoots = config.runtimeRoots.map(canonical)
       this.storage = new AsyncLocalStorage()
-      ctx.effect(() => ctx.systemPrompt.context({
-        name: 'rumi:project-instructions', order: ctx.systemPrompt.getContextOrder('WEB_SURFACE'), interpolate: false, required: true,
+      ctx.effect(() => ctx.systemPrompt.section({
+        name: 'rumi:project-instructions', order: ctx.systemPrompt.getSectionOrder('TOOL_WORKFLOW'), interpolate: false,
         text: ({ agent }) => {
           if (!agent) return ''
           const root = this.rootFor(agent.session)

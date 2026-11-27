@@ -82,6 +82,36 @@ async function accountCatalog(accessToken, models, signal) {
   return catalog
 }
 
+function rebrandContext(context, fromProvider, toProvider) {
+  if (!Array.isArray(context?.messages)) return context
+  let changed = false
+  const messages = context.messages.map(message => {
+    if (message?.role !== 'assistant' || message.provider !== fromProvider) return message
+    changed = true
+    return { ...message, provider: toProvider }
+  })
+  return changed ? { ...context, messages } : context
+}
+
+function rebrandEvent(event, provider) {
+  if (!event || typeof event !== 'object') return event
+  if (event.type === 'done' && event.message) return { ...event, message: { ...event.message, provider } }
+  if (event.type === 'error' && event.error) return { ...event, error: { ...event.error, provider } }
+  if (event.partial) return { ...event, partial: { ...event.partial, provider } }
+  return event
+}
+
+function rebrandStream(stream, provider) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for await (const event of stream) yield rebrandEvent(event, provider)
+    },
+    result: typeof stream?.result === 'function'
+      ? async () => ({ ...(await stream.result()), provider })
+      : undefined,
+  }
+}
+
 /** Mount the provider and its local settings actions. */
 export async function apply(ctx, config) {
   const native = openaiProvider()
@@ -105,17 +135,20 @@ export async function apply(ctx, config) {
       if (credential?.key) return { auth: { apiKey: credential.key }, source: 'ChatGPT plan' }
     } } },
     getModels: () => choices,
-    streamSimple: (model, context, options) => native.streamSimple({ ...model, provider: 'openai' }, context, {
-      ...options, onPayload(payload) {
-        const tier = requested(options.sessionId, model.id, choices.find(item => item.id === model.id)?.tiers)
-        if (tier !== 'auto') payload.service_tier = tier
-        if (payload.tools?.length) {
-          payload.input.unshift({ type: 'additional_tools', role: 'developer', tools: payload.tools })
-          delete payload.tools
-        }
-        return payload
-      },
-    }),
+    streamSimple: (model, context, options) => rebrandStream(
+      native.streamSimple({ ...model, provider: 'openai' }, rebrandContext(context, route, 'openai'), {
+        ...options, onPayload(payload) {
+          const tier = requested(options.sessionId, model.id, choices.find(item => item.id === model.id)?.tiers)
+          if (tier !== 'auto') payload.service_tier = tier
+          if (payload.tools?.length) {
+            payload.input.unshift({ type: 'additional_tools', role: 'developer', tools: payload.tools })
+            delete payload.tools
+          }
+          return payload
+        },
+      }),
+      route,
+    ),
   }
   function grant(record) {
     if (record?.payload?.reauthRequired) throw signInRequired()

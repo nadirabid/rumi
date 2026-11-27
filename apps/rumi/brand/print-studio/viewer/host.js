@@ -151,6 +151,16 @@ function sceneState(record) {
   }
 }
 
+function designIdentity(design) {
+  if (!design) return null
+  return {
+    path: design.path,
+    revision: design.revision,
+    url: design.url,
+    contentHash: design.contentHash ?? null,
+  }
+}
+
 /**
  * What an agent needs to talk about the scene: placements and measurements.
  * @param {object} record - Session record.
@@ -257,7 +267,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         if (!agent) return ''
         const record = sessions.get(agent.session.id)
         return modelContextJson({ meshState: record
-          ? { ...sceneReport(record), ...(validation ? { displayedDesign: agentDesign(record.source?.state()) } : {}), validation: summarizeValidationState(validation?.read(agent.session.id)), workingModels: focus.paths(agent.session.id) }
+          ? { ...sceneReport(record), ...(validation ? { displayedDesign: designIdentity(record.source?.state()) } : {}), validation: summarizeValidationState(validation?.read(agent.session.id)), workingModels: focus.paths(agent.session.id) }
           : { status: 'unavailable', reason: 'viewer_not_initialized', validation: summarizeValidationState(validation?.read(agent.session.id)) } })
       },
     }), 'print viewer: live mesh context')

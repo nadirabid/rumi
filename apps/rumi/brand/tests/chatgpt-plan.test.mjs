@@ -243,3 +243,69 @@ it('persists a requested tier per conversation and model, including explicit Aut
   } finally { globalThis.fetch = original }
   assert.equal(payload.service_tier, 'priority')
 })
+
+it('preserves native OpenAI Responses replay state without degrading assistant history', async () => {
+  const { adapter } = await mount({ kind: 'grant', payload: {
+    token: { type: 'oauth', access: 'replay-token', expires: Date.now() + 60000 },
+    models: [{ id: model, name: 'GPT-6.2 Sol', tiers: ['auto', 'ultrafast'] }],
+  } }, { solServiceTier: 'ultrafast' })
+  const original = globalThis.fetch
+  const bodies = []
+  const sse = [
+    { type: 'response.output_item.added', output_index: 0, item: { type: 'reasoning', id: 'rs_1', summary: [] } },
+    { type: 'response.output_item.done', output_index: 0, item: { type: 'reasoning', id: 'rs_1', encrypted_content: 'enc_blob_1', summary: [] } },
+    { type: 'response.output_item.added', output_index: 1, item: { type: 'function_call', id: 'fc_native_42', call_id: 'call_42', name: 'measure', arguments: '' } },
+    { type: 'response.function_call_arguments.delta', output_index: 1, delta: '{}' },
+    { type: 'response.output_item.done', output_index: 1, item: { type: 'function_call', id: 'fc_native_42', call_id: 'call_42', name: 'measure', arguments: '{}' } },
+    { type: 'response.completed', response: {
+      id: 'resp_1', status: 'completed',
+      usage: { input_tokens: 100, output_tokens: 10, total_tokens: 110, input_tokens_details: { cached_tokens: 0 } },
+    } },
+  ].map(event => `data: ${JSON.stringify(event)}\n\n`).join('')
+  globalThis.fetch = async (url, options) => {
+    const request = new Request(url, options)
+    bodies.push(await request.json())
+    return bodies.length === 1
+      ? new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+      : Response.json({ error: { message: 'stop second call' } }, { status: 403 })
+  }
+  const tools = [{ name: 'measure', description: 'Measure model', inputSchema: { type: 'object', properties: {}, additionalProperties: false } }]
+  let firstFinish
+  try {
+    for await (const chunk of adapter.stream({
+      provider, model, sessionId: 'sess-replay', tools,
+      messages: [{ role: 'user', id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: 'Measure it' }] }],
+    })) {
+      if (chunk.type === 'finish') firstFinish = chunk
+    }
+    assert.equal(firstFinish?.replayState?.response?.provider, provider)
+    const assistant = {
+      role: 'assistant', id: 'a1',
+      source: { kind: 'model', provider, model, replayState: firstFinish.replayState },
+      content: [
+        { type: 'reasoning', text: '' },
+        { type: 'tool-call', id: 'call_42|fc_native_42', name: 'measure', arguments: '{}' },
+      ],
+    }
+    const toolResult = {
+      role: 'tool', id: 't1', toolCallId: 'call_42|fc_native_42',
+      source: { kind: 'tool', callId: 'call_42|fc_native_42' },
+      content: [{ type: 'text', text: '10mm' }],
+    }
+    for await (const chunk of adapter.stream({
+      provider, model, sessionId: 'sess-replay', tools,
+      messages: [
+        { role: 'user', id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: 'Measure it' }] },
+        assistant,
+        toolResult,
+      ],
+    })) {
+      if (chunk.type === 'finish') break
+    }
+  } finally { globalThis.fetch = original }
+  assert.equal(bodies.length, 2)
+  const reasoningItem = bodies[1].input.find(item => item.type === 'reasoning')
+  const callItem = bodies[1].input.find(item => item.type === 'function_call')
+  assert.equal(reasoningItem?.encrypted_content, 'enc_blob_1')
+  assert.equal(callItem?.id, 'fc_native_42')
+})

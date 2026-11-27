@@ -761,7 +761,15 @@ exports[`keeps admitted references while browsing changes, with separate agent w
 Resolve model references before editing. Explicit model names and captured pointing references take precedence over the selected model. Resolve named regions from a feature name or alias the person says or types. namedRegionsMentioned lists exact name matches detected at admission, even in questions or corrections. Interpret the action and intended model from the message and verify the saved revision. For an otherwise unqualified request, use the selection captured when that request entered the inbox, not a later selection. Voice references include the selection at speech capture; prefer that over inbox-time selection. Continued work stays on its established model. If a new selection conflicts with ongoing work and intent is ambiguous, ask which model the person means. Browsing alone never retargets work. Call viewer_working_model with the discovered model entry before inspecting or editing that model; change it when your work changes targets. Clear it before asking a clarification or when no model is being worked on. The green dot reports your declared work, not a lock, proof of an edit, or the user selection. If the model does not exist yet, create its entry first. Use viewer_load only when you intend to change what the person sees."
 `;
 
-exports[`keeps one full context across changed and unchanged requests with durable original snapshots 1`] = `
+exports[`loads editable source and exposes placement, camera and revision-scoped errors > acknowledged highlight result 1`] = `
+{
+  "message": "The visible viewer rendered this teal highlight. Use it as the visual reference for the requested change.",
+  "reason": "rendered",
+  "status": "rendered",
+}
+`;
+
+exports[`preserves append-only runtime context across unchanged requests and emits fresh snapshots on changes and retries 1`] = `
 [
   [
     [
@@ -779,7 +787,7 @@ The following information describes your current session:
     [
       {
         "text": "<system-reminder>
-The following information describes your current session. It replaces earlier versions of this context, including any retained in conversation summaries.
+The following information describes your current session:
 
 {"meshState":{"selection":"helmet","workingModel":"helmet"}}
 </system-reminder>",
@@ -788,6 +796,16 @@ The following information describes your current session. It replaces earlier ve
     ],
   ],
   [
+    [
+      {
+        "text": "<system-reminder>
+The following information describes your current session:
+
+{"meshState":{"selection":"helmet","workingModel":"helmet"}}
+</system-reminder>",
+        "type": "text",
+      },
+    ],
     [
       {
         "text": "<system-reminder>
@@ -803,6 +821,26 @@ The following information describes your current session. It replaces earlier ve
     [
       {
         "text": "<system-reminder>
+The following information describes your current session:
+
+{"meshState":{"selection":"helmet","workingModel":"helmet"}}
+</system-reminder>",
+        "type": "text",
+      },
+    ],
+    [
+      {
+        "text": "<system-reminder>
+The following information describes your current session. It replaces earlier versions of this context, including any retained in conversation summaries.
+
+{"meshState":{"selection":"cube","workingModel":"helmet"}}
+</system-reminder>",
+        "type": "text",
+      },
+    ],
+    [
+      {
+        "text": "<system-reminder>
 The following information describes your current session. It replaces earlier versions of this context, including any retained in conversation summaries.
 
 {"meshState":{"selection":"dragon","workingModel":"helmet"}}
@@ -815,6 +853,26 @@ The following information describes your current session. It replaces earlier ve
     [
       {
         "text": "<system-reminder>
+The following information describes your current session:
+
+{"meshState":{"selection":"helmet","workingModel":"helmet"}}
+</system-reminder>",
+        "type": "text",
+      },
+    ],
+    [
+      {
+        "text": "<system-reminder>
+The following information describes your current session. It replaces earlier versions of this context, including any retained in conversation summaries.
+
+{"meshState":{"selection":"cube","workingModel":"helmet"}}
+</system-reminder>",
+        "type": "text",
+      },
+    ],
+    [
+      {
+        "text": "<system-reminder>
 The following information describes your current session. It replaces earlier versions of this context, including any retained in conversation summaries.
 
 {"meshState":{"selection":"dragon","workingModel":"helmet"}}
@@ -824,14 +882,6 @@ The following information describes your current session. It replaces earlier ve
     ],
   ],
 ]
-`;
-
-exports[`loads editable source and exposes placement, camera and revision-scoped errors > acknowledged highlight result 1`] = `
-{
-  "message": "The visible viewer rendered this teal highlight. Use it as the visual reference for the requested change.",
-  "reason": "rendered",
-  "status": "rendered",
-}
 `;
 
 exports[`publishes the analog workflow in model instructions and removes it on unload 1`] = `

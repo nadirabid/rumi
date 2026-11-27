@@ -13,7 +13,7 @@ import { expect, it } from 'vitest'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../../../packages/core/agent-loop/tests/mock-adapter.ts'
 import { applyContextRetention } from '../viewer/context-retention.js'
 
-it('keeps one full context across changed and unchanged requests with durable original snapshots', async () => {
+it('preserves append-only runtime context across unchanged requests and emits fresh snapshots on changes and retries', async () => {
   const ctx = new Context()
   try {
     await ctx.plugin(LlmRuntime)
@@ -55,16 +55,16 @@ it('keeps one full context across changed and unchanged requests with durable or
     selection = 'cube'
     await send('continue')
     await send('continue again')
-    for (const request of adapter.requests) {
-      expect(request.messages.filter(message => message.source.kind === 'runtime-context')).toHaveLength(1)
-    }
+    // Unchanged follow-ups (step 2 of turn 1 and turn 3) keep the exact previous prefix without adding duplicate snapshots.
+    expect(adapter.requests.map(request => request.messages.filter(message => message.source.kind === 'runtime-context').length))
+      .toEqual([1, 1, 2, 3, 3])
     const latest = adapter.requests[4]!.messages
     expect(latest.filter(message => message.source.kind === 'user')).toHaveLength(3)
     expect(latest.filter(message => message.role === 'assistant')).toHaveLength(3)
     expect(latest.find(message => message.role === 'tool')?.content).toEqual([{ type: 'text', text: 'Helmet edit saved.' }])
-    const context = latest.find(message => message.source.kind === 'runtime-context')!
-    expect(context.content).toEqual([{ type: 'text', text: expect.stringContaining('"selection":"dragon","workingModel":"helmet"') }])
-    expect(originalSnapshots).toHaveLength(5)
+    const snapshots = latest.filter(message => message.source.kind === 'runtime-context')
+    expect(snapshots.at(-1)?.content).toEqual([{ type: 'text', text: expect.stringContaining('"selection":"dragon","workingModel":"helmet"') }])
+    expect(originalSnapshots).toHaveLength(3)
     expect(originalSnapshots[0]).toContain('helmet')
     expect(adapter.requests.map(request => request.messages.filter(message => message.source.kind === 'runtime-context').map(message => message.content))).toMatchSnapshot()
   } finally { await ctx.fiber.dispose() }

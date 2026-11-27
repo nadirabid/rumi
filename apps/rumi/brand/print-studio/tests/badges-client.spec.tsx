@@ -18,7 +18,7 @@ afterEach(() => {
 class AwardStream extends EventTarget {
   close = vi.fn()
 
-  earned(...awards: Array<{ id: string; kind: string }>) {
+  earned(...awards: Array<{ id: string; kind: string; path?: 'practice' | 'growth' }>) {
     this.dispatchEvent(new MessageEvent('badge-earned', {
       data: JSON.stringify({ projectId: 'cart', projectName: 'Cart', awards }),
     }))
@@ -94,7 +94,7 @@ it('updates the empty collection with earned badges and shows all contributing p
     expect(card.querySelector('details')).toBeNull()
   }
   await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
-  expect(screen.getByText('1 of 9 badges earned')).toBeTruthy()
+  expect(screen.getByText('1 badge earned')).toBeTruthy()
   const earnedGroup = document.querySelector('.rumi-badges-earned')!
   const unearnedGroups = document.querySelector('.rumi-badges-unearned-groups')!
   expect(document.querySelector('.rumi-badges-divider')).toBeTruthy()
@@ -112,14 +112,14 @@ it('updates the empty collection with earned badges and shows all contributing p
 })
 
 it.each([
-  { kind: 'living-hinge', name: '柔性铰链', working: true },
-  { kind: 'wheel-and-axle', name: '车轮与轮轴', working: true },
-  { kind: 'language', name: '清晰表达', working: false },
-  { kind: 'patience', name: '耐心等待', working: false },
-  { kind: 'persistence', name: '坚持不懈', working: false },
-])('displays the earned $kind face identically in the collection and the celebration', async ({ kind, name, working }) => {
+  { kind: 'living-hinge', name: '柔性铰链', working: true, individual: false, path: undefined },
+  { kind: 'wheel-and-axle', name: '车轮与轮轴', working: true, individual: false, path: undefined },
+  { kind: 'language', name: '清晰表达', working: false, individual: true, path: 'practice' as const },
+  { kind: 'patience', name: '耐心等待', working: false, individual: true, path: 'growth' as const },
+  { kind: 'persistence', name: '坚持不懈', working: false, individual: true, path: 'practice' as const },
+])('displays the earned $kind face identically in the collection and the celebration', async ({ kind, name, working, individual, path }) => {
   const { page, reveal, service, stream } = fixture('zh')
-  const earned = { ...award, kind, working }
+  const earned = { ...award, kind, working, ...(path ? { path } : {}) }
   service.mockImplementation(async () => Response.json({ ...empty, awards: [earned] }))
   render(<>{page}{reveal}</>)
   await act(async () => { stream.earned(earned) })
@@ -129,13 +129,43 @@ it.each([
   const face = card.querySelector<HTMLElement>('.rumi-badge-face')!
   expect(within(face).getByText('Cart')).toBeTruthy()
   expect(face.querySelector(`[data-kind="${kind}"] .rumi-badge-medallion .rumi-badge-emblem`)).toBeTruthy()
+  if (path === 'growth') expect(within(face).getByText('有进步')).toBeTruthy()
+  else expect(within(face).queryByText('有进步')).toBeNull()
   const plate = screen.getByRole('complementary').querySelector('.rumi-badge-reveal-plate')!
   expect(face.isEqualNode(plate.querySelector('.rumi-badge-face'))).toBe(true)
 
-  fireEvent.click(within(card).getByText('1 个项目'))
+  fireEvent.click(within(card).getByText(individual ? '查看原因' : '1 个项目'))
   expect(card.querySelector('details')?.open).toBe(true)
   if (working) expect(within(card).getByText('已检查活动情况')).toBeTruthy()
   else expect(within(card).queryByText('已检查活动情况')).toBeNull()
+})
+
+it('renders every earned habit demonstration and improvement as its own growing tile in chronological order', async () => {
+  const { page, service } = fixture()
+  service.mockResolvedValueOnce(Response.json({
+    ...empty,
+    awards: [
+      { ...award, id: 'p2', kind: 'patience', path: 'growth', earnedAt: '2026-11-24T12:00:00.000Z', projectName: 'Rocket', evidence: 'Settled down and waited for the fins to finish.' },
+      { ...award, id: 'l1', kind: 'language', path: 'practice', earnedAt: '2026-11-23T12:00:00.000Z', projectName: 'Rocket', evidence: 'Specified exact fin counts and wall thickness.' },
+      { ...award, id: 'p1', kind: 'patience', path: 'practice', earnedAt: '2026-11-22T12:00:00.000Z', projectName: 'Cart', evidence: 'Waited through three builds before changing the wheels.' },
+    ],
+  }))
+  render(page)
+  await act(async () => {})
+  expect(screen.getByText('3 badges earned')).toBeTruthy()
+  const earnedGroup = document.querySelector('.rumi-badges-earned')!
+  const earnedCards = within(earnedGroup).getAllByRole('article')
+  expect(earnedCards).toHaveLength(3)
+  expect(earnedCards.map(c => within(c).getByRole('heading', { level: 2 }).textContent)).toEqual([
+    'Patience', 'Language', 'Patience',
+  ])
+  expect(within(earnedCards[0]!).queryByText('Improved')).toBeNull()
+  expect(within(earnedCards[2]!).getByText('Improved')).toBeTruthy()
+  fireEvent.click(within(earnedCards[2]!).getByText('See why'))
+  expect(within(earnedCards[2]!).getByText('Settled down and waited for the fins to finish.')).toBeTruthy()
+  // Only Persistence remains in unearned Maker habits once Patience and Language are earned.
+  const habitsSection = document.querySelector('[data-category="habits"]')!
+  expect(within(habitsSection).getAllByRole('heading', { level: 2 }).map(h => h.textContent)).toEqual(['Persistence'])
 })
 
 it('lists earned mechanical and habit badges together by first award before categorized unearned groups', async () => {
@@ -308,6 +338,6 @@ it('refreshes the open collection as soon as the new award arrives', async () =>
   await act(async () => {})
   expect(service).toHaveBeenCalledTimes(1)
   await act(async () => { stream.earned(award) })
-  expect(screen.getByText('1 of 9 badges earned')).toBeTruthy()
+  expect(screen.getByText('1 badge earned')).toBeTruthy()
   expect(screen.getAllByRole('heading', { level: 2 })[0]?.textContent).toBe('Wheel and axle')
 })

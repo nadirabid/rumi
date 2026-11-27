@@ -11,10 +11,11 @@ const REVEAL_FADE_MS = 600
 
 const en = {
   title: 'Badges', empty: 'Build mechanisms and grow your maker habits in a project to earn badges.',
-  progress: '{count} of {total} badges earned',
+  oneEarned: '1 badge earned', manyEarned: '{count} badges earned',
   pending: 'Checking your latest work…', failed: 'Some projects still need a badge check.',
   loadError: 'Your badges couldn’t be loaded.', retryError: 'The badge check couldn’t be restarted.',
   retry: 'Try again', oneProject: '1 project', projects: '{count} projects',
+  seeWhy: 'See why', improved: 'Improved',
   movementChecked: 'Movement checked',
   earnedAnnouncement: 'You earned the {badge} badge in {project}.',
   dismissReveal: 'Dismiss badge reveal',
@@ -26,10 +27,11 @@ const en = {
 }
 const zh = {
   title: '徽章', empty: '在项目中设计机械结构、培养制作习惯，即可获得徽章。',
-  progress: '已获得 {count} 枚徽章，共 {total} 枚',
+  oneEarned: '已获得 1 枚徽章', manyEarned: '已获得 {count} 枚徽章',
   pending: '正在检查最新进展…', failed: '部分项目仍需进行徽章检查',
   loadError: '徽章未能加载', retryError: '未能重新开始徽章检查',
   retry: '再试一次', oneProject: '1 个项目', projects: '{count} 个项目',
+  seeWhy: '查看原因', improved: '有进步',
   movementChecked: '已检查活动情况',
   earnedAnnouncement: '你在{project}项目中获得了{badge}徽章。',
   dismissReveal: '关闭徽章提示',
@@ -131,6 +133,7 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
       'data-kind': kind,
       'data-locked': !award || undefined,
     },
+      award?.path === 'growth' && h('span', { className: 'rumi-badge-growth' }, t('improved')),
       h('div', { className: 'rumi-badge-art', 'data-kind': kind, 'aria-hidden': true },
         h('div', { className: 'rumi-badge-medallion' },
           h(Emblem, { kind }))),
@@ -139,12 +142,15 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
         award && h('p', { className: 'rumi-badge-project' }, h('bdi', null, award.projectName))))
   }
 
-  function Card({ kind, awards, t }) {
+  function Card({ kind, awards, individual = false, t }) {
     const earned = awards.length > 0
+    const summaryLabel = individual
+      ? t('seeWhy')
+      : t(awards.length === 1 ? 'oneProject' : 'projects', { count: awards.length })
     return h('article', { className: 'rumi-badge-card', 'data-earned': earned || undefined },
       h(BadgeFace, { kind, award: awards[0], t }),
       earned && h('details', { className: 'rumi-badge-projects' },
-        h('summary', null, t(awards.length === 1 ? 'oneProject' : 'projects', { count: awards.length }),
+        h('summary', null, summaryLabel,
           h(IconChevronRightOutlineRegular, { size: 12, 'aria-hidden': true })),
         h('ul', null, awards.map(award => h('li', { key: award.id },
           h('h3', null, award.projectName), h('p', null, award.evidence),
@@ -268,32 +274,55 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
       }
     }
 
-    const cards = allKinds.map(kind => {
-      const awards = data?.awards.filter(award => award.kind === kind) ?? []
-      const firstEarnedAt = awards.reduce((first, award) => {
+    const allAwards = data?.awards ?? []
+    const earnedEntries = []
+    const unearnedMechanical = []
+    for (const kind of mechanicalKinds) {
+      const awards = allAwards.filter(award => award.kind === kind)
+      if (awards.length === 0) {
+        unearnedMechanical.push({ key: kind, kind, awards: [] })
+        continue
+      }
+      const sortTime = awards.reduce((first, award) => {
         const earnedAt = Date.parse(award.earnedAt)
         return Number.isFinite(earnedAt) ? Math.min(first, earnedAt) : first
       }, Number.MAX_SAFE_INTEGER)
-      return { kind, awards, earned: awards.length > 0, firstEarnedAt }
-    })
-    const cardByKind = new Map(cards.map(card => [card.kind, card]))
-    const earnedCards = cards.filter(card => card.earned)
-      .sort((left, right) => left.firstEarnedAt - right.firstEarnedAt)
+      earnedEntries.push({ key: kind, kind, awards, individual: false, sortTime })
+    }
+    const earnedHabitKinds = new Set()
+    for (const award of allAwards) {
+      if (!habitKinds.includes(award.kind)) continue
+      earnedHabitKinds.add(award.kind)
+      const parsed = Date.parse(award.earnedAt)
+      earnedEntries.push({
+        key: award.id, kind: award.kind, awards: [award], individual: true,
+        sortTime: Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER,
+      })
+    }
+    earnedEntries.sort((left, right) => left.sortTime - right.sortTime || String(left.key).localeCompare(String(right.key)))
+    const unearnedHabits = habitKinds
+      .filter(kind => !earnedHabitKinds.has(kind))
+      .map(kind => ({ key: kind, kind, awards: [] }))
     const unearnedGroups = [
-      { id: 'mechanical', labelKey: 'mechanicalGroup', items: mechanicalKinds.map(kind => cardByKind.get(kind)).filter(card => !card.earned) },
-      { id: 'habits', labelKey: 'habitsGroup', items: habitKinds.map(kind => cardByKind.get(kind)).filter(card => !card.earned) },
+      { id: 'mechanical', labelKey: 'mechanicalGroup', items: unearnedMechanical },
+      { id: 'habits', labelKey: 'habitsGroup', items: unearnedHabits },
     ].filter(group => group.items.length > 0)
     const notice = error || (data?.failed ? 'failed' : null)
+    const subtitle = earnedEntries.length === 0
+      ? t('empty')
+      : earnedEntries.length === 1
+        ? t('oneEarned')
+        : t('manyEarned', { count: earnedEntries.length })
     return h('section', { className: 'rumi-badges', 'aria-label': t('title') },
       h('header', { className: 'rumi-badges-heading' }, h('h1', null, t('title')),
-        data && h('p', null, earnedCards.length ? t('progress', { count: earnedCards.length, total: allKinds.length }) : t('empty'))),
+        data && h('p', null, subtitle)),
       notice && h('div', { className: 'rumi-badges-notice', role: 'alert' }, t(notice),
         h(Button, { variant: 'outline', size: 'sm', disabled: retrying, onClick: retry }, t('retry'))),
       data?.pending > 0 && h('p', { className: 'rumi-badges-pending', role: 'status' }, t('pending')),
       data ? h('div', { className: 'rumi-badges-groups' },
-        earnedCards.length > 0 && h('div', { className: 'rumi-badges-grid rumi-badges-earned' },
-          earnedCards.map(({ kind, awards }) => h(Card, { key: kind, kind, awards, t }))),
-        earnedCards.length > 0 && unearnedGroups.length > 0 && h('div', {
+        earnedEntries.length > 0 && h('div', { className: 'rumi-badges-grid rumi-badges-earned' },
+          earnedEntries.map(({ key, kind, awards, individual }) => h(Card, { key, kind, awards, individual, t }))),
+        earnedEntries.length > 0 && unearnedGroups.length > 0 && h('div', {
           className: 'rumi-badges-divider', role: 'separator', 'aria-hidden': true,
         }),
         unearnedGroups.length > 0 && h('div', { className: 'rumi-badges-unearned-groups' },
@@ -303,7 +332,7 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
           },
           h('div', { id: `rumi-badges-category-${group.id}`, className: 'rumi-badges-category-label' }, t(group.labelKey)),
           h('div', { className: 'rumi-badges-grid rumi-badges-unearned' },
-            group.items.map(({ kind, awards }) => h(Card, { key: kind, kind, awards, t })))))))
+            group.items.map(({ key, kind, awards }) => h(Card, { key, kind, awards, t })))))))
         : !error && h('div', { className: 'rumi-badges-grid rumi-badges-earned', 'aria-busy': true },
           allKinds.map(kind => h('div', { key: kind, className: 'rumi-badges-skeleton' }))))
   }

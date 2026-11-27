@@ -4,6 +4,7 @@ import { relative, resolve } from 'node:path'
 import { createBadgeEvents } from './badges-events.js'
 import { openBadgeStore } from './badges-store.js'
 import { HABIT_BADGE_KINDS, PRINT_BADGE_KINDS } from './badges-kinds.js'
+import { latestSessionRoute } from './badge-review-route.js'
 
 function validationPath(event, project) {
   if (event.data.name !== 'validation_mechanics' || event.data.isError) return null
@@ -45,10 +46,9 @@ function eligibleMechanicalAwards(results, targets) {
   })
 }
 
-function eligibleHabitAwards(results, unearnedKinds) {
-  const allowed = new Set(unearnedKinds)
+function eligibleHabitAwards(results) {
   return results.map(({ kind, path, signals, evidence, evidenceRefs }) => {
-    if (!HABIT_BADGE_KINDS.includes(kind) || !allowed.has(kind)
+    if (!HABIT_BADGE_KINDS.includes(kind)
       || !['practice', 'growth'].includes(path)
       || !Array.isArray(signals) || signals.length === 0 || !signals.every(code => typeof code === 'string')
       || !evidence?.trim()
@@ -84,22 +84,21 @@ export function createBadgeHost(ctx, { databasePath, config, capture, review, re
         if (!owningProject(ctx.rumiProjectScope, session)) throw new Error('The review project is no longer registered')
         store.recordRequest(job, record)
       }
+      const sessionRoute = latestSessionRoute(observed.events.slice(0, job.turnEndSeq + 1))
       if (job.scope === 'habit') {
         if (!reviewHabits) return []
-        const earned = new Set(store.earnedKinds(job.projectId))
-        const unearnedKinds = HABIT_BADGE_KINDS.filter(kind => !earned.has(kind))
-        if (unearnedKinds.length === 0) return []
+        const priorAwards = store.priorHabitAwards(job.projectId, job.sessionId)
         const events = projectEvents(observed, job.turnEndSeq)
         const results = await reviewHabits(ctx, {
-          session, project, events, turnEndSeq: job.turnEndSeq, unearnedKinds, signal, recordRequest,
+          session, project, events, turnEndSeq: job.turnEndSeq, unearnedKinds: HABIT_BADGE_KINDS, priorAwards, sessionRoute, signal, recordRequest,
         }, config)
         signal.throwIfAborted()
         if (!owningProject(ctx.rumiProjectScope, session)) return []
-        return eligibleHabitAwards(results, unearnedKinds)
+        return eligibleHabitAwards(results)
       }
       const events = turnEvents(observed, job.turnEndSeq)
       const results = await review(ctx, {
-        session, project, events, turnEndSeq: job.turnEndSeq, targets: job.targets, signal, recordRequest,
+        session, project, events, turnEndSeq: job.turnEndSeq, targets: job.targets, sessionRoute, signal, recordRequest,
       }, config)
       signal.throwIfAborted()
       if (!owningProject(ctx.rumiProjectScope, session)) return []
@@ -182,12 +181,8 @@ export function createBadgeHost(ctx, { databasePath, config, capture, review, re
       queued = true
     }
     if (reviewHabits && (state.hadUserMessage || targets.length > 0)) {
-      const earned = new Set(store.earnedKinds(state.project.id))
-      const unearnedKinds = HABIT_BADGE_KINDS.filter(kind => !earned.has(kind))
-      if (unearnedKinds.length > 0) {
-        store.enqueue(state.project.id, session.id, event.seq, { kinds: unearnedKinds }, 'habit')
-        queued = true
-      }
+      store.enqueue(state.project.id, session.id, event.seq, { kinds: HABIT_BADGE_KINDS }, 'habit')
+      queued = true
     }
     if (queued) schedule(state.project.id)
   }

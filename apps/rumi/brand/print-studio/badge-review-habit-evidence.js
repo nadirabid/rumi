@@ -1,10 +1,11 @@
-/** Deterministically extract project-level Language, Patience, and Persistence signals from session logs and disk state. */
+/** Deterministically extract project-level Language, Patience, and Persistence signals with non-overlapping watermarks. */
 import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 const VOICE_GRACE_MS = 6_000
 const SUBSTANTIVE_DURATION_MS = 10_000
 const HEAVY_DURATION_MS = 15_000
+const MAJOR_WAIT_DURATION_MS = 30_000
 const MAX_TURNS_SUMMARY = 32
 const MAX_MESSAGES = 24
 const MAX_MESSAGE_CHARS = 360
@@ -81,14 +82,20 @@ function scanDiskArtifacts(projectPath) {
       const match = LAYOUT_PATTERN.exec(entry.name)
       if (match) {
         const info = lstatSync(join(canonicalRoot, entry.name))
-        if (info.isFile() && info.nlink === 1) layouts.push(`layout:${match[1].slice(0, 12)}`)
+        if (info.isFile() && info.nlink === 1) {
+          layouts.push({ ref: `layout:${match[1].slice(0, 12)}`, mtimeMs: info.mtimeMs })
+        }
       } else if (entry.name === '.rumi-print-handoff.json') {
         const file = join(canonicalRoot, entry.name)
         const info = lstatSync(file)
         if (info.isFile() && info.nlink === 1 && info.size <= 16_384) {
           const parsed = parseJsonBounded(readFileSync(file, 'utf8'))
           if (typeof parsed?.openedAt === 'string' && typeof parsed?.model === 'string') {
-            printHandoff = { ref: 'handoff:print', model: parsed.model.slice(0, 128), openedAt: parsed.openedAt }
+            const openedMs = Date.parse(parsed.openedAt)
+            printHandoff = {
+              ref: 'handoff:print', model: parsed.model.slice(0, 128),
+              openedAt: parsed.openedAt, openedMs: Number.isFinite(openedMs) ? openedMs : info.mtimeMs,
+            }
           }
         }
       }
@@ -143,14 +150,26 @@ function modelRevisionsFromOutput(output) {
   return found
 }
 
+function priorInfo(priorByKind, kind) {
+  const entry = priorByKind?.[kind]
+  const lastEarnedMs = typeof entry?.lastEarnedAt === 'string' ? Date.parse(entry.lastEarnedAt) : NaN
+  return {
+    count: Number.isInteger(entry?.count) && entry.count > 0 ? entry.count : 0,
+    watermarkSeq: Number.isInteger(entry?.lastSessionTurnEndSeq) ? entry.lastSessionTurnEndSeq : -1,
+    lastEarnedMs: Number.isFinite(lastEarnedMs) ? lastEarnedMs : null,
+    recentEvidence: Array.isArray(entry?.recentEvidence) ? entry.recentEvidence : [],
+  }
+}
+
 /**
- * Extract structured, citation-backed facts and deterministic eligibility gates for habit badges.
+ * Extract structured, citation-backed facts and non-overlapping eligibility gates for repeatable habit badges.
  * @param {string} projectPath Canonical registered project directory.
  * @param {object[]} events Contiguous session events from `inheritedEventCount` through `turnEndSeq`.
- * @param {readonly string[]} unearnedKinds Habit badge kinds not yet earned in this project.
+ * @param {readonly string[]} candidateKinds Habit badge kinds eligible for consideration.
+ * @param {Record<string, object>} [priorByKind] Previously earned habit awards and per-session watermarks.
  * @returns {object} Eligibility flags, bounded evaluator input, and valid citation references.
  */
-export function extractHabitBadgeEvidence(projectPath, events, unearnedKinds) {
+export function extractHabitBadgeEvidence(projectPath, events, candidateKinds, priorByKind = {}) {
   const voiceRefUserIds = new Set()
   for (const event of events) {
     if (event.type === 'user/message' && event.data?.source?.kind === 'rumi-voice-reference'
@@ -176,6 +195,9 @@ export function extractHabitBadgeEvidence(projectPath, events, unearnedKinds) {
     const heavyWork = current.toolCallCount >= 2 || current.stepCount >= 2
       || (durationMs !== null && durationMs >= HEAVY_DURATION_MS)
       || current.toolNames.has('validation_mechanics')
+    const majorWait = current.toolNames.has('validation_mechanics')
+      || (durationMs !== null && durationMs >= MAJOR_WAIT_DURATION_MS)
+      || current.stepCount >= 4 || current.toolCallCount >= 4
     const endedWithSetback = current.unresolvedErrorRef !== null || current.unresolvedCheckRef !== null
     turns.push({
       ref: `turn:${current.index}`,
@@ -194,6 +216,7 @@ export function extractHabitBadgeEvidence(projectPath, events, unearnedKinds) {
       clean,
       substantive,
       heavyWork,
+      majorWait,
       publishedRevisions: current.publishedRevisions,
       setbackRef: endedWithSetback ? (current.unresolvedCheckRef ?? current.unresolvedErrorRef) : null,
       mechanicsPassed: current.mechanicsPassed,
@@ -331,59 +354,89 @@ export function extractHabitBadgeEvidence(projectPath, events, unearnedKinds) {
   const disk = scanDiskArtifacts(projectPath)
   const humanTurns = turns.filter(turn => turn.humanMessages.length > 0)
   const latestTurn = turns.at(-1) ?? null
-  const latestHuman = humanTurns.at(-1)?.humanMessages.at(-1) ?? null
+  const latestUnresolved = Boolean(latestTurn?.setbackRef) || latestTurn?.endReason !== 'completed'
 
-  // --- Patience deterministic metrics ---
-  const substantiveTurns = turns.filter(turn => turn.substantive)
-  let cleanStreakTurns = []
-  for (let index = substantiveTurns.length - 1; index >= 0; index -= 1) {
-    const turn = substantiveTurns[index]
+  const priorLanguage = priorInfo(priorByKind, 'language')
+  const priorPatience = priorInfo(priorByKind, 'patience')
+  const priorPersistence = priorInfo(priorByKind, 'persistence')
+
+  // --- Patience deterministic metrics (strictly post-watermark) ---
+  const patienceTurns = turns.filter(turn => turn.endSeq > priorPatience.watermarkSeq)
+  const substantivePatienceTurns = patienceTurns.filter(turn => turn.substantive)
+  const cleanStreakTurns = []
+  for (let index = substantivePatienceTurns.length - 1; index >= 0; index -= 1) {
+    const turn = substantivePatienceTurns[index]
     if (turn.clean) cleanStreakTurns.unshift(turn)
     else break
   }
   const streakStart = cleanStreakTurns[0]?.index ?? Infinity
-  const earlierInterruptions = turns.filter(turn => turn.index < streakStart && (turn.userAborted || turn.midTurnSteers > 0))
+  const earlierInterruptions = patienceTurns.filter(turn => turn.index < streakStart && (turn.userAborted || turn.midTurnSteers > 0))
   const hadHeavyWaitInStreak = cleanStreakTurns.some(turn => turn.heavyWork)
-  const patiencePracticeEligible = cleanStreakTurns.length >= 3 && hadHeavyWaitInStreak
+  const majorWaitTurns = cleanStreakTurns.filter(turn => turn.majorWait)
+  const majorWaitEligible = majorWaitTurns.length > 0
+    && (cleanStreakTurns.length >= 2 || (priorPatience.count >= 1 && Boolean(latestTurn?.majorWait)))
+  const patiencePracticeEligible = (cleanStreakTurns.length >= 3 && hadHeavyWaitInStreak) || majorWaitEligible
   const patienceGrowthEligible = earlierInterruptions.length > 0 && cleanStreakTurns.length >= 2 && hadHeavyWaitInStreak
-  const patienceEligible = Boolean(latestTurn?.clean) && (patiencePracticeEligible || patienceGrowthEligible)
+  const patienceEligible = Boolean(latestTurn?.clean) && latestTurn.endSeq > priorPatience.watermarkSeq
+    && (patiencePracticeEligible || patienceGrowthEligible)
 
-  // --- Persistence deterministic metrics ---
-  const totalRevisions = Math.max(sessionRevisions.size, disk.revisions)
+  // --- Persistence deterministic metrics (strictly post-watermark) ---
+  const persistenceTurns = turns.filter(turn => turn.endSeq > priorPersistence.watermarkSeq)
+  const freshPersistenceHumanTurns = persistenceTurns.filter(turn => turn.humanMessages.length > 0)
+  const latestFreshPersistenceHuman = freshPersistenceHumanTurns.at(-1)?.humanMessages.at(-1) ?? null
+  const freshSessionRevisions = new Set(persistenceTurns.flatMap(turn => turn.publishedRevisions))
+  const persistenceRevisions = priorPersistence.count === 0
+    ? Math.max(freshSessionRevisions.size, disk.revisions)
+    : freshSessionRevisions.size
   const crossTurnSetbacks = []
-  for (let index = 0; index < turns.length - 1; index += 1) {
-    if (!turns[index].setbackRef) continue
-    const laterHumanTurns = turns.slice(index + 1).filter(turn => turn.humanMessages.length > 0)
+  for (let index = 0; index < persistenceTurns.length - 1; index += 1) {
+    if (!persistenceTurns[index].setbackRef) continue
+    const laterHumanTurns = persistenceTurns.slice(index + 1).filter(turn => turn.humanMessages.length > 0)
     if (laterHumanTurns.length > 0) {
       crossTurnSetbacks.push({
-        turnRef: turns[index].ref,
-        ref: turns[index].setbackRef,
+        turnRef: persistenceTurns[index].ref,
+        ref: persistenceTurns[index].setbackRef,
         subsequentHumanTurns: laterHumanTurns.length,
-        subsequentRevisions: new Set(turns.slice(index + 1).flatMap(turn => turn.publishedRevisions)).size,
+        subsequentRevisions: new Set(persistenceTurns.slice(index + 1).flatMap(turn => turn.publishedRevisions)).size,
       })
     }
   }
   const stoppingPoints = []
-  for (const turn of turns) {
+  for (const turn of persistenceTurns) {
     if (turn.validationAccepted && turn.milestoneRef) stoppingPoints.push({ kind: 'validation-accepted', ref: turn.milestoneRef, turnRef: turn.ref })
     else if (turn.mechanicsPassed && turn.milestoneRef) stoppingPoints.push({ kind: 'mechanics-passed', ref: turn.milestoneRef, turnRef: turn.ref })
   }
-  for (const ref of disk.layouts) stoppingPoints.push({ kind: 'print-layout-saved', ref })
-  if (disk.printHandoff) stoppingPoints.push({ kind: 'print-handoff', ref: disk.printHandoff.ref })
-  const latestUnresolved = Boolean(latestTurn?.setbackRef) || latestTurn?.endReason !== 'completed'
-  const hasPostSetbackIteration = crossTurnSetbacks.some(setback => setback.subsequentHumanTurns >= 2)
+  for (const layout of disk.layouts) {
+    if (priorPersistence.lastEarnedMs === null || layout.mtimeMs > priorPersistence.lastEarnedMs) {
+      stoppingPoints.push({ kind: 'print-layout-saved', ref: layout.ref })
+    }
+  }
+  if (disk.printHandoff && (priorPersistence.lastEarnedMs === null || disk.printHandoff.openedMs > priorPersistence.lastEarnedMs)) {
+    stoppingPoints.push({ kind: 'print-handoff', ref: disk.printHandoff.ref })
+  }
+  const hasPostSetbackIteration = crossTurnSetbacks.some(setback => setback.subsequentHumanTurns >= (priorPersistence.count === 0 ? 2 : 1))
+  const minPersistenceTurns = priorPersistence.count === 0 ? 3 : 2
   const persistenceEligible = !latestUnresolved
-    && humanTurns.length >= 3
-    && totalRevisions >= 2
-    && (hasPostSetbackIteration || stoppingPoints.length > 0 || totalRevisions >= 3 || Boolean(latestHuman?.hasWrapUp))
+    && persistenceTurns.length > 0
+    && freshPersistenceHumanTurns.length >= minPersistenceTurns
+    && persistenceRevisions >= 2
+    && (hasPostSetbackIteration || stoppingPoints.length > 0 || persistenceRevisions >= 3 || Boolean(latestFreshPersistenceHuman?.hasWrapUp))
 
-  // --- Language deterministic metrics ---
+  // --- Language deterministic metrics (strictly post-watermark for new awards, with earlier context for growth) ---
   const allMessages = humanTurns.flatMap(turn => turn.humanMessages)
-  const languageCadenceHit = humanTurns.length === 2
-    || (humanTurns.length >= 3 && (humanTurns.length % 2 === 0 || Boolean(latestHuman?.hasCue) || patienceEligible || persistenceEligible))
-  const languageEligible = humanTurns.length >= 2 && allMessages.length >= 2 && languageCadenceHit
+  const freshLanguageTurns = humanTurns.filter(turn => turn.endSeq > priorLanguage.watermarkSeq)
+  const freshLanguageMessages = freshLanguageTurns.flatMap(turn => turn.humanMessages)
+  const latestFreshLanguageHuman = freshLanguageMessages.at(-1) ?? null
+  const languageCadenceHit = freshLanguageTurns.length === 2
+    || (freshLanguageTurns.length >= 3 && (
+      freshLanguageTurns.length % 2 === 0
+      || Boolean(latestFreshLanguageHuman?.hasCue)
+      || patienceEligible
+      || persistenceEligible
+    ))
+  const languageEligible = freshLanguageTurns.length >= 2 && freshLanguageMessages.length >= 2 && languageCadenceHit
 
-  const eligibleKinds = unearnedKinds.filter(kind => (
+  const eligibleKinds = candidateKinds.filter(kind => (
     (kind === 'language' && languageEligible)
     || (kind === 'patience' && patienceEligible)
     || (kind === 'persistence' && persistenceEligible)
@@ -403,12 +456,22 @@ export function extractHabitBadgeEvidence(projectPath, events, unearnedKinds) {
 
   const validRefs = new Set()
   const validMessageRefs = new Set()
+  const freshLanguageMessageRefs = new Set(freshLanguageMessages.map(msg => msg.ref))
   const streakTurnRefs = new Set(cleanStreakTurns.map(turn => turn.ref))
+  const freshPersistenceRefs = new Set()
+
   for (const turn of sampledTurns) {
     validRefs.add(turn.ref)
     if (turn.setbackRef) validRefs.add(turn.setbackRef)
     if (turn.milestoneRef) validRefs.add(turn.milestoneRef)
     for (const rev of turn.publishedRevisions) validRefs.add(`rev:${rev.slice(0, 12)}`)
+  }
+  for (const turn of persistenceTurns) {
+    freshPersistenceRefs.add(turn.ref)
+    if (turn.setbackRef) freshPersistenceRefs.add(turn.setbackRef)
+    if (turn.milestoneRef) freshPersistenceRefs.add(turn.milestoneRef)
+    for (const rev of turn.publishedRevisions) freshPersistenceRefs.add(`rev:${rev.slice(0, 12)}`)
+    for (const msg of turn.humanMessages) freshPersistenceRefs.add(msg.ref)
   }
   for (const msg of sampledMessages) {
     validRefs.add(msg.ref)
@@ -417,21 +480,35 @@ export function extractHabitBadgeEvidence(projectPath, events, unearnedKinds) {
   for (const setback of crossTurnSetbacks) {
     validRefs.add(setback.ref)
     validRefs.add(setback.turnRef)
+    freshPersistenceRefs.add(setback.ref)
+    freshPersistenceRefs.add(setback.turnRef)
   }
-  for (const point of stoppingPoints) validRefs.add(point.ref)
+  for (const point of stoppingPoints) {
+    validRefs.add(point.ref)
+    freshPersistenceRefs.add(point.ref)
+  }
+
+  const priorAwardsSummary = {}
+  for (const [kind, info] of [['language', priorLanguage], ['patience', priorPatience], ['persistence', priorPersistence]]) {
+    if (info.count > 0) {
+      priorAwardsSummary[kind] = { count: info.count, recentEvidence: info.recentEvidence }
+    }
+  }
 
   const facts = {
     candidateKinds: eligibleKinds,
+    ...(Object.keys(priorAwardsSummary).length > 0 ? { priorAwards: priorAwardsSummary } : {}),
     projectSummary: {
       totalTurns: turns.length,
       humanTurnCount: humanTurns.length,
-      distinctRevisions: totalRevisions,
+      distinctRevisions: Math.max(sessionRevisions.size, disk.revisions),
       latestTurnClean: !latestUnresolved,
     },
     messages: sampledMessages.map(msg => ({
       ref: msg.ref,
       turn: msg.turnRef,
       text: msg.text,
+      ...(msg.seq > priorLanguage.watermarkSeq ? { freshForLanguage: true } : {}),
       ...(msg.hasVoiceReference ? { pointedAtModel: true } : {}),
       ...(prevAssistantByTurn.has(msg.turnRef) ? { previousAssistantReply: prevAssistantByTurn.get(msg.turnRef) } : {}),
     })),
@@ -443,6 +520,7 @@ export function extractHabitBadgeEvidence(projectPath, events, unearnedKinds) {
       toolCalls: turn.toolCallCount,
       clean: turn.clean,
       heavyWork: turn.heavyWork,
+      ...(turn.majorWait ? { majorWait: true } : {}),
       ...(turn.midTurnSteers > 0 ? { midTurnSteers: turn.midTurnSteers } : {}),
       ...(turn.userAborted ? { userAborted: true } : {}),
       ...(turn.publishedRevisions.length ? { revisions: turn.publishedRevisions.map(rev => `rev:${rev.slice(0, 12)}`) } : {}),
@@ -455,13 +533,15 @@ export function extractHabitBadgeEvidence(projectPath, events, unearnedKinds) {
       eligible: patienceEligible,
       practiceEligible: patiencePracticeEligible,
       growthEligible: patienceGrowthEligible,
+      majorWaitEligible,
       cleanSubstantiveStreak: cleanStreakTurns.length,
       streakTurnRefs: cleanStreakTurns.map(turn => turn.ref),
+      majorWaitTurnRefs: majorWaitTurns.map(turn => turn.ref),
       earlierInterruptionTurnRefs: earlierInterruptions.map(turn => turn.ref),
     },
     persistence: {
       eligible: persistenceEligible,
-      distinctRevisions: totalRevisions,
+      distinctRevisions: persistenceRevisions,
       crossTurnSetbacks,
       stoppingPoints,
     },
@@ -472,10 +552,13 @@ export function extractHabitBadgeEvidence(projectPath, events, unearnedKinds) {
     facts,
     validRefs,
     validMessageRefs,
+    freshLanguageMessageRefs,
     streakTurnRefs,
+    freshPersistenceRefs,
     patience: facts.patience,
     persistence: facts.persistence,
     humanTurnCount: humanTurns.length,
+    freshLanguageTurnCount: freshLanguageTurns.length,
     latestUnresolved,
   }
 }

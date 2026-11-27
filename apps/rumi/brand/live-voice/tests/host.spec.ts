@@ -206,11 +206,11 @@ it('keeps voice exclusive until the provider closes and ignores stale close IDs'
 it('shares new badge awards as silent context only with active voice for the owning project', async () => {
   const f = await fixture()
   type Award = PrintBadgeEarned['awards'][number]
-  const award = (projectPath: string, id: string, kind: Award['kind']) => f.owner.parallel('rumi/print-badge-earned', {
+  const award = (projectPath: string, id: string, kind: Award['kind'], path?: Award['path']) => f.owner.parallel('rumi/print-badge-earned', {
     projectId: brandString<PrintBadgeEarned['projectId']>(projectPath),
     projectPath,
     projectName: 'A project title never needed in voice context',
-    awards: [{ id: brandString<Award['id']>(id), kind }],
+    awards: [{ id: brandString<Award['id']>(id), kind, ...(path ? { path } : {}) }],
   })
   await award(f.projectPath, 'older', 'barrel-hinge')
   const { liveId } = await (await f.request('/session', { sessionId: 's' })).json()
@@ -224,10 +224,10 @@ it('shares new badge awards as silent context only with active voice for the own
   expect(note.content).toContain('your next relevant reply')
   expect(note.content).not.toContain('project title')
 
-  await award(f.projectPath, 'habit-award', 'patience')
+  await award(f.projectPath, 'habit-award', 'patience', 'growth')
   await expect.poll(() => f.frames.length).toBe(2)
   const habitNote = f.frames[1]!
-  expect(habitNote.content).toContain('The user just earned the Patience badge in this project.')
+  expect(habitNote.content).toContain('The user just earned a Patience badge for improving in this project.')
   expect(habitNote.content).not.toContain('Print readiness requires a separate check.')
 
   const acknowledgment = f.holdProviderClose()

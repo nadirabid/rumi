@@ -33,7 +33,10 @@ export function createBadgeAwardFeed(path) {
         || !ALL_BADGE_KINDS.includes(award.kind) || seen.has(award.id)) continue
       seen.add(award.id)
       if (seen.size > MAX_REMEMBERED_AWARDS) seen.delete(seen.values().next().value)
-      fresh.push({ id: award.id, kind: award.kind, projectName: notice.projectName })
+      fresh.push({
+        id: award.id, kind: award.kind, projectName: notice.projectName,
+        ...(award.path === 'practice' || award.path === 'growth' ? { path: award.path } : {}),
+      })
     }
     if (fresh.length === 0) return
     queue.push(...fresh.slice(0, MAX_QUEUED_AWARDS - queue.length))

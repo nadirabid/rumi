@@ -3,10 +3,27 @@ import { createRequire } from 'node:module'
 import { closeSync, constants, mkdirSync, openSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { badgeCategory } from './badges-kinds.js'
+import { HABIT_BADGE_KINDS, badgeCategory } from './badges-kinds.js'
 
 const APPLICATION_ID = 0x52424447 // RBDG
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
+
+const CREATE_REVIEWS_SQL = `CREATE TABLE reviews (
+  sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, scope TEXT NOT NULL DEFAULT 'mechanical',
+  projectId TEXT NOT NULL, targets TEXT NOT NULL, status TEXT NOT NULL, worker TEXT, pid INTEGER,
+  PRIMARY KEY (sessionId, turnEndSeq, scope)
+);`
+
+const CREATE_AWARDS_V3_SQL = `CREATE TABLE awards (
+  projectId TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL PRIMARY KEY, earnedAt TEXT NOT NULL,
+  sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, detail TEXT NOT NULL
+);
+CREATE UNIQUE INDEX awards_mechanical_unique
+  ON awards(projectId, kind)
+  WHERE json_extract(detail, '$.category') IS NULL OR json_extract(detail, '$.category') = 'mechanical';
+CREATE UNIQUE INDEX awards_habit_turn_unique
+  ON awards(projectId, kind, sessionId, turnEndSeq)
+  WHERE json_extract(detail, '$.category') = 'habit';`
 
 /** Open the local badge database. Claims serialize reviews within each project across hosts.
  * @param {string} path Database path in the Rumi home.
@@ -23,31 +40,39 @@ export function openBadgeStore(path) {
     const { application_id: application } = db.prepare('PRAGMA application_id').get()
     const { user_version: version } = db.prepare('PRAGMA user_version').get()
     if (application === 0 && version === 0 && !db.prepare("SELECT 1 FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get()) {
-      db.exec(`CREATE TABLE reviews (
-        sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, scope TEXT NOT NULL DEFAULT 'mechanical',
-        projectId TEXT NOT NULL, targets TEXT NOT NULL, status TEXT NOT NULL, worker TEXT, pid INTEGER,
-        PRIMARY KEY (sessionId, turnEndSeq, scope)
-      );
-      CREATE TABLE awards (
-        projectId TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, earnedAt TEXT NOT NULL,
-        sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, detail TEXT NOT NULL,
-        PRIMARY KEY (projectId, kind)
-      );
+      db.exec(`${CREATE_REVIEWS_SQL}
+      ${CREATE_AWARDS_V3_SQL}
       CREATE TABLE requests (
         id INTEGER PRIMARY KEY, sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, payload TEXT NOT NULL
       );
       PRAGMA application_id=${APPLICATION_ID};
       PRAGMA user_version=${SCHEMA_VERSION}`)
-    } else if (application === APPLICATION_ID && version === 1) {
-      db.exec(`CREATE TABLE reviews_v2 (
-        sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, scope TEXT NOT NULL DEFAULT 'mechanical',
-        projectId TEXT NOT NULL, targets TEXT NOT NULL, status TEXT NOT NULL, worker TEXT, pid INTEGER,
-        PRIMARY KEY (sessionId, turnEndSeq, scope)
+    } else if (application === APPLICATION_ID && (version === 1 || version === 2)) {
+      if (version === 1) {
+        db.exec(`CREATE TABLE reviews_v2 (
+          sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, scope TEXT NOT NULL DEFAULT 'mechanical',
+          projectId TEXT NOT NULL, targets TEXT NOT NULL, status TEXT NOT NULL, worker TEXT, pid INTEGER,
+          PRIMARY KEY (sessionId, turnEndSeq, scope)
+        );
+        INSERT INTO reviews_v2(sessionId, turnEndSeq, scope, projectId, targets, status, worker, pid)
+          SELECT sessionId, turnEndSeq, 'mechanical', projectId, targets, status, worker, pid FROM reviews;
+        DROP TABLE reviews;
+        ALTER TABLE reviews_v2 RENAME TO reviews;`)
+      }
+      db.exec(`CREATE TABLE awards_v3 (
+        projectId TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL PRIMARY KEY, earnedAt TEXT NOT NULL,
+        sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, detail TEXT NOT NULL
       );
-      INSERT INTO reviews_v2(sessionId, turnEndSeq, scope, projectId, targets, status, worker, pid)
-        SELECT sessionId, turnEndSeq, 'mechanical', projectId, targets, status, worker, pid FROM reviews;
-      DROP TABLE reviews;
-      ALTER TABLE reviews_v2 RENAME TO reviews;
+      INSERT INTO awards_v3(projectId, kind, id, earnedAt, sessionId, turnEndSeq, detail)
+        SELECT projectId, kind, id, earnedAt, sessionId, turnEndSeq, detail FROM awards;
+      DROP TABLE awards;
+      ALTER TABLE awards_v3 RENAME TO awards;
+      CREATE UNIQUE INDEX awards_mechanical_unique
+        ON awards(projectId, kind)
+        WHERE json_extract(detail, '$.category') IS NULL OR json_extract(detail, '$.category') = 'mechanical';
+      CREATE UNIQUE INDEX awards_habit_turn_unique
+        ON awards(projectId, kind, sessionId, turnEndSeq)
+        WHERE json_extract(detail, '$.category') = 'habit';
       PRAGMA user_version=${SCHEMA_VERSION}`)
     } else if (application !== APPLICATION_ID || version !== SCHEMA_VERSION) {
       throw new Error('The badge database has an unrecognized schema')
@@ -86,19 +111,37 @@ export function openBadgeStore(path) {
       db.prepare('INSERT INTO requests(sessionId,turnEndSeq,payload) VALUES(?,?,?)')
         .run(job.sessionId, job.turnEndSeq, JSON.stringify(request))
     },
-    /** @returns {object[]} Award IDs and kinds inserted by the committed transaction. */
+    /** @returns {object[]} Award IDs, kinds, and optional habit paths inserted by the committed transaction. */
     commit(job, awards) {
       db.exec('BEGIN IMMEDIATE')
       try {
         const inserted = []
-        const write = db.prepare(`INSERT INTO awards(projectId,kind,id,earnedAt,sessionId,turnEndSeq,detail) VALUES(?,?,?,?,?,?,?)
-          ON CONFLICT(projectId,kind) DO UPDATE SET sessionId=excluded.sessionId,turnEndSeq=excluded.turnEndSeq,detail=excluded.detail
-          WHERE json_extract(awards.detail,'$.working')=0 AND json_extract(excluded.detail,'$.working')=1
-          RETURNING id,kind`)
+        const findMechanical = db.prepare('SELECT id, detail FROM awards WHERE projectId=? AND kind=? LIMIT 1')
+        const insertAward = db.prepare('INSERT OR IGNORE INTO awards(projectId,kind,id,earnedAt,sessionId,turnEndSeq,detail) VALUES(?,?,?,?,?,?,?)')
+        const promoteMechanical = db.prepare('UPDATE awards SET sessionId=?,turnEndSeq=?,detail=? WHERE id=?')
         for (const award of awards) {
-          const id = randomUUID()
-          const saved = write.get(job.projectId, award.kind, id, new Date().toISOString(), job.sessionId, job.turnEndSeq, JSON.stringify(award))
-          if (saved?.id === id) inserted.push({ id, kind: award.kind })
+          const category = badgeCategory(award.kind)
+          const normalized = category ? { category, ...award } : award
+          const payload = JSON.stringify(normalized)
+          if (category === 'habit') {
+            const id = randomUUID()
+            const result = insertAward.run(job.projectId, award.kind, id, new Date().toISOString(), job.sessionId, job.turnEndSeq, payload)
+            if (result.changes === 1) {
+              inserted.push({ id, kind: award.kind, ...(award.path ? { path: award.path } : {}) })
+            }
+          } else {
+            const existing = findMechanical.get(job.projectId, award.kind)
+            if (!existing) {
+              const id = randomUUID()
+              const result = insertAward.run(job.projectId, award.kind, id, new Date().toISOString(), job.sessionId, job.turnEndSeq, payload)
+              if (result.changes === 1) inserted.push({ id, kind: award.kind })
+            } else {
+              const previous = JSON.parse(existing.detail)
+              if (previous.working === false && award.working === true) {
+                promoteMechanical.run(job.sessionId, job.turnEndSeq, payload, existing.id)
+              }
+            }
+          }
         }
         finish(job, 'done')
         db.exec('COMMIT')
@@ -110,7 +153,34 @@ export function openBadgeStore(path) {
       return Number(db.prepare("UPDATE reviews SET status='pending' WHERE status='failed' AND projectId=? AND sessionId=?").run(projectId, sessionId).changes)
     },
     earnedKinds(projectId) {
-      return db.prepare('SELECT kind FROM awards WHERE projectId=?').all(projectId).map(row => row.kind)
+      return [...new Set(db.prepare('SELECT kind FROM awards WHERE projectId=?').all(projectId).map(row => row.kind))]
+    },
+    /** Summarize previously earned habit awards for one project and current session watermark.
+     * @param {string} projectId Registered project ID.
+     * @param {string} sessionId Active session ID for per-session turnEndSeq watermarks.
+     * @returns {Record<string, {count: number, lastEarnedAt: string | null, lastSessionTurnEndSeq: number, recentEvidence: string[]}>}
+     */
+    priorHabitAwards(projectId, sessionId) {
+      const rows = db.prepare('SELECT kind, sessionId, turnEndSeq, earnedAt, detail FROM awards WHERE projectId=? ORDER BY earnedAt ASC, rowid ASC').all(projectId)
+      const summary = {}
+      for (const kind of HABIT_BADGE_KINDS) {
+        summary[kind] = { count: 0, lastEarnedAt: null, lastSessionTurnEndSeq: -1, recentEvidence: [] }
+      }
+      for (const row of rows) {
+        if (!HABIT_BADGE_KINDS.includes(row.kind)) continue
+        const entry = summary[row.kind]
+        entry.count += 1
+        entry.lastEarnedAt = row.earnedAt
+        if (row.sessionId === sessionId && row.turnEndSeq > entry.lastSessionTurnEndSeq) {
+          entry.lastSessionTurnEndSeq = row.turnEndSeq
+        }
+        const parsed = JSON.parse(row.detail)
+        if (typeof parsed?.evidence === 'string' && parsed.evidence.trim()) {
+          entry.recentEvidence.push(parsed.evidence.trim())
+          if (entry.recentEvidence.length > 3) entry.recentEvidence.shift()
+        }
+      }
+      return summary
     },
     pendingByProject() {
       return db.prepare(`SELECT projectId,sessionId,status,count(*) AS count FROM reviews WHERE status!='done' GROUP BY projectId,sessionId,status`).all()

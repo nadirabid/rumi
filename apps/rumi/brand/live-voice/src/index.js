@@ -471,12 +471,17 @@ async function createEntry({ ctx, registry, config, logger, apiKey, sdp, session
         return;
       }
       if (root !== projectPath) return;
-      const names = awards.map(award => PRINT_BADGE_NAMES.get(award.kind)).filter(Boolean);
-      if (names.length === 0) return;
-      const awardNote = names.length === 1
-        ? `The user just earned the ${names[0]} badge in this project.`
-        : `The user just earned these badges in this project. ${names.join(', ')}.`;
-      const hasMechanical = awards.some(award => PRINT_BADGE_NAMES.has(award.kind) && !HABIT_BADGE_KINDS.has(award.kind));
+      const named = awards.map(award => ({ award, name: PRINT_BADGE_NAMES.get(award.kind) })).filter(entry => Boolean(entry.name));
+      if (named.length === 0) return;
+      const single = named.length === 1 ? named[0] : null;
+      const awardNote = single
+        ? HABIT_BADGE_KINDS.has(single.award.kind)
+          ? (single.award.path === 'growth'
+            ? `The user just earned a ${single.name} badge for improving in this project.`
+            : `The user just earned a ${single.name} badge in this project.`)
+          : `The user just earned the ${single.name} badge in this project.`
+        : `The user just earned these badges in this project. ${named.map(entry => entry.name).join(', ')}.`;
+      const hasMechanical = named.some(entry => !HABIT_BADGE_KINDS.has(entry.award.kind));
       const caveat = hasMechanical ? ' Print readiness requires a separate check.' : '';
       const content = `${awardNote} You may mention this briefly in your next relevant reply, in the user's language. Wait for a normal chance to speak.${caveat}`;
       const eventId = randomUUID();

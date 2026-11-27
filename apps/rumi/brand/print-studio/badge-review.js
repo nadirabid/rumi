@@ -1,8 +1,9 @@
 /** Run bounded, tool-free badge evaluations outside the project chat. */
-import { BlockAssembler, HarnessError } from '@deepseek-ai/dsh-llm'
+import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { PRINT_BADGE_KINDS } from './badges-kinds.js'
 import { isCurrentPrintBadgeRevision, showsThinWeb } from './badge-review-evidence.js'
 import { inspectSavedBadgeRevision } from './badge-review-worker.js'
+import { dispatchBadgeModelCall, latestSessionRoute, parseBadgeJson } from './badge-review-route.js'
 
 export { capturePrintBadgeRevisions } from './badge-review-evidence.js'
 
@@ -66,9 +67,7 @@ function recipeParts(recipe, joints) {
 }
 
 function parsedResult(text, evidence, sections, final) {
-  let response
-  try { response = JSON.parse(text) }
-  catch (error) { throw invalidResult(error) }
+  const response = parseBadgeJson(text, invalidResult)
   if (!Array.isArray(response?.findings) || response.findings.length > maxFindings
     || !Array.isArray(response.inspect) || response.inspect.length > maxInspect
     || (final && response.inspect.length > 0)) throw invalidResult()
@@ -112,42 +111,14 @@ function parsedResult(text, evidence, sections, final) {
   return { findings, inspect }
 }
 
-async function dispatch(ctx, input, log, config, signal) {
-  signal.throwIfAborted()
-  const prepared = await ctx.llm.prepareCall({
-    provider: config.provider, model: config.model, reasoningEffort: config.reasoningEffort,
-    maxTokens: config.maxOutputTokens,
-  }, signal)
-  const messages = [{ role: 'user', content: [{ type: 'text', text: JSON.stringify(input) }] }]
-  const request = { ...prepared.config, purpose, system, messages, sessionId: log.sessionId }
-  await log.recordRequest({
-    version: 1, sessionId: log.sessionId, turnEndSeq: log.turnEndSeq,
-    modelPath: log.modelPath, revision: log.revision, sourceHash: log.sourceHash, request,
+async function dispatch(ctx, input, log, config, sessionRoute, signal) {
+  return dispatchBadgeModelCall(ctx, {
+    purpose, system, input, log, config, sessionRoute, maxResponseChars, invalidResult, signal,
+    recordMeta: {
+      version: 1, sessionId: log.sessionId, turnEndSeq: log.turnEndSeq,
+      modelPath: log.modelPath, revision: log.revision, sourceHash: log.sourceHash,
+    },
   })
-  signal.throwIfAborted()
-  const assembler = new BlockAssembler()
-  let characters = 0
-  let finished = false
-  for await (const chunk of prepared.stream({ ...request, signal })) {
-    signal.throwIfAborted()
-    if (finished || chunk.type === 'tool-call-delta'
-      || (chunk.type === 'block-start' && chunk.blockType === 'tool-call')
-      || (chunk.type === 'block-end' && chunk.block.type === 'tool-call')) throw invalidResult()
-    if (chunk.type === 'text-delta' || chunk.type === 'reasoning-delta') characters += chunk.text.length
-    if (chunk.type === 'finish') finished = true
-    if (characters > maxResponseChars) throw invalidResult()
-    assembler.push(chunk)
-  }
-  const finish = assembler.finish
-  if (finish.kind === 'error' || finish.kind === 'aborted') {
-    throw new HarnessError('Print Studio badge model call failed', finish.failure.code)
-  }
-  if (!finished || finish.kind !== 'stop') {
-    throw new HarnessError('Print Studio badge model call did not complete', 'PRINT_BADGE_REVIEW_INCOMPLETE')
-  }
-  const blocks = assembler.blocks().filter(block => block.type !== 'reasoning')
-  if (blocks.length !== 1 || blocks[0].type !== 'text' || blocks[0].text.length > maxResponseChars) throw invalidResult()
-  return blocks[0].text
 }
 
 /**
@@ -158,8 +129,9 @@ async function dispatch(ctx, input, log, config, signal) {
  * @param {object} config Resolved DeepSeek route and per-model request budget.
  * @returns {Promise<object[]>} Findings for a current model or a publication pinned to the completed turn.
  */
-export async function reviewPrintBadges(ctx, { session, project, turnEndSeq, events, targets, signal, recordRequest }, config) {
+export async function reviewPrintBadges(ctx, { session, project, turnEndSeq, events, targets, sessionRoute, signal, recordRequest }, config) {
   if (!config.enabled) return []
+  const routeFallback = sessionRoute ?? latestSessionRoute(events)
   const findings = []
   for (const target of targets) {
     const readSignal = AbortSignal.any([signal, AbortSignal.timeout(config.timeoutMs)])
@@ -176,10 +148,10 @@ export async function reviewPrintBadges(ctx, { session, project, turnEndSeq, eve
         ? await evidence.inspect(['x', 'y', 'z'].map(axis => ({ part: singlePart.ref, axis, sampleThinWeb: true }))) : []
       const input = { ...facts, sections, followup: false }
       const matingSections = facts.matingSections?.flatMap(pair => pair.sections) ?? []
-      let result = parsedResult(await dispatch(ctx, input, log, config, readSignal), evidence, [...matingSections, ...sections], false)
+      let result = parsedResult(await dispatch(ctx, input, log, config, routeFallback, readSignal), evidence, [...matingSections, ...sections], false)
       if (result.inspect.length) {
         const inspected = [...sections, ...await evidence.inspect(result.inspect)]
-        result = parsedResult(await dispatch(ctx, { ...input, followup: true, sections: inspected }, log, config, readSignal),
+        result = parsedResult(await dispatch(ctx, { ...input, followup: true, sections: inspected }, log, config, routeFallback, readSignal),
           evidence, [...matingSections, ...inspected], true)
       }
       readSignal.throwIfAborted()

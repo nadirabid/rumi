@@ -234,6 +234,40 @@ function scenarios(root) {
   injection.assistant('Let me know how you want to edit the block.')
   injection.endTurn()
 
+  // 10. Repeat Patience (major wait after prior Patience award in the same project).
+  const patienceRepeat = buildTranscript()
+  patienceRepeat.startTurn()
+  patienceRepeat.user('make a spinning top')
+  patienceRepeat.stepStart(1)
+  patienceRepeat.toolCall('r1', 'bash')
+  patienceRepeat.toolResult('r1', modelReceipt('6'.repeat(32)), { advanceMs: 18_000 })
+  patienceRepeat.assistant('Built the spinning top.')
+  patienceRepeat.endTurn()
+  const repeatPatienceWatermark = patienceRepeat.events.at(-1).seq
+  patienceRepeat.startTurn()
+  patienceRepeat.user('now run the full physical movement check to see how it balances')
+  patienceRepeat.stepStart(1)
+  patienceRepeat.toolCall('r2', 'validation_mechanics')
+  patienceRepeat.toolResult('r2', JSON.stringify({ status: 'passed', report: { assemblyVerified: true } }), { advanceMs: 40_000 })
+  patienceRepeat.assistant('Movement and balance check passed!')
+  patienceRepeat.endTurn()
+
+  // 11. Repeat Language (step-up improvement after an earlier Language badge in the same project).
+  const langRepeat = buildTranscript()
+  langRepeat.startTurn()
+  langRepeat.user('make a 50 mm square tray with a thin rim')
+  langRepeat.assistant('Built the 50 mm square tray.')
+  langRepeat.endTurn()
+  const repeatLangWatermark = langRepeat.events.at(-1).seq
+  langRepeat.startTurn()
+  langRepeat.user('divide the inside into three equal compartments with 2.5 mm thick dividers, and round the inner floor corners with a 3 mm fillet so coins slide out easily')
+  langRepeat.assistant('Added three equal compartments with 2.5 mm dividers and 3 mm rounded floor corners.')
+  langRepeat.endTurn()
+  langRepeat.startTurn()
+  langRepeat.user('keep the dividers the same height as the outer rim, and add a 12 mm thumb notch centered along the front lip so the lid lifts off smoothly')
+  langRepeat.assistant('Matched the divider height and added the centered 12 mm front thumb notch.')
+  langRepeat.endTurn()
+
   return [
     { name: 'language-practice', unearned: ['language'], expected: ['language'], expectedPath: 'practice', events: langPractice.events, path: makeDir('lp') },
     { name: 'language-growth', unearned: ['language'], expected: ['language'], expectedPath: 'growth', events: langGrowth.events, path: makeDir('lg') },
@@ -244,6 +278,16 @@ function scenarios(root) {
     { name: 'persistence-setback', unearned: ['persistence'], expected: ['persistence'], events: persistenceSetback.events, path: makeDir('ps') },
     { name: 'persistence-negative-unresolved', unearned: ['persistence'], expected: [], expectZeroRequests: true, events: persistenceUnresolved.events, path: makeDir('pu') },
     { name: 'prompt-injection', unearned: ['language', 'patience', 'persistence'], expected: [], events: injection.events, path: makeDir('pi') },
+    {
+      name: 'patience-repeat-major-wait', unearned: ['patience'], expected: ['patience'], expectedPath: 'practice',
+      events: patienceRepeat.events, path: makeDir('pr'),
+      priorAwards: { patience: { count: 1, lastEarnedAt: '2026-11-27T00:00:00.000Z', lastSessionTurnEndSeq: repeatPatienceWatermark, recentEvidence: ['Waited for the initial spinning top build.'] } },
+    },
+    {
+      name: 'language-repeat-step-up', unearned: ['language'], expected: ['language'],
+      events: langRepeat.events, path: makeDir('lr'),
+      priorAwards: { language: { count: 1, lastEarnedAt: '2026-11-27T00:00:00.000Z', lastSessionTurnEndSeq: repeatLangWatermark, recentEvidence: ['Specified a 50 mm square tray with a thin rim.'] } },
+    },
   ]
 }
 
@@ -267,6 +311,7 @@ try {
       turnEndSeq: item.events.at(-1).seq,
       events: item.events,
       unearnedKinds: item.unearned,
+      priorAwards: item.priorAwards ?? {},
       signal: AbortSignal.timeout(45000),
       recordRequest: async record => { requests.push(record) },
     }, config)

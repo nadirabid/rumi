@@ -314,6 +314,114 @@ it('migrates v1 badge databases to v2 without losing mechanical awards and queue
     evidence: 'Described the lid and hinge clearly.', evidenceRefs: ['msg:1', 'msg:3'],
   }])).toMatchObject([{ kind: 'language' }])
   expect(store.earnedKinds('proj-1').sort()).toEqual(['barrel-hinge', 'language'])
+
+  // A later turn in the same project can earn a second Language award (repeatable!).
+  store.enqueue('proj-1', 'sess-1', 15, { kinds: ['language'] }, 'habit')
+  const third = store.take('proj-1')
+  expect(store.commit(third, [{
+    kind: 'language', category: 'habit', path: 'growth', signals: ['L2', 'L5'],
+    evidence: 'Added exact hinge clearances and wall thicknesses.', evidenceRefs: ['msg:10', 'msg:14'],
+  }])).toMatchObject([{ kind: 'language', path: 'growth' }])
+  expect(store.awards().filter(a => a.kind === 'language')).toHaveLength(2)
+  expect(store.priorHabitAwards('proj-1', 'sess-1').language).toMatchObject({
+    count: 2, lastSessionTurnEndSeq: 15,
+  })
+})
+
+it('enforces non-overlapping watermarks for repeatable Patience, Language, and Persistence awards', () => {
+  const project = tempDir()
+  const log = buildLog()
+
+  // Turns 1-3: earn Patience #1 (3 clean substantive turns with heavy wait).
+  for (let i = 1; i <= 3; i += 1) {
+    log.startTurn()
+    log.user(`Step ${i}: make wall ${i + 2} mm thick`)
+    log.stepStart(1)
+    log.toolCall(`p${i}`, 'bash')
+    log.toolResult(`p${i}`, modelReceipt(String(i).repeat(32)), { advanceMs: i === 1 ? 18_000 : 6_000 })
+    log.assistant(`Finished step ${i}.`)
+    log.endTurn()
+  }
+  const firstPatienceSeq = log.events.at(-1)!.seq
+  const firstPass = extractHabitBadgeEvidence(project, log.events, ['patience'])
+  expect(firstPass.patience.practiceEligible).toBe(true)
+
+  // Turn 4 (short regular turn after watermark): must NOT re-trigger Patience immediately.
+  log.startTurn()
+  log.user('Round the top edge by 2 mm.')
+  log.stepStart(1)
+  log.toolCall('p4', 'bash')
+  log.toolResult('p4', modelReceipt('4'.repeat(32)), { advanceMs: 5_000 })
+  log.assistant('Rounded the top edge.')
+  log.endTurn()
+
+  const priorAfterFirst = {
+    patience: { count: 1, lastEarnedAt: '2026-11-27T00:00:00.000Z', lastSessionTurnEndSeq: firstPatienceSeq, recentEvidence: ['Waited through steps 1-3.'] },
+  }
+  const noDoubleCount = extractHabitBadgeEvidence(project, log.events, ['patience'], priorAfterFirst)
+  expect(noDoubleCount.patience.eligible).toBe(false)
+  expect(noDoubleCount.eligibleKinds).toEqual([])
+
+  // Turn 5: major wait (validation_mechanics) after watermark -> eligible for Patience #2!
+  log.startTurn()
+  log.user('Run the full mechanics check on the hinge.')
+  log.stepStart(1)
+  log.toolCall('p5', 'validation_mechanics')
+  log.toolResult('p5', JSON.stringify({ status: 'passed', report: { assemblyVerified: true } }), { advanceMs: 35_000 })
+  log.assistant('Mechanics check passed!')
+  log.endTurn()
+
+  const secondPatience = extractHabitBadgeEvidence(project, log.events, ['patience'], priorAfterFirst)
+  expect(secondPatience.patience.eligible).toBe(true)
+  expect(secondPatience.patience.majorWaitEligible).toBe(true)
+  expect(secondPatience.patience.streakTurnRefs).toEqual(['turn:4', 'turn:5'])
+
+  // Language watermark: only fresh turns after watermark qualify.
+  const priorLang = {
+    language: { count: 1, lastEarnedAt: '2026-11-27T00:00:00.000Z', lastSessionTurnEndSeq: firstPatienceSeq, recentEvidence: ['Specified wall thickness.'] },
+  }
+  const repeatLang = extractHabitBadgeEvidence(project, log.events, ['language'], priorLang)
+  expect(repeatLang.eligibleKinds).toEqual(['language'])
+  expect(repeatLang.freshLanguageTurnCount).toBe(2)
+  expect(repeatLang.facts.priorAwards?.language).toMatchObject({ count: 1 })
+})
+
+it('migrates v2 badge databases to v3 and stores multiple habit awards per project', () => {
+  const dir = tempDir()
+  const dbPath = join(dir, 'badges-v2.sqlite')
+  const v2 = new DatabaseSync(dbPath)
+  try {
+    v2.exec(`CREATE TABLE reviews (
+      sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, scope TEXT NOT NULL DEFAULT 'mechanical',
+      projectId TEXT NOT NULL, targets TEXT NOT NULL, status TEXT NOT NULL, worker TEXT, pid INTEGER,
+      PRIMARY KEY (sessionId, turnEndSeq, scope)
+    );
+    CREATE TABLE awards (
+      projectId TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, earnedAt TEXT NOT NULL,
+      sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, detail TEXT NOT NULL,
+      PRIMARY KEY (projectId, kind)
+    );
+    CREATE TABLE requests (
+      id INTEGER PRIMARY KEY, sessionId TEXT NOT NULL, turnEndSeq INTEGER NOT NULL, payload TEXT NOT NULL
+    );
+    PRAGMA application_id=1380074567;
+    PRAGMA user_version=2`)
+    v2.prepare('INSERT INTO awards VALUES(?,?,?,?,?,?,?)').run(
+      'proj-2', 'patience', 'old-pat-1', '2026-11-27T01:00:00.000Z', 'sess-2', 4,
+      JSON.stringify({ kind: 'patience', category: 'habit', path: 'practice', signals: ['P1'], evidence: 'Waited through builds.' }),
+    )
+  } finally { v2.close() }
+
+  const store = openBadgeStore(dbPath)
+  disposers.push(() => store.close())
+  store.enqueue('proj-2', 'sess-2', 12, { kinds: ['patience'] }, 'habit')
+  const job = store.take('proj-2')
+  const inserted = store.commit(job, [{
+    kind: 'patience', category: 'habit', path: 'growth', signals: ['P5', 'P3'],
+    evidence: 'Settled down and waited for the validation run.', evidenceRefs: ['turn:5', 'turn:6'],
+  }])
+  expect(inserted).toMatchObject([{ kind: 'patience', path: 'growth' }])
+  expect(store.awards().filter(a => a.kind === 'patience')).toHaveLength(2)
 })
 
 it('queues and announces habit awards alongside mechanical reviews in createBadgeHost', async () => {
@@ -372,4 +480,93 @@ it('queues and announces habit awards alongside mechanical reviews in createBadg
   expect(announcements).toMatchObject([{
     projectId, projectName: 'Treasure Box', awards: [{ kind: 'language' }],
   }])
+})
+
+it('falls back to DeepSeek via Baseten or the active session route when DeepSeek API credentials are missing', async () => {
+  const project = tempDir()
+  const log = buildLog()
+  log.events.push({
+    type: 'request/header', seq: log.events.length, time: 1_700_000_000_000,
+    data: { header: { config: { provider: 'rumi-chatgpt', model: 'gpt-6.2-sol' } } },
+  })
+  log.startTurn()
+  const m1 = log.user('Make a 50 mm wide box with a 3 mm lip on top.')
+  log.assistant('Built the box.')
+  log.endTurn()
+  log.startTurn()
+  const m2 = log.user('Keep the base 50 mm wide and add a 12 mm finger notch centered on the front lid.')
+  log.assistant('Added the finger notch.')
+  log.endTurn()
+
+  const attempted: string[] = []
+  const makeError = (code: string) => Object.assign(new Error(code), { code })
+
+  // Case 1: deepseek-official missing credential in stream -> falls back to baseten, handles markdown-fenced JSON.
+  const basetenFallback = vi.fn(async (controls: { provider: string; model: string }, _signal: AbortSignal, adjust?: (c: object, m: object) => object) => {
+    attempted.push(`${controls.provider}:${controls.model}`)
+    const resolved = adjust ? adjust(controls, { reasoning: { efforts: [{ id: 'off' }, { id: 'low' }] } }) : controls
+    return {
+      config: resolved,
+      async *stream(): AsyncIterable<StreamChunk> {
+        if (controls.provider === 'deepseek-official') throw makeError('MISSING_CREDENTIAL')
+        yield {
+          type: 'text-delta', index: 0, text: `\`\`\`json\n${JSON.stringify({
+            findings: [{ kind: 'language', path: 'practice', signals: ['L1', 'L2'], refs: [`msg:${m1.seq}`, `msg:${m2.seq}`],
+              evidence: 'Specified exact 50 mm width, 3 mm lip, and a centered 12 mm front finger notch.' }],
+          })}\n\`\`\``,
+        }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      },
+    }
+  })
+
+  const config = createBadgeReviewConfig(z)({})
+  const awards = await reviewHabitBadges({ llm: { prepareCall: basetenFallback } }, {
+    session: { id: 's-baseten' }, project: { path: project }, turnEndSeq: log.events.at(-1)!.seq,
+    events: log.events, unearnedKinds: ['language'], signal: new AbortController().signal,
+    recordRequest: async () => {},
+  }, config)
+
+  expect(attempted).toEqual([
+    'deepseek-official:deepseek-flash',
+    'baseten:deepseek-ai/DeepSeek-V4.1-Flash-1017-Fast',
+  ])
+  expect(awards).toMatchObject([{ kind: 'language', path: 'practice' }])
+
+  // Case 2: deepseek-official missing + baseten unknown model -> falls back to session request/header route.
+  const attempted2: string[] = []
+  const sessionFallback = vi.fn(async (controls: { provider: string; model: string }, _signal: AbortSignal, adjust?: (c: object, m: object) => object) => {
+    attempted2.push(`${controls.provider}:${controls.model}`)
+    if (controls.provider === 'baseten') throw makeError('UNKNOWN_MODEL')
+    const resolved = adjust ? adjust(controls, { reasoning: { efforts: [{ id: 'low' }] } }) : controls
+    return {
+      config: resolved,
+      async *stream(): AsyncIterable<StreamChunk> {
+        if (controls.provider === 'deepseek-official') {
+          yield { type: 'finish', reason: { kind: 'error', failure: { code: 'MISSING_CREDENTIAL', message: 'no key' } } }
+          return
+        }
+        yield {
+          type: 'text-delta', index: 0, text: JSON.stringify({
+            findings: [{ kind: 'language', path: 'practice', signals: ['L1', 'L2'], refs: [`msg:${m1.seq}`, `msg:${m2.seq}`],
+              evidence: 'Gave exact box width, lip thickness, and centered notch size.' }],
+          }),
+        }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      },
+    }
+  })
+
+  const awards2 = await reviewHabitBadges({ llm: { prepareCall: sessionFallback } }, {
+    session: { id: 's-chatgpt' }, project: { path: project }, turnEndSeq: log.events.at(-1)!.seq,
+    events: log.events, unearnedKinds: ['language'], signal: new AbortController().signal,
+    recordRequest: async () => {},
+  }, config)
+
+  expect(attempted2).toEqual([
+    'deepseek-official:deepseek-flash',
+    'baseten:deepseek-ai/DeepSeek-V4.1-Flash-1017-Fast',
+    'rumi-chatgpt:gpt-6.2-sol',
+  ])
+  expect(awards2).toMatchObject([{ kind: 'language', path: 'practice' }])
 })

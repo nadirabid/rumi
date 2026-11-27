@@ -10,6 +10,7 @@ export interface PrintBadgeEarned {
   readonly awards: readonly {
     readonly id: Branded<'RumiPrintBadgeId'>
     readonly kind: (typeof ALL_BADGE_KINDS)[number]
+    readonly path?: 'practice' | 'growth'
   }[]
 }
 

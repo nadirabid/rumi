@@ -58,9 +58,15 @@ const PLUGIN_BUNDLE_PATH = /^\/plugins\//u
  * @param request - Request from the application origin.
  * @param host - Owned Host URL.
  * @param cookie - Desktop-private credential carried in the Cookie header for the owned Host.
+ * @param signal - Cancellation signal for the Host fetch; defaults to `request.signal`.
  * @returns Host response without connection-level headers.
  */
-export async function forwardWebRequest(request: Request, host: string, cookie: string): Promise<Response> {
+export async function forwardWebRequest(
+  request: Request,
+  host: string,
+  cookie: string,
+  signal: AbortSignal = request.signal,
+): Promise<Response> {
   const source = new URL(request.url)
   const origin = request.headers.get('origin')
   if (origin !== null && origin !== 'dsh-app://app') return new Response(null, { status: 403 })
@@ -70,7 +76,7 @@ export async function forwardWebRequest(request: Request, host: string, cookie: 
   const headers = new Headers(request.headers)
   for (const name of ['host', 'origin', 'cookie', 'sec-fetch-site']) headers.delete(name)
   headers.set('cookie', cookie)
-  const init = { method: request.method, headers, body: request.body, signal: request.signal, duplex: 'half', redirect: 'manual' as const }
+  const init = { method: request.method, headers, body: request.body, signal, duplex: 'half', redirect: 'manual' as const }
   const response = await fetch(target, init)
   const outgoing = new Headers(response.headers)
   for (const name of WITHHELD_RESPONSE_HEADERS) outgoing.delete(name)
@@ -100,7 +106,9 @@ export class DesktopUpdateReadGate {
     const signal = this.reads.signal
     if (signal.aborted) return new Response(null, { status: 503 })
     try {
-      return await forwardWebRequest(new Request(request, { signal: AbortSignal.any([request.signal, signal]) }), host, cookie)
+      // Pass the combined signal directly to fetch; wrapping in new Request(request, { signal })
+      // creates an unretained internal AbortController in undici that GC can detach from open streams.
+      return await forwardWebRequest(request, host, cookie, AbortSignal.any([request.signal, signal]))
     } catch (error) {
       if (signal.aborted) return new Response(null, { status: 503 })
       throw error

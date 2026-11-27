@@ -55,6 +55,55 @@ it('releases an idle long poll for update admission, preserves a write, and admi
   }
 })
 
+it('closes an already-streaming SSE read when paused for update admission', async () => {
+  const streamClosed = Promise.withResolvers<undefined>()
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' })
+    response.write(': connected\n\n')
+    response.once('close', () => { streamClosed.resolve(undefined) })
+  })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('Missing TCP address')
+  const host = `http://127.0.0.1:${address.port}`
+  const gate = new DesktopUpdateReadGate()
+  const response = await gate.forward(new Request('dsh-app://app/api/rumi-projects/events'), host, 'session=test')
+  const reader = response.body?.getReader()
+  if (reader === undefined) throw new Error('Missing stream body')
+  let nextRead: Promise<unknown> | undefined
+  try {
+    const first = await reader.read()
+    expect(new TextDecoder().decode(first.value)).toBe(': connected\n\n')
+    nextRead = reader.read()
+    const aborted = expect(nextRead).rejects.toThrow()
+    gate.pause()
+    await Promise.all([streamClosed.promise, aborted])
+  } finally {
+    gate.pause()
+    await Promise.allSettled([nextRead])
+    server.closeAllConnections()
+    await new Promise<void>((resolve, reject) => { server.close((error) => { if (error) reject(error); else resolve() }) })
+  }
+})
+
+it('passes the gate abort signal directly to fetch without wrapping the request', async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response('ok'))
+  vi.stubGlobal('fetch', fetch)
+  const originalRequest = globalThis.Request
+  const requestSpy = vi.fn((...args: ConstructorParameters<typeof Request>) => new originalRequest(...args))
+  const incoming = new originalRequest('dsh-app://app/api/rumi-projects/events')
+  vi.stubGlobal('Request', requestSpy)
+  const gate = new DesktopUpdateReadGate()
+  await gate.forward(incoming, 'http://127.0.0.1:1234/', 'session=owned')
+  expect(requestSpy).not.toHaveBeenCalled()
+  const [, init] = fetch.mock.calls[0] as [URL, RequestInit]
+  expect(init.signal).toBeInstanceOf(AbortSignal)
+  expect(init.signal?.aborted).toBe(false)
+  gate.pause()
+  expect(init.signal?.aborted).toBe(true)
+})
+
 it('serves the Web entry and assets without starting or contacting a Host', async () => {
   const root = await mkdtemp(join(tmpdir(), 'desktop-web-'))
   roots.push(root)

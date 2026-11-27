@@ -80,7 +80,7 @@ export const en = {
   validationPassed: 'Geometry checks passed. Slicer and moving-joint checks are still required.',
   validationUnavailable: 'Print or movement checks could not finish.',
 
-  shapeReset: 'Reset {control}', cutHeight: 'Height', cutTilt: 'Tilt', cutLean: 'Lean', shapeControls: 'Shape controls', shapeAmount: 'Strength', shapeSpread: 'Spread', shapeAngle: 'Tilt', shapePeak: 'Peak position', shapeCurve: 'Softness', shapeHint: 'Drag to shape. Tell Rumi when it feels right.', shapeFrozen: 'Keeping this shape…',
+  shapeReset: 'Reset {control}', shapeResetAction: 'Reset', cutHeight: 'Height', cutTilt: 'Tilt', cutLean: 'Lean', shapeControls: 'Shape controls', shapeAmount: 'Strength', shapeSpread: 'Spread', shapeAngle: 'Tilt', shapePeak: 'Peak position', shapeCurve: 'Softness', shapeHint: 'Drag to shape. Tell Rumi when it feels right.', shapeFrozen: 'Keeping this shape…',
   cursorHighlighting: 'Cursor driven mesh highlighting',
   cursor_patch: 'Local patch', cursor_surface: 'Surface', cursor_part: 'Whole part', cursor_edge: 'Edge', cursor_named: 'Named regions',
   cursorNamedUnavailable: 'Ask Rumi to name features in this model.',
@@ -184,7 +184,7 @@ export const zh = {
   validationPassed: '几何检查通过。仍需切片和活动关节检查。',
   validationUnavailable: '无法完成打印或运动检查。',
 
-  shapeReset: '重置{control}', cutHeight: '高度', cutTilt: '倾斜', cutLean: '侧倾', shapeControls: '形状控制', shapeAmount: '强度', shapeSpread: '范围', shapeAngle: '倾斜', shapePeak: '峰值位置', shapeCurve: '柔和度', shapeHint: '拖动调整形状。满意后告诉 Rumi。', shapeFrozen: '正在保存形状…',
+  shapeReset: '重置{control}', shapeResetAction: '重置', cutHeight: '高度', cutTilt: '倾斜', cutLean: '侧倾', shapeControls: '形状控制', shapeAmount: '强度', shapeSpread: '范围', shapeAngle: '倾斜', shapePeak: '峰值位置', shapeCurve: '柔和度', shapeHint: '拖动调整形状。满意后告诉 Rumi。', shapeFrozen: '正在保存形状…',
   cursorHighlighting: '光标驱动的网格高亮',
   cursor_patch: '局部', cursor_surface: '表面', cursor_part: '整个部件', cursor_edge: '边缘', cursor_named: '命名区域',
   cursorNamedUnavailable: '请让 Rumi 为此模型的特征命名',

@@ -154,3 +154,34 @@ it('binds custom labels, units, resets and stepped pad/curve keyboard input', as
     expect(released).toHaveBeenLastCalledWith({ tilt: 10, x: 3, z: 0, roundness: 4 })
   } finally { await act(async () => { root.unmount() }); vi.unstubAllGlobals() }
 })
+
+it('tracks dirty reset triggers, groups adjacent spatial wells, and supports double-click reset', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.createElement('div'), root = createRoot(container), Panel = createAnalogPanel(React)
+  const changed = vi.fn(), released = vi.fn()
+  const axis = (key: string, min: number, max: number, step: number, reset: number) => ({ key, min, max, step, reset })
+  try {
+    await act(async () => { root.render(React.createElement(Panel, {
+      spec: { id: 'glass', operation: 'parameters', label: 'Crest', values: { height: 0, peakX: .5, peakY: .5, curve: .5 }, controls: [
+        { kind: 'slider', label: 'Height', axes: [axis('height', -10, 10, 1, 0)] },
+        { kind: 'pad', label: 'Peak', axes: [axis('peakX', 0, 1, .05, .5), axis('peakY', 0, 1, .05, .5)] },
+        { kind: 'curve', label: 'Softness', axes: [axis('curve', 0, 1, .05, .5)] },
+      ] }, t: (key: string) => key === 'shapeReset' ? 'Reset {control}' : key === 'shapeResetAction' ? 'Reset' : key,
+      onChange: changed, onRelease: released,
+    })) })
+    const section = container.querySelector('section.av-controls')!
+    expect(section.classList.contains('av-glass')).toBe(true)
+    expect(container.querySelectorAll('.av-spatial .av-field')).toHaveLength(2)
+    const resetHeight = container.querySelector<HTMLButtonElement>('button[aria-label="Reset Height"]')!
+    expect(resetHeight.dataset.dirty).toBe('false')
+    expect(resetHeight.querySelector('.av-reset-dot')).not.toBeNull()
+    expect(resetHeight.querySelector('.av-reset-label')?.textContent).toBe('Reset')
+    const slider = container.querySelector<HTMLInputElement>('input[aria-label="Height"]')!
+    await act(async () => { slider.value = '6'; slider.dispatchEvent(new Event('input', { bubbles: true })) })
+    expect(resetHeight.dataset.dirty).toBe('true')
+    await act(async () => { slider.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })) })
+    expect(slider.value).toBe('0')
+    expect(resetHeight.dataset.dirty).toBe('false')
+    expect(released).toHaveBeenLastCalledWith({ height: 0, peakX: .5, peakY: .5, curve: .5 })
+  } finally { await act(async () => { root.unmount() }); vi.unstubAllGlobals() }
+})

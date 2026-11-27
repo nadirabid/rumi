@@ -37,13 +37,29 @@ export function createAnalogPanel(React) {
       const request = sequence.current
       void pending.current.then(() => { if (!locked && request === sequence.current) onRelease(current.current) })
     }
-    function reset(control) {
+    function resetControl(control) {
+      if (locked) return
+      update(Object.fromEntries(control.axes.map(axis => [axis.key, axis.reset])))
+      release()
+    }
+    function isDirty(control) {
+      return control.axes.some(axis => Math.abs(values[axis.key] - axis.reset) > 1e-6)
+    }
+    function reset(control, valueText) {
+      const dirty = isDirty(control)
+      const label = t('shapeReset').replace('{control}', control.label)
+      const action = t('shapeResetAction')
       return h('button', {
         type: 'button', className: 'av-reset', disabled: locked,
-        title: t('shapeReset').replace('{control}', control.label), 'aria-label': t('shapeReset').replace('{control}', control.label),
-        onClick: () => { if (!locked) { update(Object.fromEntries(control.axes.map(axis => [axis.key, axis.reset]))); release() } },
-      }, h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
-      h('path', { d: 'M3 10a9 9 0 1 1 2.5 8.5M3 4v6h6' })))
+        'data-dirty': dirty ? 'true' : 'false',
+        'data-has-value': valueText ? 'true' : 'false',
+        title: label, 'aria-label': label,
+        onClick: () => resetControl(control),
+      },
+      valueText
+        ? h('output', { className: 'av-reset-value', 'aria-hidden': true }, valueText)
+        : h('span', { className: 'av-reset-dot', 'aria-hidden': true }),
+      h('span', { className: 'av-reset-label', 'aria-hidden': true }, action))
     }
     function point(event, control) {
       const box = event.currentTarget.getBoundingClientRect(), [x, y] = control.axes
@@ -58,6 +74,7 @@ export function createAnalogPanel(React) {
         onPointerMove: event => { if (!locked && dragging.current && event.currentTarget.hasPointerCapture(event.pointerId)) point(event, control) },
         onPointerUp: event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { event.currentTarget.releasePointerCapture(event.pointerId); release() } },
         onPointerCancel: event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { event.currentTarget.releasePointerCapture(event.pointerId); release() } },
+        onDoubleClick: () => resetControl(control),
         onKeyDown: event => {
           const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[event.key]
           if (!delta || locked) return
@@ -72,20 +89,45 @@ export function createAnalogPanel(React) {
         },
       }
     }
-    function render(control) {
+    function renderControl(control) {
       const [x, y] = control.axes, key = control.axes.map(axis => axis.key).join(':')
       const valueText = formatValue?.(x, values[x.key])
-      if (control.kind === 'slider') return h('div', { className: 'av-glass av-slider', key },
-        h('span', null, control.label), valueText && h('output', { 'aria-hidden': true }, valueText), h('input', {
-          type: 'range', min: x.min, max: x.max, step: x.step, value: values[x.key], disabled: locked,
-          'aria-label': control.label, 'aria-valuetext': valueText, style: { '--av-value': `${fraction(x, values[x.key]) * 100}%` },
-          onPointerDown: () => { dragging.current = true }, onInput: event => update({ [x.key]: Number(event.currentTarget.value) }),
-          onPointerUp: release, onPointerCancel: release, onKeyUp: release, onBlur: () => { if (dragging.current) release() },
-        }), reset(control))
+      if (control.kind === 'slider') {
+        const valueFraction = fraction(x, values[x.key])
+        const resetFraction = fraction(x, x.reset)
+        const hasOriginDetent = x.reset > x.min && x.reset < x.max
+        const fillStart = hasOriginDetent && x.min < 0 && x.max > 0 ? Math.min(resetFraction, valueFraction) : 0
+        const fillEnd = hasOriginDetent && x.min < 0 && x.max > 0 ? Math.max(resetFraction, valueFraction) : valueFraction
+        return h('div', { className: 'av-slider', key },
+          h('div', { className: 'av-control-header' },
+            h('span', { className: 'av-label' }, control.label),
+            reset(control, valueText)),
+          h('div', { className: 'av-slider-wrap' },
+            hasOriginDetent && h('span', {
+              className: 'av-slider-detent', 'aria-hidden': true,
+              style: { left: `calc(14px + (100% - 28px) * ${resetFraction})` },
+            }),
+            h('input', {
+              type: 'range', min: x.min, max: x.max, step: x.step, value: values[x.key], disabled: locked,
+              'aria-label': control.label, 'aria-valuetext': valueText,
+              style: {
+                '--av-value': `${valueFraction * 100}%`,
+                '--av-fill-start': `${fillStart * 100}%`,
+                '--av-fill-end': `${fillEnd * 100}%`,
+              },
+              onPointerDown: () => { dragging.current = true },
+              onInput: event => update({ [x.key]: Number(event.currentTarget.value) }),
+              onDoubleClick: () => resetControl(control),
+              onPointerUp: release, onPointerCancel: release, onKeyUp: release,
+              onBlur: () => { if (dragging.current) release() },
+            })))
+      }
       const normalized = fraction(x, values[x.key])
       const curve = `M0 90 Q50 ${90 - 160 * normalized} 100 90`
-      return h('div', { className: 'av-glass av-field', key },
-        h('div', { className: 'av-field-header' }, h('span', null, control.label), reset(control)),
+      return h('div', { className: 'av-field', key },
+        h('div', { className: 'av-control-header av-field-header' },
+          h('span', { className: 'av-label' }, control.label),
+          reset(control)),
         h('div', {
           className: control.kind === 'pad' ? 'av-pad' : 'av-curve', role: control.kind === 'pad' ? 'group' : 'slider',
           tabIndex: locked ? -1 : 0, 'aria-label': control.label, 'aria-disabled': locked,
@@ -95,15 +137,43 @@ export function createAnalogPanel(React) {
           h('span', { key: 'x', className: 'av-cross av-cross-x' }), h('span', { key: 'y', className: 'av-cross av-cross-y' }),
           h('span', { key: 'handle', className: 'av-handle', style: { left: `${normalized * 100}%`, top: `${(1 - fraction(y, values[y.key])) * 100}%` } }),
         ] : [
-          h('svg', { key: 'curve', viewBox: '0 0 100 100', preserveAspectRatio: 'none', 'aria-hidden': true }, h('path', { d: curve, className: 'av-curve-line' })),
+          h('svg', { key: 'curve', viewBox: '0 0 100 100', preserveAspectRatio: 'none', 'aria-hidden': true },
+            h('path', { d: curve, className: 'av-curve-line' }),
+            h('path', { d: `${curve} L100 100 L0 100 Z`, className: 'av-curve-fill' }),
+            h('line', { x1: 0, y1: 90, x2: 100, y2: 90, className: 'av-curve-baseline' })),
           h('span', { key: 'handle', className: 'av-handle', style: { left: '50%', top: `${90 - 80 * normalized}%` } }),
         ]))
     }
+    function renderItems(list) {
+      const items = []
+      let index = 0
+      while (index < list.length) {
+        const control = list[index]
+        if (control.kind === 'slider') {
+          items.push(renderControl(control))
+          index++
+          continue
+        }
+        const spatial = []
+        while (index < list.length && list[index].kind !== 'slider') {
+          spatial.push(list[index])
+          index++
+        }
+        if (items.length > 0) items.push(h('div', { key: `divider-${index}`, className: 'av-divider', 'aria-hidden': true }))
+        if (spatial.length >= 2) {
+          items.push(h('div', { key: `spatial-${index}`, className: 'av-spatial' }, spatial.map(renderControl)))
+        } else {
+          items.push(renderControl(spatial[0]))
+        }
+      }
+      return items
+    }
     if (spec.frozen) return h('div', { className: 'av-saving av-glass', role: 'status' }, t('shapeFrozen'))
     const visible = controlIndex === undefined ? definitions : controlIndex === null ? [] : [definitions[controlIndex]]
-    return h('section', { className: 'av-controls',
+    return h('section', {
+      className: controlIndex === undefined ? 'av-controls av-glass' : 'av-controls',
       'aria-label': controlIndex === undefined ? `${t('shapeControls')}: ${spec.label}` : spec.label,
       'aria-busy': locked,
-    }, visible.map(render))
+    }, renderItems(visible))
   }
 }

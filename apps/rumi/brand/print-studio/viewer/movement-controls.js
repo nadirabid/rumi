@@ -94,7 +94,10 @@ export function createMovementControls(React, AnalogPanel) {
           type: 'button', className: 'pv-joint-target', hidden: true, title: control.label,
           'aria-label': control.label, 'aria-expanded': selected === index, 'aria-controls': popoverId,
           onClick: () => setSelected(selected === index ? null : index),
-        }))),
+        },
+        h('span', { className: 'pv-joint-orb', 'aria-hidden': true },
+          h('span', { className: 'pv-joint-core' })),
+        h('span', { className: 'pv-joint-tip rumi-region-glass', 'aria-hidden': true }, control.label)))),
       h('div', { ref: popover, id: popoverId, className: 'pv-joint-popover rumi-region-glass', hidden: !interactive || selected === null },
         h(AnalogPanel, {
           spec, t, controlIndex: interactive ? selected : null, formatValue, onChange: change, onRelease: () => {},

@@ -23,6 +23,7 @@ import '../brand/print-studio/tests/cursor-surfaces.spec.ts'
 import '../brand/print-studio/tests/analog.spec.ts'
 
 import '../brand/print-studio/tests/model-focus.spec.ts'
+import '../brand/print-studio/tests/activity-classifier.spec.ts'
 import '../brand/print-studio/tests/model-regions.spec.ts'
 import '../brand/print-studio/tests/region-audit.spec.ts'
 

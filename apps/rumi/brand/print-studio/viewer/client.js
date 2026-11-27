@@ -172,6 +172,7 @@ export function installViewer(ctx, React, primitives) {
         && JSON.stringify(current.scene.models) === JSON.stringify(scene.models)
         && JSON.stringify(current.scene.workingModels) === JSON.stringify(scene.workingModels)
         && current.scene.agentRunning === scene.agentRunning
+        && (current.scene.agentActivity ?? null) === (scene.agentActivity ?? null)
         && current.scene.selectedModel === scene.selectedModel
         && current.scene.catalogFailed === scene.catalogFailed
         && !current.scene.failed
@@ -568,7 +569,7 @@ export function installViewer(ctx, React, primitives) {
         }
         analogRendered.current = values; setBuildError(null); return true
       }, onRelease: values => { void sendShape('adjusted', values).catch(_error => { /* sendShape reports delivery failure in the viewer. */ }) } })) : null,
-      h('div', { className: 'pv-stage', ref: holder, role: 'img', 'aria-label': t(working ? activity === 'checking' ? 'activityChecking' : 'activityBuilding' : 'view'), 'aria-busy': working, 'data-activity': activity, 'data-testid': 'print-viewport',
+      h('div', { className: 'pv-stage', ref: holder, role: 'img', 'aria-label': t(working ? (ACTIVITY_LABELS[activity] ?? 'activityBuilding') : 'view'), 'aria-busy': working, 'data-activity': activity, 'data-testid': 'print-viewport',
         tabIndex: highlight?.regionName && !printState?.active && !failed ? 0 : -1,
         onFocus: event => { if (event.currentTarget.matches(':focus-visible')) viewport.current?.setRegionFocused(true) },
         onBlur: () => viewport.current?.setRegionFocused(false),
@@ -581,11 +582,26 @@ export function installViewer(ctx, React, primitives) {
         ? h('p', { role: 'alert', className: view?.design?.analog ? 'pv-error av-error' : 'pv-error' }, t(buildError)) : null)
   }
 
+  const ACTIVITY_LABELS = {
+    building: 'activityBuilding',
+    checking: 'activityChecking',
+    sculpt: 'activitySculpt',
+    regions: 'activityRegions',
+    collision: 'activityCollision',
+    fdm: 'activityFdm',
+    mechanics: 'activityMechanics',
+    look: 'activityLook',
+    controls: 'activityControls',
+  }
+  const SPECIFIC_VALIDATION_ACTIVITIES = new Set(['collision', 'fdm', 'mechanics'])
+
   function activityFor(scene) {
     if (!scene) return 'idle'
+    const activeOnModel = scene.agentRunning && (!scene.workingModels?.length || scene.workingModels.includes(scene.selectedModel))
+    const classified = activeOnModel && scene.agentActivity && Object.hasOwn(ACTIVITY_LABELS, scene.agentActivity) ? scene.agentActivity : null
     const item = scene.selectedModel ? scene.validation?.models.find(model => model.path === scene.selectedModel) : null
-    if (item?.status === 'checking') return 'checking'
-    if (scene.agentRunning && (!scene.workingModels?.length || scene.workingModels.includes(scene.selectedModel))) return 'building'
+    if (item?.status === 'checking') return classified && SPECIFIC_VALIDATION_ACTIVITIES.has(classified) ? classified : 'checking'
+    if (activeOnModel) return classified ?? 'building'
     return 'idle'
   }
 

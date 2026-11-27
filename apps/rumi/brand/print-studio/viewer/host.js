@@ -26,6 +26,7 @@ import { createLoadReceipts } from './load-receipts.js'
 import { createViewerEvents } from './events.js'
 import { createCursorRequests, cursorIdentity, MAX_CURSOR_BODY_CHARS, saveCursorMesh } from './cursor.js'
 import { createModelFocus } from './model-focus.js'
+import { createActivityTracker } from './activity-classifier.js'
 import { createValidation } from './validation.js'
 import { registerValidationTools } from './validation-tools.js'
 import { registerSurfaceAnalysis } from './surface-analysis-tool.js'
@@ -226,6 +227,9 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
   const events = createViewerEvents()
   const focus = createModelFocus(ctx, {
     read: id => sessions.get(id), notify: id => events.notify(id),
+  })
+  const activity = createActivityTracker(ctx, {
+    notify: id => events.notify(id),
   })
   const validation = validationConfig ? createValidation(ctx, validationConfig, {
     notify: id => events.notify(id),
@@ -429,6 +433,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
       ...displayed, design: record.source?.state() ?? null,
       models: record.models ?? [], selectedModel: record.selectedModel ?? null,
       workingModels: focus.paths(sessionId), agentRunning: focus.running(sessionId),
+      agentActivity: activity.read(sessionId),
       catalogFailed: Boolean(record.catalogError),
     } })
   })

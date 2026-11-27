@@ -1,6 +1,6 @@
 /** Activity owns one cancellable frame chain and respects visibility and reduced motion. */
 import { afterEach, expect, it, vi } from 'vitest'
-import { createActivity } from '../viewer/viewport/activity.js'
+import { ACTIVITY_MODES, createActivity } from '../viewer/viewport/activity.js'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -46,6 +46,16 @@ it('schedules only visible work, caps redraws, and stops for reduced motion and 
     expect(frames.size).toBe(0)
     document.hidden = false; document.dispatchEvent(new Event('visibilitychange'))
     expect(frames.size).toBe(1)
+    clock.setMode('checking')
+    expect(clock.uniform.value.x).toBe(2)
+    for (const stage of ['sculpt', 'regions', 'collision', 'fdm', 'mechanics', 'look', 'controls'] as const) {
+      clock.setMode(stage)
+      expect(clock.mode).toBe(stage)
+      expect(clock.uniform.value.x).toBe(ACTIVITY_MODES[stage])
+    }
+    clock.setMode('unknown-future-stage')
+    expect(clock.mode).toBe('building')
+    expect(clock.uniform.value.x).toBe(ACTIVITY_MODES.building)
     clock.setMode('checking')
     expect(clock.uniform.value.x).toBe(2)
     reduced.matches = true; reduced.dispatchEvent(new Event('change'))

@@ -13,7 +13,10 @@ All lengths, radii, clearances, offsets, and positions are in **millimetres, Z u
 | `K.join(target, *others, keep=False)`, `K.cut(target, *tools, keep=False)`, `K.common(target, tool, keep=False)` | Exact B-Rep union, difference, and intersection. Updates `target` in place and discards tools unless `keep=True`. |
 | `K.fillet(target, radius, edges=None)`, `K.chamfer(target, length, length2=None, edges=None)` | Exact B-Rep edge fillets and chamfers. |
 | `K.copy(obj, name)`, `K.mirror(obj, axis, name=None, plane_origin=(0,0,0))`, `K.move(obj, offset)`, `K.rotate(obj, axis, degrees, pivot=(0,0,0))`, `K.place(obj, transform)` | Duplicate, mirror, translate, rotate, or transform a `CadPart`. |
-| `K.paint(obj, rgba)` | Set surface colour `(r, g, b)` or `(r, g, b, a)` in `0..1`. |
+| `K.paint(obj, rgba)` | Set whole-part surface colour `(r, g, b)`, `(r, g, b, a)` in `0..1`, or `'#rrggbb[aa]'`. |
+| `K.split_faces(obj, *tools)` | Split the boundary B-Rep faces of `obj` along planes or faces while keeping it one closed solid (for crisp multi-colour seams). |
+| `K.paint_faces(obj, faces, rgba)` | Paint specific B-Rep faces on `obj` (`Face`, iterable of `Face`s, or predicate `fn(face) -> bool`) as USD `GeomSubset` multi-colour materials. |
+| `K.paint_regions(obj, painter)` | Attach a per-triangle region painter `painter(centroids_mm, normals)` returning `(T, 3)`/`(T, 4)` RGBA in `0..1` (`NaN` rows preserve existing colour) or a length-`T` sequence. |
 | `K.bounds(obj)`, `K.volume(obj)`, `K.solids(obj)`, `K.distance(a, b)`, `K.require_one_solid(obj, recipe, hint)` | Bounding box corners, volume in mm³, disconnected solid count, exact B-Rep minimum distance (`BRepExtrema`), and single-solid assertion. |
 | `K.direction(value)`, `K.frame(pivot, axis, xdir=None)`, `K.outline_distances(points, outlines)` | Unit direction vectors, orthonormal local frames, and fast NumPy 2D outline distances. |
 | `K.joint(name, kind, parent, child, axis='Z', pivot=(0,0,0), limits=(0,0), control=None, retainer=None)` | Declare a custom joint (`kind`: `'fixed'`, `'revolute'`, `'prismatic'`; optional `retainer` on fixed joints: `'rigid'`, `'bayonet'`, `'threaded'`, `'snap'`, `'friction'`). |

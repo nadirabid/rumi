@@ -33,7 +33,7 @@ Run the geometry, clearance, collision, retention, and movement workflow in [fin
 1. Call `K.start()`, plan assembly after separate printing, and block out each physical part as a solid with its real outer size and position in millimetres.
 2. Choose each joint's pivot and axis from those coordinates.
 3. Call the recipe. It adds and cuts the mating features on both parts, creates any separate retainer hardware (caps, pins, collars, plugs), and records the joint records and disassembly `actions`. A recipe raises an error explaining what to move when a part does not reach the joint.
-4. Add detail, fillets/chamfers, and colour (`K.paint`). Build one side and `K.mirror` it for pairs.
+4. Add detail, fillets/chamfers, and colour (`K.paint` for whole parts; `K.split_faces` + `K.paint_faces` or `K.paint_regions` for multi-colour faces on one part). Build one side and `K.mirror` it for pairs.
 5. Publish the assembled pose with `K.publish("models/<name>", root=base, joints=joints, mode="separate", controls=controls)`. `K.publish` auto-collects recipe-created parts, joints, topologically ordered disassembly steps, and badge features, prints `RUMI_MODEL` and `RUMI_CHECKS`, and updates `model.usda`. Follow [CAD modeling](../cad-modeling/SKILL.md#edit-and-publish) for region labels, `viewer_load`, and `validation_mechanics` + `validation_accept`.
 
 Choose movement widgets through [cad-modeling](../cad-modeling/SKILL.md#movement-controls). Pass their declarations as `controls` to `K.publish`; joint geometry and limits remain the movement definition.

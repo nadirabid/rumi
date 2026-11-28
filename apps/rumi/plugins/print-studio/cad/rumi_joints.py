@@ -214,6 +214,25 @@ def outline_distances(points, outlines, batch_size=256):
 
 # ---------------------------------------------------------------- part wrapper & scene
 
+def _normalize_rgba(color) -> tuple[float, float, float, float]:
+    """Normalize RGB/RGBA tuple, build123d Color, or '#rrggbb[aa]' hex string to (r, g, b, a) in 0..1."""
+    if isinstance(color, str):
+        text = color.strip()
+        if not text.startswith('#') or len(text) not in (7, 9):
+            raise ValueError(f'Color string must be #rrggbb or #rrggbbaa, got {color!r}')
+        r = int(text[1:3], 16) / 255.0
+        g = int(text[3:5], 16) / 255.0
+        b = int(text[5:7], 16) / 255.0
+        a = int(text[7:9], 16) / 255.0 if len(text) == 9 else 1.0
+        return (r, g, b, a)
+    values = tuple(float(c) for c in color)
+    if len(values) == 3:
+        values = (*values, 1.0)
+    if len(values) != 4 or not all(0.0 <= c <= 1.0 for c in values):
+        raise ValueError('Color must be 3 or 4 floats in 0..1 or a #rrggbb[aa] hex string')
+    return values
+
+
 class CadPart:
     """Mutable handle wrapping a named build123d B-Rep solid (millimetres, Z-up)."""
 
@@ -221,8 +240,19 @@ class CadPart:
         if not isinstance(name, str) or not name.strip():
             raise ValueError('Part name must be a non-empty string')
         self.name = name
+        inherited_faces = list(getattr(shape, '_rumi_face_colors', ()))
+        inherited_painters = list(getattr(shape, '_rumi_region_painters', ()))
+        if isinstance(shape, CadPart):
+            inherited_faces = list(shape.face_colors)
+            inherited_painters = list(shape.region_painters)
+            if color is None:
+                color = shape.color
+        elif color is None and getattr(shape, 'color', None) is not None:
+            color = _normalize_rgba(shape.color)
         self.shape = _as_part(shape)
-        self.color = color
+        self.color = _normalize_rgba(color) if color is not None else None
+        self.face_colors: list[tuple] = inherited_faces
+        self.region_painters: list = inherited_painters
         self.meta: dict = {}
         self._sync_shape_attrs()
 
@@ -239,13 +269,21 @@ class CadPart:
         self.shape.label = self.name
         if self.color is not None:
             self.shape.color = b3d.Color(*self.color)
+        if self.face_colors:
+            setattr(self.shape, '_rumi_face_colors', list(self.face_colors))
+        if self.region_painters:
+            setattr(self.shape, '_rumi_region_painters', list(self.region_painters))
 
     def to_build123d(self) -> b3d.Shape:
-        """Return a build123d Shape carrying this part's label and optional color."""
+        """Return a build123d Shape carrying this part's label, colors, and metadata."""
         out = b3d.Part(self.shape.wrapped)
         out.label = self.name
         if self.color is not None:
             out.color = b3d.Color(*self.color)
+        if self.face_colors:
+            setattr(out, '_rumi_face_colors', list(self.face_colors))
+        if self.region_painters:
+            setattr(out, '_rumi_region_painters', list(self.region_painters))
         if '_rumi_features' in self.meta:
             setattr(out, '_rumi_features', list(self.meta['_rumi_features']))
         return out
@@ -284,14 +322,7 @@ def register(name: str, shape: b3d.Shape, color=None) -> CadPart:
     """Register a custom build123d Shape (or CadPart) in the active scene under `name`."""
     if not isinstance(name, str) or not name.strip():
         raise ValueError('register: name must be a non-empty string')
-    rgba = None
-    if color is not None:
-        values = tuple(float(c) for c in color)
-        if len(values) == 3:
-            values = (*values, 1.0)
-        if len(values) != 4 or not all(0.0 <= c <= 1.0 for c in values):
-            raise ValueError('register: color must be 3 or 4 floats in 0..1')
-        rgba = values
+    rgba = _normalize_rgba(color) if color is not None else None
     return _register(name, shape, color=rgba)
 
 
@@ -533,7 +564,10 @@ def copy(obj: CadPart, name: str) -> CadPart:
     """Duplicate a part with a new name."""
     cloned = b3d.Part(obj.shape.wrapped).moved(b3d.Location((0, 0, 0)))
     dup = _register(name, cloned, color=obj.color)
+    dup.face_colors = list(obj.face_colors)
+    dup.region_painters = list(obj.region_painters)
     dup.meta = dict(obj.meta)
+    dup._sync_shape_attrs()
     return dup
 
 
@@ -572,13 +606,36 @@ def place(obj: CadPart, transform) -> CadPart:
 
 
 def paint(obj: CadPart, rgba) -> CadPart:
-    """Assign one surface colour `(r, g, b)` or `(r, g, b, a)` in 0..1."""
-    values = tuple(float(c) for c in rgba)
-    if len(values) == 3:
-        values = (*values, 1.0)
-    if len(values) != 4 or not all(0.0 <= c <= 1.0 for c in values):
-        raise ValueError('paint: rgba must be 3 or 4 floats in 0..1')
-    obj.color = values
+    """Assign one surface colour `(r, g, b)`, `(r, g, b, a)` in 0..1, or `'#rrggbb[aa]'`."""
+    obj.color = _normalize_rgba(rgba)
+    obj._sync_shape_attrs()
+    return obj
+
+
+def paint_faces(obj: CadPart, faces, rgba) -> CadPart:
+    """Assign a surface colour to specific B-Rep faces on `obj` (Face, iterable of Faces, or `fn(face) -> bool`)."""
+    cad_mod = _load_core_module('rumi_cad.py')
+    cad_mod['paint_faces'](obj.shape, faces, rgba)
+    obj.face_colors = list(getattr(obj.shape, '_rumi_face_colors', ()))
+    obj._sync_shape_attrs()
+    return obj
+
+
+def split_faces(obj: CadPart, *tools) -> CadPart:
+    """Split the boundary B-Rep faces of `obj` along planes or faces while keeping it one closed solid."""
+    cad_mod = _load_core_module('rumi_cad.py')
+    split_shape = cad_mod['split_faces'](obj.shape, *tools)
+    obj.shape = _as_part(split_shape)
+    obj.face_colors = []
+    obj._sync_shape_attrs()
+    return obj
+
+
+def paint_regions(obj: CadPart, painter) -> CadPart:
+    """Attach a per-triangle region painter `painter(centroids_mm, normals)` to `obj`."""
+    cad_mod = _load_core_module('rumi_cad.py')
+    cad_mod['paint_regions'](obj.shape, painter)
+    obj.region_painters = list(getattr(obj.shape, '_rumi_region_painters', ()))
     obj._sync_shape_attrs()
     return obj
 

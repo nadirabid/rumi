@@ -222,4 +222,81 @@ with tempfile.TemporaryDirectory(prefix='rumi-cad-publish-') as tmp:
     bulge_summary = CAD['summarize_control_recipe'](bulge_recipe)
     assert bulge_summary['operation'] == 'bulge' and abs(bulge_summary['amplitudeMm'] - 3.0) < 1e-3, bulge_summary
 
-print('CAD_PUBLISH_CHECKS_OK: STEP/BREP/USD publish, RUMI_CHECKS, badges, and B-Rep control recipes')
+    # Multi-color B-Rep face splitting, painting, region painters, and lossless B-Rep round-trip
+    block = bd.fillet(bd.Box(30, 20, 24).edges(), 2.0)
+    block.label = 'ColorBlock'
+    block.color = bd.Color(0.10, 0.35, 0.75)
+    split_block = CAD['split_faces'](block, bd.Plane.XY.offset(-4.0), bd.Plane.XY.offset(4.0))
+    assert len(split_block.solids()) == 1
+    assert abs(split_block.volume - block.volume) < 0.05
+    assert len(split_block.faces()) > len(block.faces())
+    CAD['paint_faces'](split_block, lambda f: f.center().Z > 4.0, '#d72430')
+    CAD['paint_faces'](split_block, lambda f: f.center().Z < -4.0, '#ffffff')
+
+    color_dir = project / 'models' / 'multicolor'
+    color_report = CAD['publish'](color_dir, [split_block], check=True)
+    color_usd = (color_dir / 'model.usda').read_text(encoding='utf-8')
+    assert 'def GeomSubset "rumi_d72430"' in color_usd, 'missing red GeomSubset'
+    assert 'def GeomSubset "rumi_ffffff"' in color_usd, 'missing white GeomSubset'
+    assert 'def GeomSubset "rumi_1a59bf"' in color_usd, 'missing blue base GeomSubset'
+    # Multi-subset meshes must not emit mesh-level displayColor (which overrides pure-white subsets in Three.js)
+    mesh_section = color_usd[color_usd.index('def Mesh "ColorBlock"'):]
+    assert 'primvars:displayColor' not in mesh_section, 'unexpected displayColor on multi-subset mesh'
+    parsed_color = CAD['_robot_usd']['parse_usda'](color_usd)
+    subsets = [p for p in parsed_color['prims'].values() if p['type'] == 'GeomSubset']
+    covered = sorted(idx for s in subsets for idx in s['attrs']['indices']['value'])
+    assert covered == list(range(color_report['triangles'])), 'GeomSubsets must partition all triangles exactly once'
+    assert color_report['checks']['status'] in ('passed', 'review'), color_report['checks']
+    assert all(c['severity'] != 'error' for c in color_report['checks']['checks']), color_report['checks']
+
+    # Verify assembly.json + import_brep restores face colors losslessly
+    rev_dir = Path(color_report['revisionUsd']).parent
+    reimported = CAD['import_brep'](rev_dir)
+    assert len(reimported) == 1
+    assert len(getattr(reimported[0], '_rumi_face_colors', ())) > 0
+    repub_dir = project / 'models' / 'multicolor-repub'
+    CAD['publish'](repub_dir, reimported, check=False)
+    repub_usd = (repub_dir / 'model.usda').read_text(encoding='utf-8')
+    assert 'def GeomSubset "rumi_d72430"' in repub_usd and 'def GeomSubset "rumi_ffffff"' in repub_usd
+
+    # Verify joints kit helpers: K.split_faces, K.paint_faces, K.paint_regions, K.copy, and single-color collapse
+    import types
+    import numpy as np
+    K = types.SimpleNamespace(**runpy.run_path(str(ROOT / 'cad/rumi_joints.py')))
+    K.start()
+    kit_part = K.box('PaintedBox', (20, 20, 20), (0, 0, 10))
+    K.paint(kit_part, '#2060c0')
+    K.split_faces(kit_part, bd.Plane.XY.offset(10.0))
+    K.paint_faces(kit_part, lambda f: f.center().Z > 10.0, '#e03030')
+
+    def stripe_painter(centroids, normals):
+        out = np.full((len(centroids), 3), np.nan, dtype=np.float64)
+        mask = (centroids[:, 0] > 0.0) & (centroids[:, 2] < 10.0)
+        out[mask] = (0.95, 0.80, 0.10)
+        return out
+
+    K.paint_regions(kit_part, stripe_painter)
+    dup = K.copy(kit_part, 'CopiedBox')
+    K.move(dup, (40, 0, 0))
+    K.discard(dup)
+    kit_dir = project / 'models' / 'kit-painted'
+    kit_report = K.publish(kit_dir, parts=[kit_part], root=kit_part, check=True)
+    kit_usd = (kit_dir / 'model.usda').read_text(encoding='utf-8')
+    assert 'def GeomSubset "rumi_e03030"' in kit_usd
+    assert 'def GeomSubset "rumi_f2cc1a"' in kit_usd
+    assert 'def GeomSubset "rumi_2060c0"' in kit_usd
+    assert kit_report['checks']['status'] == 'passed', kit_report['checks']
+    assert all(c['severity'] != 'error' for c in kit_report['checks']['checks']), kit_report['checks']
+
+    # Single-color paint_faces collapses cleanly without GeomSubset overhead
+    uni = bd.Box(12, 12, 12)
+    uni.label = 'UniBox'
+    uni.color = bd.Color(0.2, 0.4, 0.6)
+    CAD['paint_faces'](uni, lambda f: True, (0.2, 0.4, 0.6))
+    uni_dir = project / 'models' / 'unibox'
+    CAD['publish'](uni_dir, [uni], check=False)
+    uni_usd = (uni_dir / 'model.usda').read_text(encoding='utf-8')
+    assert 'GeomSubset' not in uni_usd
+    assert 'primvars:displayColor' in uni_usd
+
+print('CAD_PUBLISH_CHECKS_OK: STEP/BREP/USD publish, RUMI_CHECKS, badges, multi-color GeomSubsets, and B-Rep control recipes')

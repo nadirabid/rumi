@@ -146,10 +146,25 @@ def _euler_xyz_usd_to_mat3(deg_xyz: list[float]) -> np.ndarray:
     return mz @ my @ mx
 
 
+_DEFAULT_SUBSET_COLOR = (0.78, 0.78, 0.78, 1.0)
+
+
 def _normalize_color(color: Any) -> tuple[float, float, float, float] | None:
-    """Normalize an optional RGBA color tuple or build123d Color to (r, g, b, a) in 0..1."""
+    """Normalize an optional RGB(A) tuple, hex string ('#rrggbb[aa]'), or build123d Color to (r, g, b, a) in 0..1."""
     if color is None:
         return None
+    if isinstance(color, str):
+        text = color.strip()
+        if not text.startswith('#') or len(text) not in (7, 9):
+            raise ValueError(f'Color string must be #rrggbb or #rrggbbaa, got {color!r}')
+        try:
+            r = int(text[1:3], 16) / 255.0
+            g = int(text[3:5], 16) / 255.0
+            b = int(text[5:7], 16) / 255.0
+            a = int(text[7:9], 16) / 255.0 if len(text) == 9 else 1.0
+        except ValueError as exc:
+            raise ValueError(f'Invalid hex color {color!r}') from exc
+        return (r, g, b, a)
     if hasattr(color, '__iter__'):
         values = [float(c) for c in color]
     else:
@@ -159,6 +174,12 @@ def _normalize_color(color: Any) -> tuple[float, float, float, float] | None:
     if len(values) != 4 or not all(math.isfinite(c) for c in values):
         raise ValueError('Part color must have 3 or 4 finite RGB(A) channels')
     return tuple(max(0.0, min(1.0, c)) for c in values)  # type: ignore[return-value]
+
+
+def _material_key(rgba: tuple[float, float, float, float]) -> str:
+    """Return a deterministic USD Material prim name for an RGBA color."""
+    r8, g8, b8, a8 = (int(round(c * 255)) for c in rgba)
+    return f'rumi_{r8:02x}{g8:02x}{b8:02x}' if a8 == 255 else f'rumi_{r8:02x}{g8:02x}{b8:02x}_{a8:02x}'
 
 
 def _compute_face_varying_normals(
@@ -242,7 +263,8 @@ def write_robot_usd(
             - `points`: Nx3 array-like of vertex coordinates in **metres** (Z-up)
             - `triangles`: Tx3 array-like of integer vertex indices
             - `normals`: optional (T*3)x3 faceVarying normals (computed if omitted)
-            - `color`: optional (r, g, b) or (r, g, b, a) in 0..1
+            - `color`: optional (r, g, b) or (r, g, b, a) in 0..1 (or '#rrggbb[aa]')
+            - `face_colors`: optional per-triangle color sequence of length T (entries may be None to inherit `color`)
         assembly: Optional assembly dict (version 1) with root, parts, connections, sequences, manufacturing.
         controls: Optional list of rumi:motionControls widget declarations.
         default_prim: Root prim name (default 'Model').
@@ -269,12 +291,16 @@ def write_robot_usd(
             raise ValueError(f'Nonfinite coordinates in {pid}')
         if tris.ndim != 2 or tris.shape[1] != 3 or len(tris) == 0:
             raise ValueError(f'Mesh {pid} has invalid triangles array')
+        raw_face_colors = item.get('face_colors')
+        if raw_face_colors is not None and len(raw_face_colors) != len(tris):
+            raise ValueError(f'Mesh {pid} face_colors length ({len(raw_face_colors)}) does not match triangles ({len(tris)})')
         mesh_by_id[pid] = {
             'id': pid,
             'points': pts,
             'triangles': tris,
             'normals': item.get('normals'),
             'color': _normalize_color(item.get('color')),
+            'face_colors': raw_face_colors,
         }
         ordered_ids.append(pid)
 
@@ -301,15 +327,36 @@ def write_robot_usd(
     link_ids = [root_part] + [pid for pid in ordered_ids if pid != root_part]
     link_paths = [f'{root_path}/{pid}' for pid in link_ids]
 
-    # Build deduplicated UsdPreviewSurface materials for colored meshes.
+    # Build deduplicated UsdPreviewSurface materials for single-color and multi-color meshes.
     materials: dict[str, tuple[float, float, float, float]] = {}
     mesh_materials: dict[str, str] = {}
+    mesh_subsets: dict[str, list[tuple[str, list[int]]]] = {}
     for pid in link_ids:
-        rgba = mesh_by_id[pid]['color']
-        if rgba is not None:
-            r8, g8, b8, a8 = (int(round(c * 255)) for c in rgba)
-            mat_name = f'rumi_{r8:02x}{g8:02x}{b8:02x}' if a8 == 255 else f'rumi_{r8:02x}{g8:02x}{b8:02x}_{a8:02x}'
-            materials[mat_name] = rgba
+        mesh = mesh_by_id[pid]
+        base_rgba = mesh['color']
+        raw_face_colors = mesh['face_colors']
+        if raw_face_colors is not None:
+            fallback_rgba = base_rgba if base_rgba is not None else _DEFAULT_SUBSET_COLOR
+            grouped: dict[str, list[int]] = {}
+            for tri_idx, raw_fc in enumerate(raw_face_colors):
+                rgba = _normalize_color(raw_fc) if raw_fc is not None else fallback_rgba
+                if rgba is None:
+                    rgba = fallback_rgba
+                mat_name = _material_key(rgba)
+                materials.setdefault(mat_name, rgba)
+                grouped.setdefault(mat_name, []).append(tri_idx)
+            if len(grouped) == 1:
+                only_name = next(iter(grouped))
+                mesh['color'] = materials[only_name]
+                mesh_materials[pid] = f'{root_path}/Materials/{only_name}'
+            elif len(grouped) > 1:
+                dominant = min(grouped.keys(), key=lambda name: (-len(grouped[name]), name))
+                mesh['color'] = materials[dominant]
+                mesh_materials[pid] = f'{root_path}/Materials/{dominant}'
+                mesh_subsets[pid] = [(name, grouped[name]) for name in sorted(grouped.keys())]
+        elif base_rgba is not None:
+            mat_name = _material_key(base_rgba)
+            materials.setdefault(mat_name, base_rgba)
             mesh_materials[pid] = f'{root_path}/Materials/{mat_name}'
 
     # Prepare joints under /Model/Joints/<id>.
@@ -463,18 +510,34 @@ def write_robot_usd(
         ])
         if pid in mesh_materials:
             lines.append(f'        rel material:binding = <{mesh_materials[pid]}>')
-            r, g, b, a = mesh['color']
-            lines.append(f'        color3f[] primvars:displayColor = [({_fmt_float(r)}, {_fmt_float(g)}, {_fmt_float(b)})]')
-            if a < 1.0:
-                lines.append(f'        float[] primvars:displayOpacity = [{_fmt_float(a)}]')
+            if pid not in mesh_subsets and mesh['color'] is not None:
+                r, g, b, a = mesh['color']
+                lines.append(f'        color3f[] primvars:displayColor = [({_fmt_float(r)}, {_fmt_float(g)}, {_fmt_float(b)})]')
+                if a < 1.0:
+                    lines.append(f'        float[] primvars:displayOpacity = [{_fmt_float(a)}]')
         lines.extend([
             f'        normal3f[] normals = {_format_vec3_array(normals)} (',
             '            interpolation = "faceVarying"',
             '        )',
             f'        point3f[] points = {_format_vec3_array(pts)}',
             '        uniform token subdivisionScheme = "none"',
-            '    }',
         ])
+        if pid in mesh_subsets:
+            for mat_name, subset_indices in mesh_subsets[pid]:
+                idx_str = '[' + ', '.join(str(i) for i in subset_indices) + ']'
+                lines.extend([
+                    '',
+                    f'        def GeomSubset "{mat_name}" (',
+                    '            prepend apiSchemas = ["MaterialBindingAPI"]',
+                    '        )',
+                    '        {',
+                    '            uniform token elementType = "face"',
+                    '            uniform token familyName = "materialBind"',
+                    f'            int[] indices = {idx_str}',
+                    f'            rel material:binding = <{root_path}/Materials/{mat_name}>',
+                    '        }',
+                ])
+        lines.append('    }')
 
     # Emit Joints scope.
     if joint_records:

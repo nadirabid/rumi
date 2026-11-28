@@ -84,13 +84,18 @@ def weld_mesh(
     points: np.ndarray,
     triangles: np.ndarray,
     dist: float = 0.001,
-) -> tuple[np.ndarray, np.ndarray]:
+    return_mask: bool = False,
+) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Positional vertex weld within `dist` mm; drops degenerate collapsed triangles."""
     pts = np.asarray(points, dtype=np.float64)
     tris = np.asarray(triangles, dtype=np.int64)
     n = len(pts)
     if n == 0 or len(tris) == 0:
-        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int64)
+        empty_pts = np.zeros((0, 3), dtype=np.float64)
+        empty_tris = np.zeros((0, 3), dtype=np.int64)
+        if return_mask:
+            return empty_pts, empty_tris, np.zeros((0,), dtype=bool)
+        return empty_pts, empty_tris
 
     inv = 1.0 / dist
     dist2 = dist * dist
@@ -135,6 +140,8 @@ def weld_mesh(
         & (new_tris[:, 1] != new_tris[:, 2])
         & (new_tris[:, 2] != new_tris[:, 0])
     )
+    if return_mask:
+        return new_pts, new_tris[valid], valid
     return new_pts, new_tris[valid]
 
 

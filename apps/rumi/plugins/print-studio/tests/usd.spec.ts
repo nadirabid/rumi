@@ -6,6 +6,9 @@ import { validateUsd, usdRequiresSeparatePrint } from '../viewer/usd.js'
 import { parseUsdModel } from '../viewer/viewport/usd.js'
 import { disposeModel } from '../viewer/viewport/model.js'
 import { analyzeMesh } from '../viewer/checks.js'
+import { createSurfaceIndex } from '../viewer/viewport/surfaces.js'
+import { arrangePrintParts, createPrintPreview, printParts } from '../viewer/viewport/print-layout.js'
+import { PRINT_FACE_BYTES } from '../viewer/print-layout/plate-payload.js'
 
 function withMotionControls(text: string, controls: unknown) {
   return new TextEncoder().encode(text.replace('token rumi:manufacturingMode',
@@ -185,5 +188,138 @@ it('parses fixed-joint rumi:retainer and lock axis metadata for bayonet and thre
       id: 'CapLock', parent: 'Body', child: 'Door', kind: 'fixed',
       retainer: 'bayonet', axis: [0, 0, 1], pivot: [15, 0, 0],
     }])
+  } finally { disposeModel(model.root) }
+})
+
+it('loads multi-color GeomSubset materials (including pure white) into Three.js, surface seams, and 3MF print face colors', async () => {
+  const usda = `#usda 1.0
+(
+    defaultPrim = "Model"
+    doc = "Rumi CAD"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "Model" (
+    prepend apiSchemas = ["IsaacRobotAPI", "PhysicsArticulationRootAPI"]
+)
+{
+    rel isaac:physics:robotJoints = []
+    rel isaac:physics:robotLinks = </Model/PaintedBox>
+    token rumi:manufacturingMode = "print-in-place"
+
+    def Scope "Materials"
+    {
+        def Material "rumi_1a59bf"
+        {
+            token outputs:surface.connect = </Model/Materials/rumi_1a59bf/PreviewSurface.outputs:surface>
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.101961, 0.34902, 0.74902)
+                float inputs:opacity = 1
+                float inputs:roughness = 0.45
+                token outputs:surface
+            }
+        }
+        def Material "rumi_d72430"
+        {
+            token outputs:surface.connect = </Model/Materials/rumi_d72430/PreviewSurface.outputs:surface>
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.843137, 0.141176, 0.188235)
+                float inputs:opacity = 1
+                float inputs:roughness = 0.45
+                token outputs:surface
+            }
+        }
+        def Material "rumi_ffffff"
+        {
+            token outputs:surface.connect = </Model/Materials/rumi_ffffff/PreviewSurface.outputs:surface>
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (1, 1, 1)
+                float inputs:opacity = 1
+                float inputs:roughness = 0.45
+                token outputs:surface
+            }
+        }
+    }
+
+    def Mesh "PaintedBox" (
+        active = true
+        prepend apiSchemas = ["IsaacLinkAPI", "PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        float3[] extent = [(-0.01, -0.01, 0), (0.01, 0.01, 0.02)]
+        int[] faceVertexCounts = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+        int[] faceVertexIndices = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5]
+        rel material:binding = </Model/Materials/rumi_1a59bf>
+        point3f[] points = [(-0.01, -0.01, 0), (0.01, -0.01, 0), (0.01, 0.01, 0), (-0.01, 0.01, 0), (-0.01, -0.01, 0.02), (0.01, -0.01, 0.02), (0.01, 0.01, 0.02), (-0.01, 0.01, 0.02)]
+        uniform token subdivisionScheme = "none"
+
+        def GeomSubset "rumi_1a59bf" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            uniform token elementType = "face"
+            uniform token familyName = "materialBind"
+            int[] indices = [4, 5, 6, 7, 8, 9, 10, 11]
+            rel material:binding = </Model/Materials/rumi_1a59bf>
+        }
+
+        def GeomSubset "rumi_d72430" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            uniform token elementType = "face"
+            uniform token familyName = "materialBind"
+            int[] indices = [2, 3]
+            rel material:binding = </Model/Materials/rumi_d72430>
+        }
+
+        def GeomSubset "rumi_ffffff" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            uniform token elementType = "face"
+            uniform token familyName = "materialBind"
+            int[] indices = [0, 1]
+            rel material:binding = </Model/Materials/rumi_ffffff>
+        }
+    }
+}
+`
+  const model = await parseUsdModel(new TextEncoder().encode(usda).buffer)
+  try {
+    expect(model.motionIssue).toBeUndefined()
+    const mesh = model.root.getObjectByName('PaintedBox') as THREE.Mesh
+    expect(mesh?.isMesh).toBe(true)
+    expect(Array.isArray(mesh.material)).toBe(true)
+    const materials = mesh.material as THREE.MeshPhysicalMaterial[]
+    expect(materials).toHaveLength(3)
+    const hexes = materials.map(m => m.color.getHex())
+    expect(hexes).toEqual([0x1a59bf, 0xd72430, 0xffffff])
+    expect(mesh.geometry.groups.reduce((sum, g) => sum + g.count, 0)).toBe(36)
+
+    // Surface index respects material seams cleanly
+    const surfaces = createSurfaceIndex(mesh.geometry)
+    expect(surfaces.count).toBe(12)
+
+    // Print plate payload preserves all 3 face colors for .3mf export
+    const parts = printParts(model.root, model.robot)
+    const layout = arrangePrintParts(parts, { x: 256, y: 256, z: 256 }, 'multi-color-test')
+    const preview = createPrintPreview(parts, new THREE.Scene())
+    try {
+      preview.apply(layout, 0)
+      const plate = preview.plate(0)
+      const blob = plate.parts[0].faces as Blob
+      const view = new DataView(await blob.arrayBuffer())
+      const faceHexes = new Set<number>()
+      for (let i = 0; i < 12; i++) faceHexes.add(view.getUint32(i * PRINT_FACE_BYTES + 36, true))
+      expect([...faceHexes].sort((a, b) => a - b)).toEqual([0x1a59bf, 0xd72430, 0xffffff])
+    } finally { preview.dispose() }
   } finally { disposeModel(model.root) }
 })

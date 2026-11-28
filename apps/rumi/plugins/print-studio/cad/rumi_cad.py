@@ -30,9 +30,13 @@ read_robot = _robot_usd['read_robot']
 validate_usda_text = _robot_usd['validate_usda_text']
 require_separate_moving_parts = _robot_usd['require_separate_moving_parts']
 make_valid_identifier = _robot_usd['make_valid_identifier']
+_normalize_color = _robot_usd['_normalize_color']
 published_features = _evidence['published_features']
 weld_mesh = _validator['weld_mesh']
 analyze_part_print_orientation = _validator['analyze_part_print_orientation']
+
+_FACE_COLORS_ATTR = '_rumi_face_colors'
+_REGION_PAINTERS_ATTR = '_rumi_region_painters'
 
 CHECKS_TIMEOUT_SECONDS = 60
 CHECKS_NOTE = 'Bullet mechanics were not run; call validation_mechanics when the design is ready.'
@@ -51,15 +55,254 @@ def _unwrap_shape(shape: Any) -> Any:
 
 
 def _extract_color(shape: Any) -> tuple[float, float, float, float] | None:
-    color = getattr(shape, 'color', None)
-    if color is None:
+    return _normalize_color(getattr(shape, 'color', None))
+
+
+def _resolve_face_color(
+    raw_face: Any,
+    face_bindings: list[tuple[Any, tuple[float, float, float, float]]],
+    fallback: tuple[float, float, float, float] | None,
+) -> tuple[float, float, float, float] | None:
+    """Resolve the color for one TopoDS_Face (last matching binding wins; IsSame before IsPartner)."""
+    for target, rgba in reversed(face_bindings):
+        if raw_face.IsSame(target):
+            return rgba
+    for target, rgba in reversed(face_bindings):
+        if raw_face.IsPartner(target):
+            return rgba
+    return fallback
+
+
+def paint_faces(part: Any, faces: Any, color: Any) -> Any:
+    """Assign a surface color to specific B-Rep faces on `part`.
+
+    Args:
+        part: A `build123d` `Shape`/`Part`/`Solid`.
+        faces: A single `Face`, an iterable of `Face` objects, or a predicate `fn(face) -> bool`.
+        color: RGB/RGBA tuple in 0..1, `build123d.Color`, or hex string (`'#rrggbb'` / `'#rrggbbaa'`).
+
+    Returns:
+        `part` (for chaining).
+    """
+    import build123d as bd
+
+    rgba = _normalize_color(color)
+    if rgba is None:
+        raise ValueError('paint_faces requires a non-None color')
+    bd_shape = part if isinstance(part, bd.Shape) else bd.Shape(part)
+    if callable(faces):
+        selected = [f for f in bd_shape.faces() if faces(f)]
+    elif isinstance(faces, bd.Face) or type(faces).__name__ == 'TopoDS_Face':
+        selected = [faces]
+    else:
+        selected = list(faces)
+
+    bindings = list(getattr(part, _FACE_COLORS_ATTR, ()))
+    for face in selected:
+        raw = face.wrapped if hasattr(face, 'wrapped') else face
+        bindings.append((raw, rgba))
+    setattr(part, _FACE_COLORS_ATTR, bindings)
+    return part
+
+
+def paint_regions(part: Any, painter: Callable[[np.ndarray, np.ndarray], Any]) -> Any:
+    """Attach a per-triangle color callback `painter(centroids_mm, normals)` to `part`.
+
+    `centroids_mm` and `normals` are `(T, 3)` float64 arrays in model-local millimetres (Z-up).
+    Return either an `(T, 3)`/`(T, 4)` float array in `0..1` (rows containing `NaN` keep their
+    existing color) or a length-`T` sequence of colors/`None`.
+    """
+    if not callable(painter):
+        raise TypeError('paint_regions requires a callable painter(centroids_mm, normals)')
+    painters = list(getattr(part, _REGION_PAINTERS_ATTR, ()))
+    painters.append(painter)
+    setattr(part, _REGION_PAINTERS_ATTR, painters)
+    return part
+
+
+def _tool_to_ocp_shape(tool: Any, center_mm: np.ndarray, span_mm: float) -> Any:
+    """Convert a Plane, Face, Shell, Solid, or TopoDS_Shape into a splitting tool shape."""
+    import build123d as bd
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+    from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
+
+    if isinstance(tool, bd.Plane):
+        orig = np.array([tool.origin.X, tool.origin.Y, tool.origin.Z], dtype=np.float64)
+        z_dir = np.array([tool.z_dir.X, tool.z_dir.Y, tool.z_dir.Z], dtype=np.float64)
+        z_norm = float(np.linalg.norm(z_dir))
+        if z_norm < 1e-12:
+            raise ValueError('split_faces: plane normal must be nonzero')
+        z_dir = z_dir / z_norm
+        # Project solid center onto the plane so the bounded tool face spans the entire part.
+        proj = center_mm - float(np.dot(center_mm - orig, z_dir)) * z_dir
+        pln = gp_Pln(gp_Pnt(float(proj[0]), float(proj[1]), float(proj[2])), gp_Dir(float(z_dir[0]), float(z_dir[1]), float(z_dir[2])))
+        return BRepBuilderAPI_MakeFace(pln, -span_mm, span_mm, -span_mm, span_mm).Face()
+    if hasattr(tool, 'wrapped'):
+        return tool.wrapped
+    if type(tool).__name__.startswith('TopoDS_'):
+        return tool
+    raise TypeError(f'split_faces tool must be a Plane or Shape, got {type(tool).__name__}')
+
+
+def split_faces(part: Any, *tools: Any) -> Any:
+    """Split the boundary B-Rep faces of a single closed solid along planes or faces.
+
+    Preserves the part as one valid closed `Solid` with identical volume so `paint_faces`
+    can assign crisp multi-color regions without diagonal triangle jaggies.
+    """
+    import build123d as bd
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Splitter
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeSolid, BRepBuilderAPI_Sewing
+    from OCP.BRepCheck import BRepCheck_Analyzer, BRepCheck_NoError, BRepCheck_Shell
+    from OCP.BRepLib import BRepLib
+    from OCP.collections import List_TopoDS_Shape
+    from OCP.ShapeFix import ShapeFix_Solid
+    from OCP.TopAbs import TopAbs_FACE, TopAbs_SHELL
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    if not tools:
+        return part
+    bd_shape = part if isinstance(part, bd.Shape) else bd.Shape(part)
+    solids = bd_shape.solids()
+    if len(solids) != 1:
+        raise ValueError(f'split_faces requires a single closed solid (got {len(solids)})')
+    orig_vol = float(bd_shape.volume)
+    bbox = bd_shape.bounding_box()
+    center_mm = np.array([
+        0.5 * (bbox.min.X + bbox.max.X),
+        0.5 * (bbox.min.Y + bbox.max.Y),
+        0.5 * (bbox.min.Z + bbox.max.Z),
+    ], dtype=np.float64)
+    diag = math.sqrt(
+        (bbox.max.X - bbox.min.X) ** 2
+        + (bbox.max.Y - bbox.min.Y) ** 2
+        + (bbox.max.Z - bbox.min.Z) ** 2
+    )
+    span_mm = max(100.0, diag * 2.0)
+
+    ocp_tools = List_TopoDS_Shape()
+    for tool in tools:
+        ocp_tools.Append(_tool_to_ocp_shape(tool, center_mm, span_mm))
+
+    sewn_shells: list[Any] = []
+    shell_exp = TopExp_Explorer(solids[0].wrapped, TopAbs_SHELL)
+    while shell_exp.More():
+        shell = shell_exp.Current()
+        args = List_TopoDS_Shape()
+        args.Append(shell)
+        splitter = BRepAlgoAPI_Splitter()
+        splitter.SetArguments(args)
+        splitter.SetTools(ocp_tools)
+        splitter.Build()
+        if not splitter.IsDone():
+            raise ValueError('split_faces: OpenCASCADE face split failed')
+        sew = BRepBuilderAPI_Sewing(1e-6)
+        fexp = TopExp_Explorer(splitter.Shape(), TopAbs_FACE)
+        while fexp.More():
+            sew.Add(fexp.Current())
+            fexp.Next()
+        sew.Perform()
+        sewed = sew.SewedShape()
+        if sewed.ShapeType() == TopAbs_SHELL:
+            candidate_shell = TopoDS.Shell(sewed)
+        else:
+            inner_exp = TopExp_Explorer(sewed, TopAbs_SHELL)
+            if not inner_exp.More():
+                raise ValueError('split_faces: sewing split faces did not produce a closed shell')
+            candidate_shell = TopoDS.Shell(inner_exp.Current())
+        if BRepCheck_Shell(candidate_shell).Closed() != BRepCheck_NoError:
+            raise ValueError('split_faces: split shell is not watertight')
+        candidate_shell.Closed(True)
+        sewn_shells.append(candidate_shell)
+        shell_exp.Next()
+
+    if not sewn_shells:
+        raise ValueError('split_faces: solid has no boundary shells')
+    mk_solid = BRepBuilderAPI_MakeSolid(sewn_shells[0])
+    for extra_shell in sewn_shells[1:]:
+        mk_solid.Add(extra_shell)
+    solid = mk_solid.Solid()
+    fixer = ShapeFix_Solid(solid)
+    fixer.Perform()
+    solid = TopoDS.Solid(fixer.Solid())
+    BRepLib.OrientClosedSolid_s(solid)
+    if not BRepCheck_Analyzer(solid).IsValid():
+        raise ValueError('split_faces: resulting solid failed BRepCheck validation')
+    result = bd.Part() + bd.Solid(solid)
+    if abs(float(result.volume) - orig_vol) > max(1e-2, abs(orig_vol) * 1e-3):
+        raise ValueError(f'split_faces: solid volume changed ({orig_vol:.3f} -> {result.volume:.3f} mm^3)')
+    if getattr(part, 'label', None):
+        result.label = part.label
+    color = _extract_color(part)
+    if color is not None:
+        result.color = bd.Color(*color)
+    if hasattr(part, '_rumi_features'):
+        setattr(result, '_rumi_features', list(getattr(part, '_rumi_features')))
+    if hasattr(part, _REGION_PAINTERS_ATTR):
+        setattr(result, _REGION_PAINTERS_ATTR, list(getattr(part, _REGION_PAINTERS_ATTR)))
+    return result
+
+
+def _apply_region_painters(
+    pts_mm: np.ndarray,
+    tris: np.ndarray,
+    tri_colors: list[tuple[float, float, float, float] | None],
+    painters: list[Callable[[np.ndarray, np.ndarray], Any]],
+) -> None:
+    """Evaluate attached per-triangle region painters on welded (centroids_mm, normals)."""
+    if not painters or len(tris) == 0:
+        return
+    p0 = pts_mm[tris[:, 0]]
+    p1 = pts_mm[tris[:, 1]]
+    p2 = pts_mm[tris[:, 2]]
+    centroids = (p0 + p1 + p2) / 3.0
+    raw_normals = np.cross(p1 - p0, p2 - p0)
+    lengths = np.linalg.norm(raw_normals, axis=1)
+    safe = np.where(lengths > 1e-18, lengths, 1.0)
+    normals = raw_normals / safe[:, None]
+    normals[lengths <= 1e-18] = np.array([0.0, 0.0, 1.0])
+
+    n_tris = len(tris)
+    for painter in painters:
+        painted = painter(centroids, normals)
+        if painted is None:
+            continue
+        if isinstance(painted, np.ndarray):
+            if painted.ndim != 2 or painted.shape[0] != n_tris or painted.shape[1] not in (3, 4):
+                raise ValueError(f'Region painter array must have shape ({n_tris}, 3 or 4), got {painted.shape}')
+            arr = painted.astype(np.float64, copy=False)
+            finite_mask = np.isfinite(arr).all(axis=1)
+            for idx in np.flatnonzero(finite_mask):
+                row = arr[idx]
+                r = max(0.0, min(1.0, float(row[0])))
+                g = max(0.0, min(1.0, float(row[1])))
+                b = max(0.0, min(1.0, float(row[2])))
+                a = max(0.0, min(1.0, float(row[3]))) if arr.shape[1] == 4 else 1.0
+                tri_colors[int(idx)] = (r, g, b, a)
+        else:
+            seq = list(painted)
+            if len(seq) != n_tris:
+                raise ValueError(f'Region painter sequence length ({len(seq)}) must match triangles ({n_tris})')
+            for idx, entry in enumerate(seq):
+                if entry is not None:
+                    tri_colors[idx] = _normalize_color(entry)
+
+
+def _serialize_face_colors(shape: Any) -> list[list[Any]] | None:
+    """Serialize non-base per-face colors by B-Rep face index for assembly.json."""
+    import build123d as bd
+
+    bindings = list(getattr(shape, _FACE_COLORS_ATTR, ()))
+    if not bindings:
         return None
-    values = [float(c) for c in color]
-    if len(values) == 3:
-        values.append(1.0)
-    if len(values) != 4 or not all(math.isfinite(c) for c in values):
-        raise ValueError('Part color must have 3 or 4 finite RGB(A) channels')
-    return tuple(max(0.0, min(1.0, c)) for c in values)  # type: ignore[return-value]
+    bd_shape = shape if isinstance(shape, bd.Shape) else bd.Shape(shape)
+    out: list[list[Any]] = []
+    for idx, face in enumerate(bd_shape.faces()):
+        rgba = _resolve_face_color(face.wrapped, bindings, None)
+        if rgba is not None:
+            out.append([idx, list(rgba)])
+    return out if out else None
 
 
 def _normalize_parts(parts: Any) -> list[tuple[str, str, Any]]:
@@ -97,29 +340,87 @@ def _normalize_parts(parts: Any) -> list[tuple[str, str, Any]]:
     return result
 
 
+def tessellate_shape_with_faces(
+    shape: Any,
+    deflection: float = 0.05,
+    angular_deflection: float = 0.25,
+) -> tuple[np.ndarray, np.ndarray, list[tuple[float, float, float, float] | None] | None]:
+    """Tessellate a build123d/OCP shape in mm, welding vertices and tracking per-triangle colors."""
+    import build123d as bd
+    from OCP.BRep import BRep_Tool
+    from OCP.TopAbs import TopAbs_Orientation
+    from OCP.TopLoc import TopLoc_Location
+
+    bd_shape = shape if isinstance(shape, bd.Shape) else bd.Shape(shape)
+    if bd_shape.wrapped is None:
+        raise ValueError('Cannot tessellate an empty shape')
+
+    base_color = _extract_color(shape)
+    face_bindings = list(getattr(shape, _FACE_COLORS_ATTR, ()))
+    region_painters = list(getattr(shape, _REGION_PAINTERS_ATTR, ()))
+
+    bd_shape.mesh(deflection, angular_deflection)
+
+    pts_list: list[tuple[float, float, float]] = []
+    tris_list: list[tuple[int, int, int]] = []
+    tri_colors: list[tuple[float, float, float, float] | None] = []
+    has_face_override = bool(region_painters)
+    offset = 0
+
+    for face in bd_shape.faces():
+        raw_face = face.wrapped
+        if raw_face is None:
+            continue
+        loc = TopLoc_Location()
+        poly = BRep_Tool.Triangulation_s(raw_face, loc)
+        if poly is None:
+            continue
+        trsf = loc.Transformation()
+        reverse = raw_face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED
+
+        direct_color = _extract_color(face)
+        face_rgba = _resolve_face_color(raw_face, face_bindings, direct_color if direct_color is not None else base_color)
+        if face_rgba != base_color:
+            has_face_override = True
+
+        n_nodes = poly.NbNodes()
+        for i in range(1, n_nodes + 1):
+            node = poly.Node(i).Transformed(trsf)
+            pts_list.append((node.X(), node.Y(), node.Z()))
+
+        for tri in poly.Triangles():
+            if reverse:
+                tris_list.append((tri.Value(1) + offset - 1, tri.Value(3) + offset - 1, tri.Value(2) + offset - 1))
+            else:
+                tris_list.append((tri.Value(1) + offset - 1, tri.Value(2) + offset - 1, tri.Value(3) + offset - 1))
+            tri_colors.append(face_rgba)
+
+        offset += n_nodes
+
+    if not pts_list or not tris_list:
+        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int64), None
+    pts = np.asarray(pts_list, dtype=np.float64)
+    tri_arr = np.asarray(tris_list, dtype=np.int64)
+    if not np.isfinite(pts).all():
+        raise ValueError('Nonfinite coordinates in tessellated B-Rep shape')
+
+    welded_pts, welded_tris, valid_mask = weld_mesh(pts, tri_arr, dist=1e-5, return_mask=True)
+    if not has_face_override:
+        return welded_pts, welded_tris, None
+
+    filtered_colors = [c for c, keep in zip(tri_colors, valid_mask) if keep]
+    _apply_region_painters(welded_pts, welded_tris, filtered_colors, region_painters)
+    return welded_pts, welded_tris, filtered_colors
+
+
 def tessellate_shape(
     shape: Any,
     deflection: float = 0.05,
     angular_deflection: float = 0.25,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Tessellate a build123d/OCP shape in mm and weld vertices at 1e-5 mm."""
-    import build123d as bd
-
-    if isinstance(shape, bd.Shape):
-        verts, tris = shape.tessellate(deflection, angular_deflection)
-        pts = np.array([(v.X, v.Y, v.Z) for v in verts], dtype=np.float64)
-        tri_arr = np.asarray(tris, dtype=np.int64)
-    else:
-        wrapped = bd.Shape(shape)
-        verts, tris = wrapped.tessellate(deflection, angular_deflection)
-        pts = np.array([(v.X, v.Y, v.Z) for v in verts], dtype=np.float64)
-        tri_arr = np.asarray(tris, dtype=np.int64)
-
-    if len(pts) == 0 or len(tri_arr) == 0:
-        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int64)
-    if not np.isfinite(pts).all():
-        raise ValueError('Nonfinite coordinates in tessellated B-Rep shape')
-    return weld_mesh(pts, tri_arr, dist=1e-5)
+    pts, tris, _ = tessellate_shape_with_faces(shape, deflection=deflection, angular_deflection=angular_deflection)
+    return pts, tris
 
 
 def _tessellate_all(
@@ -133,19 +434,24 @@ def _tessellate_all(
         total_tris = 0
         all_pts_list: list[np.ndarray] = []
         for raw_label, usd_id, shape in normalized_parts:
-            pts_mm, tris = tessellate_shape(shape, deflection=deflection, angular_deflection=angular)
+            pts_mm, tris, face_colors = tessellate_shape_with_faces(
+                shape, deflection=deflection, angular_deflection=angular
+            )
             if len(tris) == 0:
                 raise ValueError(f'Part {raw_label!r} produced empty geometry')
             total_tris += len(tris)
             all_pts_list.append(pts_mm)
-            meshes.append({
+            mesh_entry: dict[str, Any] = {
                 'name': usd_id,
                 'raw_label': raw_label,
                 'points_mm': pts_mm,
                 'points': pts_mm * 0.001,  # USD uses metres, Z-up
                 'triangles': tris,
                 'color': _extract_color(shape),
-            })
+            }
+            if face_colors is not None:
+                mesh_entry['face_colors'] = face_colors
+            meshes.append(mesh_entry)
         last_total = total_tris
         if 0 < total_tris <= MAX_TRIANGLES:
             return meshes, total_tris, np.vstack(all_pts_list)
@@ -382,6 +688,11 @@ def publish(
                 'label': raw_label,
                 'brep': f'parts/{usd_id}.brep',
                 'color': list(_extract_color(shape)) if _extract_color(shape) is not None else None,
+                **(
+                    {'faceColors': serialized_faces}
+                    if (serialized_faces := _serialize_face_colors(shape)) is not None
+                    else {}
+                ),
             }
             for raw_label, usd_id, shape in normalized
         ],
@@ -493,6 +804,11 @@ def import_brep(path: str | Path) -> Any:
                 shape.label = entry.get('label') or entry['id']
                 if entry.get('color') is not None:
                     shape.color = bd.Color(*entry['color'])
+                if entry.get('faceColors'):
+                    all_faces = list(shape.faces())
+                    for face_idx, rgba in entry['faceColors']:
+                        if isinstance(face_idx, int) and 0 <= face_idx < len(all_faces):
+                            paint_faces(shape, all_faces[face_idx], rgba)
                 loaded.append(shape)
             return loaded
         raise FileNotFoundError(f'No assembly.json in directory: {resolved}')

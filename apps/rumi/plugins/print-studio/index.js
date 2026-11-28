@@ -23,6 +23,7 @@ import { loginMessageToken, accessCodeFor, devices as cloudDevices } from './pri
 import { createAppSetup } from './printer/app-setup.js'
 import { readPrinterStatus } from './printer/monitor.js'
 import { applyCad } from './cad/host.js'
+import { registerLegacyCadMigration } from './cad/legacy-migration.js'
 import { applySkillReminders, createProjectSkillReviewStore, skillReviewDomain } from './skill-reminders.js'
 import { createBadgeReviewConfig, capturePrintBadgeRevisions, reviewPrintBadges } from './badges/review.js'
 import { reviewHabitBadges } from './badges/review-habits.js'
@@ -240,6 +241,7 @@ export async function apply(ctx, config) {
   ctx.plugin(analogWorkflow)
   ctx.plugin(mechanicalWorkflow)
   const checkNamedRegions = registerRegionAudits(ctx)
+  const checkLegacyCad = registerLegacyCadMigration(ctx, PRINT_TYPE.templates[0])
   applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory, config.viewerLoadTimeoutMs, config)
   applyCad(ctx, defineTool, config)
   const legacySkillReviews = await ctx.storageDomain.open(skillReviewDomain).catch(() => {
@@ -252,7 +254,13 @@ export async function apply(ctx, config) {
     createUserMessage, skillReviews)
   // A project-type plugin contributes; it does not own the creation flow.
   ctx.inject(['rumiProjectTypes'], (scoped) => {
-    scoped.effect(() => scoped.rumiProjectTypes.register({ ...PRINT_TYPE, onOpen: checkNamedRegions }), 'print-studio: project type')
+    scoped.effect(() => scoped.rumiProjectTypes.register({
+      ...PRINT_TYPE,
+      onOpen: (project) => {
+        checkNamedRegions(project)
+        checkLegacyCad(project)
+      },
+    }), 'print-studio: project type')
   })
   const register = (path, methods, fetch) => {
     ctx.effect(() => ctx.connection.fetch.register({

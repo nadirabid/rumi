@@ -26,6 +26,7 @@ import '../plugins/print-studio/tests/model-focus.spec.ts'
 import '../plugins/print-studio/tests/activity-classifier.spec.ts'
 import '../plugins/print-studio/tests/model-regions.spec.ts'
 import '../plugins/print-studio/tests/region-audit.spec.ts'
+import '../plugins/print-studio/tests/legacy-migration.spec.ts'
 
 import '../plugins/print-studio/tests/context-retention.spec.ts'
 import '../plugins/print-studio/tests/viewer-load-receipts.spec.ts'

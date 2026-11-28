@@ -49,7 +49,7 @@ function fixture(language: 'en' | 'zh' = 'en') {
     Tooltip: ({ children }: React.PropsWithChildren) => children,
     IconChevronRightOutlineRegular: () => <svg />,
     IconCloseOutlineRegular: () => <svg />,
-  }, createPortal)
+  }, createPortal, (reference: string) => reference)
   const t = (key: string, args: Record<string, string> = {}) => copy[key]!.replace(/\{(\w+)\}/g, (_all, name: string) => args[name]!)
   return { service, stream, connect, page: React.createElement(entries.get('print-studio-badges')!, { t }),
     reveal: React.createElement(entries.get('shell.overlay')!, { t }),
@@ -88,11 +88,17 @@ it('updates the empty collection with earned badges and shows all contributing p
   expect(document.querySelectorAll('.rumi-badges-unearned article')).toHaveLength(9)
   expect(screen.getByText('Mechanical')).toBeTruthy()
   expect(screen.getByText('Maker habits')).toBeTruthy()
+  const artwork = new Set<string>()
   for (const card of cards) {
     expect(within(card).queryByText('Not yet earned')).toBeNull()
     expect(card.querySelector('.rumi-badge-face[data-locked]')).toBeTruthy()
     expect(card.querySelector('details')).toBeNull()
+    const medal = card.querySelector<HTMLImageElement>('.rumi-badge-artwork')
+    expect(medal?.alt).toBe('')
+    expect(medal?.src).toMatch(/\.webp$/)
+    artwork.add(medal!.src)
   }
+  expect(artwork.size).toBe(cards.length)
   await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
   expect(screen.getByText('1 badge earned')).toBeTruthy()
   const earnedGroup = document.querySelector('.rumi-badges-earned')!
@@ -128,7 +134,7 @@ it.each([
   const card = within(collection).getByRole('heading', { name }).closest('article')!
   const face = card.querySelector<HTMLElement>('.rumi-badge-face')!
   expect(within(face).getByText('Cart')).toBeTruthy()
-  expect(face.querySelector(`[data-kind="${kind}"] .rumi-badge-medallion .rumi-badge-emblem`)).toBeTruthy()
+  expect(face.querySelector<HTMLImageElement>('.rumi-badge-artwork')?.src).toContain(`/${kind}.webp`)
   if (path === 'growth') expect(within(face).getByText('有进步')).toBeTruthy()
   else expect(within(face).queryByText('有进步')).toBeNull()
   const plate = screen.getByRole('complementary').querySelector('.rumi-badge-reveal-plate')!
@@ -262,7 +268,7 @@ it('announces each new award once, keeps project focus, and advances after dismi
   expect(status.textContent).toBe('')
 })
 
-it('presents queued awards one at a time, with the emblem and name on the same rotating face', async () => {
+it('presents queued awards one at a time, with artwork and name on the same rotating face', async () => {
   const { stream, reveal } = fixture()
   stream.earned({ id: 'hinge', kind: 'living-hinge' }, award)
   render(reveal)
@@ -272,8 +278,9 @@ it('presents queued awards one at a time, with the emblem and name on the same r
   const front = plate.querySelector<HTMLElement>('.rumi-badge-face')!
   expect(within(front).getByText('Living hinge')).toBeTruthy()
   expect(within(front).getByText('Cart')).toBeTruthy()
-  expect(front.querySelector('[data-kind="living-hinge"] .rumi-badge-medallion .rumi-badge-emblem')).toBeTruthy()
+  expect(front.querySelector<HTMLImageElement>('.rumi-badge-artwork')?.src).toContain('/living-hinge.webp')
   expect(plate.querySelector('.rumi-badge-reveal-back')?.getAttribute('aria-hidden')).toBe('true')
+  expect(plate.querySelector<HTMLImageElement>('.rumi-badge-reveal-back .rumi-badge-artwork')?.src).toContain('/reverse.webp')
   expect(screen.queryByText('Wheel and axle')).toBeNull()
 
   await act(async () => { await vi.advanceTimersByTimeAsync(3700) })
@@ -282,7 +289,7 @@ it('presents queued awards one at a time, with the emblem and name on the same r
   const second = screen.getByRole('complementary')
   expect(first.isConnected).toBe(false)
   expect(second.hasAttribute('data-leaving')).toBe(false)
-  expect(second.querySelector('[data-kind="wheel-and-axle"] svg path')).toBeTruthy()
+  expect(second.querySelector<HTMLImageElement>('.rumi-badge-face .rumi-badge-artwork')?.src).toContain('/wheel-and-axle.webp')
   expect(within(second).getByText('Wheel and axle')).toBeTruthy()
   fireEvent.pointerOver(second, { pointerType: 'touch' })
   await act(async () => { await vi.advanceTimersByTimeAsync(4300) })

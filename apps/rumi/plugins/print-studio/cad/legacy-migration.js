@@ -186,8 +186,9 @@ export function formatLegacyCadUpgradeNotice(status) {
     'Blender is no longer bundled in Rumi. Before applying the user request to any model in legacyBlenderModels:',
     '1. Briefly tell the user in plain words that you are upgrading their older model to Rumi\'s new CAD builder first, then making their change.',
     '2. Do not run Blender and do not hand-edit model.usda directly. Call cad_status and follow cad-modeling (and printable-joints when the model has multiple or moving parts).',
-    '3. Read any listed legacyBlenderScripts and inspect the existing model.usda (part names, dimensions, colors, joints, and movement controls) so the new build123d script preserves the existing shape, parts, colors, and working separate-print joints.',
-    '4. Apply the user\'s requested change in the new build123d script under source/, publish a CAD revision (STEP, B-Rep, and USD) into the same models/<name>/ folder, load it with viewer_load, and complete the normal validation and region-naming steps.',
+    '3. Read any listed legacyBlenderScripts and inspect the existing model.usda for the target shape, dimensions, part roles, multi-color surfaces, and intended movements/controls. Preserve multi-color details on single solids with K.paint_faces / K.split_faces (or helper["paint_faces"]) instead of flattening a part to one color.',
+    '4. Rebuild connectors and moving joints with verified printable-joints recipes rather than copying legacy hand-rolled Blender joint geometry or manual disassembly steps verbatim; pass recipe results directly to K.publish so retainers, clearances, and topologically ordered disassembly actions are generated cleanly.',
+    '5. Apply the user\'s requested change in the new build123d script under source/, publish a CAD revision (STEP, B-Rep, and USD) into the same models/<name>/ folder, load it with viewer_load, run validation_mechanics and validation_accept until passing (fixing any geometry, clearance, retention, or disassembly failures), and complete name-model-regions.',
   ].join('\n')
 }
 

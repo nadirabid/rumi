@@ -102,6 +102,9 @@ it('upgrades stale Blender AGENTS.md and emits a CAD upgrade notice until republ
     expect(notice).toContain('"legacyBlenderModels":["models/kart/model.usda"]')
     expect(notice).toContain('"legacyBlenderScripts":["source/build_kart.py"]')
     expect(notice).toContain('do not hand-edit model.usda directly')
+    expect(notice).toContain('verified printable-joints recipes')
+    expect(notice).toContain('K.paint_faces')
+    expect(notice).toContain('validation_mechanics and validation_accept')
 
     // Once republished by build123d CAD, the temporary upgrade notice clears automatically.
     await writeFile(join(modelDir, 'model.usda'), CAD_USD)

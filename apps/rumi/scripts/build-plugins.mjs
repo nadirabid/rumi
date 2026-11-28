@@ -139,7 +139,9 @@ const BUILDERS = {
       target: 'es2022',
       minify: true,
       legalComments: 'eof',
-      loader: { '.css': 'text', '.module.css': 'text' },
+      publicPath: 'plugins/@rumi/print-studio',
+      assetNames: 'assets/badges/[name]-[hash]',
+      loader: { '.css': 'text', '.module.css': 'text', '.webp': 'file' },
     })
     await copyFile(join(packageRoot(require.resolve('three')), 'LICENSE'), join(root, 'lib/THREE-LICENSE.txt'))
   },

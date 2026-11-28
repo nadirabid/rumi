@@ -14,11 +14,12 @@ it('declares the bundle, client, patch, locale, icon, and runtime files', () => 
   expect(manifest.dsh.bundle.patch).toBe('./cordis.patch.yml')
   expect(manifest.dsh.client.platform).toBe('web')
   expect(manifest.exports['./client']).toBe('./lib/client.js')
+  expect(manifest.exports['./assets/*']).toBe('./lib/assets/*')
   expect(manifest.exports['./cordis.patch.yml']).toBe('./cordis.patch.yml')
   expect(manifest.exports['./locale/*.json']).toBe('./locale/*.json')
   expect(manifest.exports['./icon']).toBe('./icon.svg')
   expect(manifest.files).toEqual(expect.arrayContaining([
-    'index.js', 'http.js', 'lib/client.js', 'lib/THREE-LICENSE.txt', 'viewer', 'printer', 'badges', 'cordis.patch.yml', 'locale/*.json', 'icon.svg', 'lib/desktop', 'assets',
+    'index.js', 'http.js', 'lib/client.js', 'lib/assets', 'lib/THREE-LICENSE.txt', 'viewer', 'printer', 'badges', 'cordis.patch.yml', 'locale/*.json', 'icon.svg', 'lib/desktop', 'assets',
   ]))
 })
 

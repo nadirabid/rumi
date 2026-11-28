@@ -183,7 +183,7 @@ Additional 3D models require an explicit user request or agreement to a clearly 
 
 ## Print Studio
 
-The medal button beside Plugins opens [mechanical badges](apps/rumi/plugins/print-studio/README.md#mechanical-badges) from the gallery or a project. Badge rows use the available page width and wrap as the window narrows.
+The medal button beside Plugins opens [mechanical badges](apps/rumi/plugins/print-studio/README.md#mechanical-badges) from the gallery or a project. Badge rows align to the left and wrap to fit the page. Each badge uses a freestanding Blender render of a 3D-printed form with visible filament layers. Earned badges appear in color, including in the award reveal, and unearned badges appear in grayscale.
 
 `apps/rumi/plugins/print-studio/` installs Bambu Studio on request, detects its H2D profiles, and discovers the printer over SSDP. The **Plugins → Print Studio** card can sign in to Bambu to fetch the discovered printer’s access code. A different account-bound printer never supplies a fallback code for a known serial. The bundled `print-studio-setup` skill guides setup. The access code lives in the credential store.
 

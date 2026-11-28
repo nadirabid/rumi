@@ -7,6 +7,7 @@
   "exports": {
     ".": "./index.js",
     "./client": "./lib/client.js",
+    "./assets/*": "./lib/assets/*",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
@@ -27,6 +28,7 @@
     "skill-reminders.js",
     "print-project.js",
     "lib/client.js",
+    "lib/assets",
     "lib/THREE-LICENSE.txt",
     "viewer",
     "cad",

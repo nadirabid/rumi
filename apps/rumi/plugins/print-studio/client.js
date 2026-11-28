@@ -310,7 +310,7 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         const primitives = require('@deepseek-ai/dsh-client-ui-primitives');
         installViewer(ctx, React, primitives);
-        installBadges(ctx, React, primitives, createPortal);
+        installBadges(ctx, React, primitives, createPortal, require.asset);
         ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'rumi print studio: copy');
         const t = ctx.locale.bind(NS);
         ctx.slots.inject('plugins.item', () => ctx.slots.register({

@@ -1,5 +1,15 @@
 /** Project awards and their supporting evidence in Rumi's global badge collection. */
 import stylesheet from './collection.css?inline'
+import barrelHinge from './artwork/barrel-hinge.webp'
+import livingHinge from './artwork/living-hinge.webp'
+import wheelAndAxle from './artwork/wheel-and-axle.webp'
+import dovetailSlide from './artwork/dovetail-slide.webp'
+import gearPair from './artwork/gear-pair.webp'
+import rackAndPinion from './artwork/rack-and-pinion.webp'
+import language from './artwork/language.webp'
+import patience from './artwork/patience.webp'
+import persistence from './artwork/persistence.webp'
+import reverse from './artwork/reverse.webp'
 import { ALL_BADGE_KINDS as allKinds, HABIT_BADGE_KINDS as habitKinds, PRINT_BADGE_KINDS as mechanicalKinds } from './kinds.js'
 import { createBadgeAwardFeed } from './award-feed.js'
 
@@ -42,48 +52,16 @@ const zh = {
   language: '清晰表达', patience: '耐心等待', persistence: '坚持不懈',
 }
 
-/** Unified 48x48 dual-layer emblems shared by every earned badge, unearned badge, and reveal. */
-const emblems = {
-  'barrel-hinge': {
-    fill: 'M8 10h11a1.5 1.5 0 0 1 1.5 1.5v25A1.5 1.5 0 0 1 19 38H8a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2z M29 10h11a2 2 0 0 1 2 2v24a2 2 0 0 1-2 2H29a1.5 1.5 0 0 1-1.5-1.5v-25A1.5 1.5 0 0 1 29 10z M20.5 9h7v8h-7z M20.5 20h7v8h-7z M20.5 31h7v8h-7z',
-    stroke: 'M8 10h12.5v7H18v3h2.5v8H18v3h2.5v7H8a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2z M40 10H27.5v7H30v3h-2.5v8H30v3h-2.5v7H40a2 2 0 0 0 2-2V12a2 2 0 0 0-2-2z M20.5 9h7v8h-7z M20.5 20h7v8h-7z M20.5 31h7v8h-7z M24 5.5V9 M24 39v3.5 M11.5 16a1 1 0 1 0 0 .01 M11.5 32a1 1 0 1 0 0 .01 M36.5 16a1 1 0 1 0 0 .01 M36.5 32a1 1 0 1 0 0 .01',
-  },
-  'living-hinge': {
-    fill: 'M7 13.5 19.5 19v16.5L7 30a1.5 1.5 0 0 1-.9-1.4V14.8a1.3 1.3 0 0 1 1.8-1.2z M41 13.5 28.5 19v16.5L41 30a1.5 1.5 0 0 0 .9-1.4V14.8a1.3 1.3 0 0 0-1.8-1.2z M19.5 19q4.5-2.6 9 0v16.5q-4.5-2.6-9 0z',
-    stroke: 'M6.5 14.5 19.5 19v16.5L6.5 30a1.4 1.4 0 0 1-.9-1.3V15.7a1.2 1.2 0 0 1 .9-1.2z M41.5 14.5 28.5 19v16.5L41.5 30a1.4 1.4 0 0 0 .9-1.3V15.7a1.2 1.2 0 0 0-.9-1.2z M19.5 19q4.5-2.8 9 0 M19.5 35.5q4.5-2.8 9 0 M22.5 20.5v11.5 M25.5 20.5v11.5',
-  },
-  'wheel-and-axle': {
-    fill: 'M29.5 24a11 13.5 0 1 1-22 0 11 13.5 0 1 1 22 0z M21.5 24a3 3.7 0 1 1-6 0 3 3.7 0 1 1 6 0z M21.3 21.6l16.8-3.4a2.4 2.4 0 0 1 1 4.7l-17.8 3.6z',
-    stroke: 'M29.5 24a11 13.5 0 1 1-22 0 11 13.5 0 1 1 22 0z M25.5 24a7 8.8 0 1 1-14 0 7 8.8 0 1 1 14 0z M21.5 24a3 3.7 0 1 1-6 0 3 3.7 0 1 1 6 0z M18.5 15.2v5.1 M18.5 27.7v5.1 M11.7 21.8l4 1.2 M11.7 26.2l4-1.2 M21.3 21.6l16.8-3.4a2.4 2.4 0 0 1 1 4.7l-17.8 3.6',
-  },
-  'dovetail-slide': {
-    fill: 'M17.5 9h13l4.2 17.5H13.3z M6.5 23h9.2l-2.9 11.5h22.4L32.3 23h9.2a1.5 1.5 0 0 1 1.5 1.5v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-12A1.5 1.5 0 0 1 6.5 23z',
-    stroke: 'M17.5 9h13l4.2 17.5H13.3z M6.5 23h9.2l-2.9 11.5h22.4L32.3 23h9.2a1.5 1.5 0 0 1 1.5 1.5v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-12A1.5 1.5 0 0 1 6.5 23z M21 15h6',
-  },
-  'gear-pair': {
-    fill: 'M16 7h4l1 3.2 2.4 1 3-1.4 2.8 2.8-1.4 3 1 2.4 3.2 1v4l-3.2 1-1 2.4 1.4 3-2.8 2.8-3-1.4-2.4 1L20 35h-4l-1-3.2-2.4-1-3 1.4-2.8-2.8 1.4-3-1-2.4L4 23v-4l3.2-1 1-2.4-1.4-3 2.8-2.8 3 1.4 2.4-1z M33.5 24.5h3l.7 2.2 1.7.7 2.1-1 2 2-1 2.1.7 1.7 2.2.7v3l-2.2.7-.7 1.7 1 2.1-2 2-2.1-1-1.7.7-.7 2.2h-3l-.7-2.2-1.7-.7-2.1 1-2-2 1-2.1-.7-1.7-2.2-.7v-3l2.2-.7.7-1.7-1-2.1 2-2 2.1 1 1.7-.7z',
-    stroke: 'M16 7h4l1 3.2 2.4 1 3-1.4 2.8 2.8-1.4 3 1 2.4 3.2 1v4l-3.2 1-1 2.4 1.4 3-2.8 2.8-3-1.4-2.4 1L20 35h-4l-1-3.2-2.4-1-3 1.4-2.8-2.8 1.4-3-1-2.4L4 23v-4l3.2-1 1-2.4-1.4-3 2.8-2.8 3 1.4 2.4-1z M22.5 21a4.5 4.5 0 1 1-9 0 4.5 4.5 0 1 1 9 0z M33.5 24.5h3l.7 2.2 1.7.7 2.1-1 2 2-1 2.1.7 1.7 2.2.7v3l-2.2.7-.7 1.7 1 2.1-2 2-2.1-1-1.7.7-.7 2.2h-3l-.7-2.2-1.7-.7-2.1 1-2-2 1-2.1-.7-1.7-2.2-.7v-3l2.2-.7.7-1.7-1-2.1 2-2 2.1 1 1.7-.7z M37.6 34.4a2.6 2.6 0 1 1-5.2 0 2.6 2.6 0 1 1 5.2 0z',
-  },
-  'rack-and-pinion': {
-    fill: 'M21.8 6h4.4l.9 2.9 2.2.9 2.7-1.3 3.1 3.1-1.3 2.7.9 2.2 2.9.9v4.4l-2.9.9-.9 2.2 1.3 2.7-3.1 3.1-2.7-1.3-2.2.9-.9 2.9h-4.4l-.9-2.9-2.2-.9-2.7 1.3-3.1-3.1 1.3-2.7-.9-2.2-2.9-.9v-4.4l2.9-.9.9-2.2-1.3-2.7 3.1-3.1 2.7 1.3 2.2-.9z M6 40.5v-5h3.5l1.5 2.5h3.5l1.5-2.5h3.5l1.5 2.5h3.5l1.5-2.5h3.5l1.5 2.5h3.5l1.5-2.5H42v5a1.5 1.5 0 0 1-1.5 1.5h-33A1.5 1.5 0 0 1 6 40.5z',
-    stroke: 'M21.8 6h4.4l.9 2.9 2.2.9 2.7-1.3 3.1 3.1-1.3 2.7.9 2.2 2.9.9v4.4l-2.9.9-.9 2.2 1.3 2.7-3.1 3.1-2.7-1.3-2.2.9-.9 2.9h-4.4l-.9-2.9-2.2-.9-2.7 1.3-3.1-3.1 1.3-2.7-.9-2.2-2.9-.9v-4.4l2.9-.9.9-2.2-1.3-2.7 3.1-3.1 2.7 1.3 2.2-.9z M28.2 19.6a4.2 4.2 0 1 1-8.4 0 4.2 4.2 0 1 1 8.4 0z M6 40.5v-5h3.5l1.5 2.5h3.5l1.5-2.5h3.5l1.5 2.5h3.5l1.5-2.5h3.5l1.5 2.5h3.5l1.5-2.5H42v5a1.5 1.5 0 0 1-1.5 1.5h-33A1.5 1.5 0 0 1 6 40.5z',
-  },
-  language: {
-    fill: 'M10 9.5h28a4 4 0 0 1 4 4v16.5a4 4 0 0 1-4 4H21.5L12 40.5V34h-2a4 4 0 0 1-4-4V13.5a4 4 0 0 1 4-4z',
-    stroke: 'M10 9.5h28a4 4 0 0 1 4 4v16.5a4 4 0 0 1-4 4H21.5L12 40.5V34h-2a4 4 0 0 1-4-4V13.5a4 4 0 0 1 4-4z M13.5 17.5h15.5 M13.5 22.8h21 M13.5 28h11.5 M33.5 15l1 2.4 2.4 1-2.4 1-1 2.4-1-2.4-2.4-1 2.4-1z',
-  },
-  patience: {
-    fill: 'M13.5 8h21v4.2c0 4.4-4 7.7-8.1 10.6h-4.8C17.5 19.9 13.5 16.6 13.5 12.2z M13.5 40h21v-4.2c0-4.4-4-7.7-8.1-10.6h-4.8c-4.1 2.9-8.1 6.2-8.1 10.6z',
-    stroke: 'M10.5 8h27 M10.5 40h27 M13.5 8v4.2c0 4.6 4.4 8 8.7 10.8 1.2.7 1.2 1.3 0 2-4.3 2.8-8.7 6.2-8.7 10.8V40 M34.5 8v4.2c0 4.6-4.4 8-8.7 10.8-1.2.7-1.2 1.3 0 2 4.3 2.8 8.7 6.2 8.7 10.8V40 M17.5 14h13 M17 36.2c2.5-2.5 4.8-3.8 7-3.8s4.5 1.3 7 3.8 M24 25.5v4.5',
-  },
-  persistence: {
-    fill: 'M6.5 39 20 16.5 27.5 28l4.5-6.8L41.5 39z M20 16.5V8.5l8.5 3-8.5 3z',
-    stroke: 'M6.5 39 20 16.5 27.5 28l4.5-6.8L41.5 39H6.5z M20 16.5V8.5l8.5 3-8.5 3 M13 39c2.5-3.4 4.8-5.3 8.2-6.2 2.4-.6 3.5-2.1 2.2-4.1-1.2-1.8-.3-3.8 2.4-4.7',
-  },
-  medal: {
-    fill: 'M37 19a13 13 0 1 1-26 0 13 13 0 1 1 26 0z M16 29.5 13 42l8.5-4.8L25.5 42l1.2-11.5 M32 29.5 36.2 42l-8.8-4.8',
-    stroke: 'M37 19a13 13 0 1 1-26 0 13 13 0 1 1 26 0z M16 29.5 13 42l8.5-4.8L25.5 42l1.2-11.5 M32 29.5 36.2 42l-8.8-4.8 M18.8 19.2l3.4 3.4 7-7.2',
-  },
+const artwork = {
+  'barrel-hinge': barrelHinge,
+  'living-hinge': livingHinge,
+  'wheel-and-axle': wheelAndAxle,
+  'dovetail-slide': dovetailSlide,
+  'gear-pair': gearPair,
+  'rack-and-pinion': rackAndPinion,
+  language,
+  patience,
+  persistence,
 }
 const toolbarMedal = 'M8 13.5 6.5 21 11 18.5 13.5 21l.6-6.5 M16 13.5l2.2 7.5-4.6-2.5 M18.5 9a6.5 6.5 0 1 1-13 0 6.5 6.5 0 1 1 13 0z M9.4 9.1l1.7 1.7 3.5-3.6'
 
@@ -93,8 +71,9 @@ const toolbarMedal = 'M8 13.5 6.5 21 11 18.5 13.5 21l.6-6.5 M16 13.5l2.2 7.5-4.6
  * @param {object} React - Shell React instance.
  * @param {object} primitives - Shared controls and tooltip components.
  * @param {Function} createPortal - Shell portal for the reveal above floating project panes.
+ * @param {Function} resolveAsset - Resolve a bundled artwork reference to its display URL.
  */
-export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOutlineRegular, IconCloseOutlineRegular }, createPortal) {
+export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOutlineRegular, IconCloseOutlineRegular }, createPortal, resolveAsset) {
   const h = React.createElement
   const feed = createBadgeAwardFeed(ROUTE + '/events')
   ctx.effect(feed.connect, 'print badges: award events')
@@ -112,12 +91,8 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
       strokeLinejoin: 'round', strokeLinecap: 'round' }, h('path', { d: toolbarMedal }))
   }
 
-  function Emblem({ kind }) {
-    const art = emblems[kind] ?? emblems.medal
-    return h('svg', { className: 'rumi-badge-emblem', viewBox: '0 0 48 48', fill: 'none',
-      'aria-hidden': true, strokeLinejoin: 'round', strokeLinecap: 'round' },
-      h('path', { className: 'rumi-badge-emblem-fill', d: art.fill }),
-      h('path', { className: 'rumi-badge-emblem-stroke', d: art.stroke }))
+  function MedalImage({ asset }) {
+    return h('img', { className: 'rumi-badge-artwork', src: resolveAsset(asset), alt: '', draggable: false })
   }
 
   function Toolbar({ activePanel, openPage, t }) {
@@ -134,9 +109,8 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
       'data-locked': !award || undefined,
     },
       award?.path === 'growth' && h('span', { className: 'rumi-badge-growth' }, t('improved')),
-      h('div', { className: 'rumi-badge-art', 'data-kind': kind, 'aria-hidden': true },
-        h('div', { className: 'rumi-badge-medallion' },
-          h(Emblem, { kind }))),
+      h('div', { className: 'rumi-badge-art', 'aria-hidden': true },
+        h(MedalImage, { asset: artwork[kind] })),
       h('div', { className: 'rumi-badge-caption' },
         h('h2', { className: 'rumi-badge-title' }, t(kind)),
         award && h('p', { className: 'rumi-badge-project' }, h('bdi', null, award.projectName))))
@@ -196,8 +170,7 @@ export function installBadges(ctx, React, { Button, Tooltip, IconChevronRightOut
         h('div', { className: 'rumi-badge-reveal-plate' },
           h(BadgeFace, { kind: award.kind, award, t }),
           h('div', { className: 'rumi-badge-surface rumi-badge-reveal-back', 'data-kind': award.kind, 'aria-hidden': true },
-            h('div', { className: 'rumi-badge-medallion' },
-              h(Emblem, { kind: 'medal' })))))),
+            h(MedalImage, { asset: reverse }))))),
     h(Button, { className: 'rumi-badge-reveal-dismiss', size: 'sm', variant: 'ghost',
       'aria-label': t('dismissReveal'), onClick: dismiss }, h(IconCloseOutlineRegular, { size: 16, 'aria-hidden': 'true' })))
   }

@@ -43,6 +43,7 @@ describe('classifyToolCall', () => {
     expect(classifyToolCall('viewer_load', { path: 'models/kart/model.usda' })).toBe('sculpt')
     expect(classifyToolCall('viewer_highlight', { regionId: 'roof' })).toBe('regions')
     expect(classifyToolCall('viewer_highlight', { blobs: [] })).toBe('look')
+    expect(classifyToolCall('skill', { name: 'cad-modeling' })).toBe('sculpt')
     expect(classifyToolCall('skill', { name: 'name-model-regions' })).toBe('regions')
     expect(classifyToolCall('skill', { name: 'fdm-design' })).toBe('fdm')
     expect(classifyToolCall('skill', { name: 'printable-joints' })).toBe('mechanics')
@@ -52,17 +53,17 @@ describe('classifyToolCall', () => {
     expect(classifyToolCall('read_image', { path: 'artifacts/door_hinge_clearance.png' })).toBe('collision')
   })
 
-  it('classifies Blender and Python bash commands while absorbing workspace plumbing', () => {
-    expect(classifyToolCall('bash', { command: 'blender --background --python source/build_kart.py' })).toBe('sculpt')
-    expect(classifyToolCall('bash', { command: 'blender --background --python source/render_views.py' })).toBe('look')
-    expect(classifyToolCall('bash', { command: 'blender --background --python source/check_collision.py' })).toBe('collision')
-    expect(classifyToolCall('bash', { command: 'blender --background --python validate.py' })).toBe('fdm')
-    expect(classifyToolCall('bash', { command: 'blender --background --python source/hinge_sweep.py' })).toBe('mechanics')
-    expect(classifyToolCall('bash', { command: 'blender --background --python source/map_regions.py' })).toBe('regions')
-    expect(classifyToolCall('bash', { command: 'blender --background --python source/nose_field_controls.py' })).toBe('controls')
+  it('classifies CAD Python and legacy bash commands while absorbing workspace plumbing', () => {
+    expect(classifyToolCall('bash', { command: '/app/runtime/cad/cad-python source/build_kart.py' })).toBe('sculpt')
+    expect(classifyToolCall('bash', { command: '/app/runtime/cad/cad-python source/render_views.py' })).toBe('look')
+    expect(classifyToolCall('bash', { command: '/app/runtime/cad/cad-python source/check_collision.py' })).toBe('collision')
+    expect(classifyToolCall('bash', { command: '/app/runtime/cad/cad-python validate.py' })).toBe('fdm')
+    expect(classifyToolCall('bash', { command: '/app/runtime/cad/cad-python source/hinge_sweep.py' })).toBe('mechanics')
+    expect(classifyToolCall('bash', { command: '/app/runtime/cad/cad-python source/map_regions.py' })).toBe('regions')
+    expect(classifyToolCall('bash', { command: '/app/runtime/cad/cad-python source/nose_field_controls.py' })).toBe('controls')
     expect(classifyToolCall('bash', { command: 'ls -la models/ && pwd' })).toBeNull()
     expect(classifyToolCall('bash', { command: 'mkdir -p .rumi/tmp && cp a b' })).toBeNull()
-    expect(classifyToolCall('blender_status', {})).toBeNull()
+    expect(classifyToolCall('cad_status', {})).toBeNull()
     expect(classifyToolCall('viewer_working_model', { path: 'models/kart/model.usda' })).toBeNull()
     expect(classifyToolCall('glob', { pattern: '**/*.py' })).toBeNull()
   })
@@ -122,7 +123,7 @@ describe('createActivityTracker', () => {
     expect(tracker.read('session-1')).toBeNull()
 
     // Plumbing before any classified stage stays null (viewer falls back to generic building).
-    ctx.emit('session/event', session, { type: 'tool/call', data: { name: 'blender_status', arguments: '{}' } })
+    ctx.emit('session/event', session, { type: 'tool/call', data: { name: 'cad_status', arguments: '{}' } })
     expect(tracker.read('session-1')).toBeNull()
 
     // First classified stage publishes immediately.

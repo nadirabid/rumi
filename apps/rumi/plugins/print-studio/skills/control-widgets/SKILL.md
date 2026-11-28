@@ -5,7 +5,7 @@ description: "Choose and declare sliders, two-axis pads, and scalar curve widget
 
 # Control widgets
 
-Choose a widget after identifying what the person should be able to vary. Use [mesh-edit-controls](../mesh-edit-controls/SKILL.md) to design geometric edits and [blender-modeling](../blender-modeling/SKILL.md#movement-controls) to bind joint movement.
+Choose a widget after identifying what the person should be able to vary. Use [mesh-edit-controls](../mesh-edit-controls/SKILL.md) to design geometric edits and [cad-modeling](../cad-modeling/SKILL.md#movement-controls) to bind joint movement.
 
 ## Choose the widget
 

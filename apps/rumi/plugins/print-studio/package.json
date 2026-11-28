@@ -29,7 +29,7 @@
     "lib/client.js",
     "lib/THREE-LICENSE.txt",
     "viewer",
-    "blender",
+    "cad",
     "bullet/runner.js",
     "bullet/workflow.js"
   ],

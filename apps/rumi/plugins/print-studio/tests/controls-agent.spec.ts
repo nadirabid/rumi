@@ -16,15 +16,15 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createHash } from 'node:crypto'
 const runFile = promisify(execFile)
-const blender = '/Applications/Rumi.app/Contents/Resources/runtime/blender/blender'
+const cadPython = '/Applications/Rumi.app/Contents/Resources/runtime/cad/cad-python'
 import { expect, it } from 'vitest'
 import { applyViewer } from '../viewer/host.js'
 import * as workflow from '../viewer/analog/workflow.js'
 
 const enabled = process.env.RUMI_CONTROLS_REAL_MODEL === '1'
 const cases = [
-  { name: 'Blender unmarked preview', prompt: 'Let me adjust the width of the box. Keep its other dimensions.', values: { width: 80 }, operation: 'parameters', kind: 'slider', finish: 'That looks good. Keep it.' },
-  { name: 'Blender width preview', prompt: 'Let me adjust the width of the box. Keep its other dimensions.', values: { width: 80 }, operation: 'parameters', kind: 'slider', finish: 'That looks good. Keep it.' },
+  { name: 'CAD unmarked preview', prompt: 'Let me adjust the width of the box. Keep its other dimensions.', values: { width: 80 }, operation: 'parameters', kind: 'slider', finish: 'That looks good. Keep it.' },
+  { name: 'CAD width preview', prompt: 'Let me adjust the width of the box. Keep its other dimensions.', values: { width: 80 }, operation: 'parameters', kind: 'slider', finish: 'That looks good. Keep it.' },
   { name: 'both eyes', prompt: 'The eyes are tilted too sharply. Let me tilt both eyes.', values: { eyeTilt: 10, eyeWidth: 24, eyeHeight: 9 }, operation: 'parameters', kind: 'slider', finish: 'That looks good. Keep it.' },
   { name: 'table width', prompt: 'Let me adjust how wide the table is.', values: { width: 80 }, operation: 'parameters', kind: 'slider', finish: 'Cancel that adjustment.' },
   { name: 'feature position', prompt: 'Give me a two-axis pad to move the feature left-right and up-down.', values: { featureX: 0, featureZ: 0 }, operation: 'parameters', kind: 'pad' },
@@ -67,7 +67,7 @@ it.skipIf(!enabled).each(cases)('agent opens and uses generic controls: $name', 
         return ctx.tools.register({ ...tool, async execute(args: any, exec: any) {
           calls.push({ name: tool.name, args })
           if (tool.name !== 'viewer_controls' || !['open', 'freeze'].includes(args.action)) return tool.execute(args, exec)
-          if (args.action === 'open' && scenario.name.startsWith('Blender ')) {
+          if (args.action === 'open' && scenario.name.startsWith('CAD ')) {
             try { await readFile(join(root, 'models', 'example', '.rumi-preview.json')); markerAtOpen = true }
             catch (error) { if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') throw error }
           }
@@ -110,19 +110,19 @@ it.skipIf(!enabled).each(cases)('agent opens and uses generic controls: $name', 
         return readFile(path, 'utf8')
       },
     }))
-    ctx.tools.register(defineTool({ name: 'shell', description: 'Run a shell command in the disposable project. Blender is at ' + blender, parameters: { command: { type: 'string', required: true } }, output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] }, async execute(args) { calls.push({ name: 'shell', args }); const result = await runFile('/bin/sh', ['-c', args.command], { cwd: root, timeout: 90000, maxBuffer: 1024 * 1024 }); return result.stdout + result.stderr } }))
+    ctx.tools.register(defineTool({ name: 'shell', description: 'Run a shell command in the disposable project. CAD Python is at ' + cadPython, parameters: { command: { type: 'string', required: true } }, output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] }, async execute(args) { calls.push({ name: 'shell', args }); const result = await runFile('/bin/sh', ['-c', args.command], { cwd: root, timeout: 90000, maxBuffer: 1024 * 1024 }); return result.stdout + result.stderr } }))
     const directory = join(root, 'models', 'example'); await mkdir(directory, { recursive: true })
     let path: string
     if (scenario.operation === 'parameters') {
       path = join(directory, 'model.js')
-      const body = scenario.name.startsWith('Blender ') ? "const box=new THREE.Mesh(new THREE.BoxGeometry(p.width,50,40),material);box.name='Box';root.add(box);" : scenario.name === 'table width'
+      const body = scenario.name.startsWith('CAD ') ? "const box=new THREE.Mesh(new THREE.BoxGeometry(p.width,50,40),material);box.name='Box';root.add(box);" : scenario.name === 'table width'
         ? 'const top=new THREE.Mesh(new THREE.BoxGeometry(p.width,50,4),material);top.name=\'Tabletop\';top.position.z=40;root.add(top);for(const x of [-1,1])for(const y of [-1,1]){const leg=new THREE.Mesh(new THREE.BoxGeometry(4,4,38),material);leg.position.set(x*(p.width/2-4),y*21,19);root.add(leg);}'
         : 'const base=new THREE.Mesh(new THREE.BoxGeometry(80,4,60),material);base.name=\'Base\';root.add(base);const feature=new THREE.Mesh(new THREE.BoxGeometry(8,8,8),material);feature.name=\'Feature\';feature.position.set(p.featureX,-6,p.featureZ);root.add(feature);'
       await writeFile(path, `export const parameters=${JSON.stringify(scenario.values)};\nexport function build(THREE,p){const root=new THREE.Group(),material=new THREE.MeshStandardMaterial();${body}return root;}\n`)
-      if (scenario.name.startsWith('Blender ')) {
-        ctx.systemPrompt.section({ name: 'fixture-source', order: 2, text: 'The current JavaScript model is a temporary interactive preview of models/example/original.blend. Its width parameter is the box X dimension in millimetres; the original has a single Box object.' })
-        if (scenario.name === 'Blender width preview') await writeFile(join(directory, '.rumi-preview.json'), JSON.stringify({ original: 'models/example/original.blend', edit: 'Set the Box X dimension to width millimetres; preserve Y and Z dimensions.' }))
-        await runFile(blender, ['--background', '--python-expr', `import bpy; bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(); bpy.ops.mesh.primitive_cube_add(); o=bpy.context.object; o.name='Box'; o.dimensions=(0.08,0.05,0.04); bpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(join(directory, 'original.blend'))})`], { timeout: 90000 })
+      if (scenario.name.startsWith('CAD ')) {
+        ctx.systemPrompt.section({ name: 'fixture-source', order: 2, text: 'The current JavaScript model is a temporary interactive preview of models/example/build.py. Its width parameter is the box X dimension in millimetres; the original has a single Box solid.' })
+        if (scenario.name === 'CAD width preview') await writeFile(join(directory, '.rumi-preview.json'), JSON.stringify({ original: 'models/example/build.py', edit: 'Set the Box X dimension to width millimetres; preserve Y and Z dimensions.' }))
+        await writeFile(join(directory, 'build.py'), 'from build123d import Box\nbox = Box(80, 50, 40)\n')
       }
       if (scenario.name === 'both eyes' || scenario.name === 'fixed eye dimensions') {
         await writeFile(path, await readFile(new URL('./fixtures/parameter-faceplate.js', import.meta.url)))
@@ -135,7 +135,7 @@ it.skipIf(!enabled).each(cases)('agent opens and uses generic controls: $name', 
       await writeFile(path, bytes)
       ctx.systemPrompt.section({ name: 'fixture-geometry', order: 2, text: 'The loaded fixture is a 100 mm cube centred at [0,0,50], bottom at z=0, with one Shell mesh. Cut direction [0,0,1] retains the upper side.' })
     }
-    const originalHash = scenario.name.startsWith('Blender ') ? createHash('sha256').update(await readFile(join(directory, 'original.blend'))).digest('hex') : ''
+    const originalHash = scenario.name.startsWith('CAD ') ? createHash('sha256').update(await readFile(join(directory, 'build.py'))).digest('hex') : ''
     const agent = await ctx.agentLoop.create(sessionId, { provider: 'deepseek-official', model: 'deepseek-flash', maxTokens: 4096, reasoningEffort: ReasoningEffortId('high') })
     await raw.get('viewer_load').execute({ path }, { agent, signal })
     async function send(text: string) {
@@ -161,20 +161,14 @@ it.skipIf(!enabled).each(cases)('agent opens and uses generic controls: $name', 
       expect((await feedback({ id: design.analog.id, url: design.url, status: 'adjusted', sequence: ++sequence, values })).status).toBe(200)
       await send(scenario.finish)
       expect((await state()).design.analog).toBeNull()
-      if (scenario.name.startsWith('Blender ')) {
+      if (scenario.name.startsWith('CAD ')) {
         expect(markerAtOpen).toBe(true)
         expect(JSON.parse(await readFile(join(directory, '.rumi-preview.json'), 'utf8'))).toMatchObject({ original: expect.any(String), edit: expect.any(String) })
-        expect(frozenRecipe).toMatchObject({ finish: 'blender', values: { width: 90 } })
+        expect(frozenRecipe).toMatchObject({ finish: 'cad', values: { width: 90 } })
         expect(calls.some(call => call.name === 'viewer_controls' && call.args.action === 'freeze')).toBe(true)
-        expect(calls.some(call => call.name === 'shell' && call.args.command.includes('blender'))).toBe(true)
-        const published = calls.find(call => call.name === 'viewer_load' && String(call.args.path).endsWith('.glb'))
-        expect(published).toBeDefined()
+        expect(calls.some(call => call.name === 'shell' && call.args.command.includes('cad-python'))).toBe(true)
         expect(calls.some(call => call.name === 'viewer_controls' && call.args.action === 'save')).toBe(false)
-        expect(createHash('sha256').update(await readFile(join(directory, 'original.blend'))).digest('hex')).toBe(originalHash)
-        const glb = resolve(root, published!.args.path)
-        const measured = await runFile(blender, ['--background', '--python-expr', `import bpy,json; bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(); bpy.ops.import_scene.gltf(filepath=${JSON.stringify(glb)}); o=next(o for o in bpy.context.scene.objects if o.type=='MESH'); print('DIMENSIONS='+json.dumps(list(o.dimensions)))`], { timeout: 90000 })
-        const dimensions = JSON.parse(measured.stdout.match(/DIMENSIONS=(\[[^\n]+\])/u)![1]!)
-        expect(dimensions[0]).toBeCloseTo(.09, 3); expect(dimensions[1]).toBeCloseTo(.05, 3); expect(dimensions[2]).toBeCloseTo(.04, 3)
+        expect(createHash('sha256').update(await readFile(join(directory, 'build.py'))).digest('hex')).toBe(originalHash)
       } else if (scenario.name === 'both eyes') {
         expect(JSON.parse(await readFile(join(directory, '.rumi-parameters.json'), 'utf8'))).toEqual(values)
         expect(calls.some(call => call.name === 'viewer_controls' && call.args.action === 'save')).toBe(true)

@@ -69,7 +69,8 @@ describe('desktop macOS release signature', () => {
     expect(portablePath(dshNodeModules.from)).toContain('/.desktop-build/targets/mac-arm64/dsh/node_modules')
     expect(dshNodeModules.to).toBe('dsh/node_modules')
     expect(config.asarUnpack).toEqual(expect.arrayContaining([
-      '**/@rumi/print-studio/blender/**',
+      '**/@rumi/print-studio/cad/**',
+      '**/@rumi/print-studio/skills/**',
       '**/*.{node,dylib,so}',
       '**/@vscode/ripgrep-*/bin/rg',
     ]))
@@ -82,7 +83,7 @@ describe('desktop macOS release signature', () => {
         signIgnore: [
           '/Contents/Resources/app\\.asar\\.unpacked/dsh(?:/|$)',
           '/Contents/Resources/runtime/primary-runtime(?:/|$)',
-          '/Contents/Resources/runtime/blender(?:/|$)',
+          '/Contents/Resources/runtime/cad(?:/|$)',
           '\\.pak$',
         ],
       },

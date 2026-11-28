@@ -1,57 +1,49 @@
-Rumi requires moving parts to print separately. Recipes labeled print-in-place below are legacy geometry references; do not use their captive versions for new movable prints. A separately assembleable variant still requires validation, and deformation or assembly routes outside the checker remain unverified.
+All linear sliding recipes in `cad/joints/sliders.py` are **separate-print** assemblies. Rails open at one end for clean sliding insertion and lock closed with a separate snap-in end-stop plug or twist-lock collar.
 
 ## dovetail_slide
 
-**Use for**: a carriage on a dovetail key in a closed groove; it cannot lift off or leave.
+**Use for**: a 3-part sliding carriage or drawer on an open-ended dovetail rail closed by a snap-in end-stop plug.
 
-**Call**: `j = K.dovetail_slide(base, carriage, (0, 0, 0), '+X', '+Z', travel=30, control='slide')`
+**Call**: `res = K.dovetail_slide(base, carriage, (0, 0, 0), '+X', '+Z', travel=30, control='Drawer')`
 
-**You provide**: `base` (the held part) with a flat top at the pivot, 11+ mm thick, 22+ mm wide, `travel` + 20 mm long; `carriage`, a block over the pivot at least 3 mm tall. `axis` is the slide direction, `up` points out of `base`. The recipe cuts the groove and fuses the key.
+**You provide**: `base` (the held part) with a flat top at the pivot, at least 11 mm thick, 22 mm wide, and `travel + length + stop_length + 8` mm long; `carriage`, a block over the pivot at least 3 mm tall. `axis` is the slide direction, `up` points out of `base`.
 
-**Key options**: `travel` 10 to 60; `length` 12 to 30; `head_width` 8 to 14; `head_height` 4 to 6.
+**Key options**: `travel` 10 to 60; `length` 14 to 30; `head_width` 8 to 14; `head_height` 4 to 6; `clearance` 0.35; `stop_length` 8.0; `barb` 0.9.
 
-**Prints as**: print-in-place, base upright; PLA or PETG.
-
-**Validation**: assembly, geometry and fit pass (overhang warnings); mechanics passed, verified, 209 of 209 probes. Same when rotated (axis -Y, up +X, pivot (37, -22, 14)).
+**Prints & assembles**: all 3 parts print flat; PLA or PETG. Slide carriage into the open rail end, then snap the end-stop plug in place (`step_snap` on plug, `step_translate` on carriage). Records `dovetail-slide` badge evidence.
 
 ## tslot_rail
 
-**Use for**: a T-shaped slider in a closed T-slot.
+**Use for**: a 3-part T-shaped slider inside an open-ended T-slot rail closed by a snap-in end-stop plug.
 
-**Call**: `j = K.tslot_rail(block, slider, (0, 0, 0), '+X', '+Z', travel=30, control='slide')`
+**Call**: `res = K.tslot_rail(block, slider, (0, 0, 0), '+X', '+Z', travel=30, control='Slider')`
 
-**You provide**: `block` with a flat top at the pivot, 10+ mm deep, 16+ mm wide, `travel` + 20 mm long; `slider`, a block over the pivot at least 4 mm tall. Axes as `dovetail_slide`.
+**You provide**: `block` with a flat top at the pivot, at least 10 mm deep, 16 mm wide, and long enough for travel + slider + end stop; `slider` at least 4 mm tall. Axes as `dovetail_slide`.
 
-**Key options**: `travel` 10 to 60; `length` 12 to 30; `head_width` 8 to 16; `head_height` 3 to 6; `neck_depth` 2.5 to 4; leave `neck_clearance` at 1.
+**Key options**: `travel` 10 to 60; `length` 14 to 30; `head_width` 10 to 16; `head_height` 3.5 to 6; `neck_depth` 2.5 to 4; `neck_clearance` 0.8; `barb` 0.9.
 
-**Prints as**: print-in-place, block upright (the lid bridges); PLA or PETG.
-
-**Validation**: assembly, geometry and fit pass (overhang warnings); mechanics passed, verified, 209 of 209 probes; same rotated. With a tight stem, a sideways probe read 3.6 mm penetration.
+**Prints & assembles**: all 3 parts print separately; PLA or PETG. Slide T-slider in from the open end and snap in the end-stop plug.
 
 ## telescoping_tube
 
-**Use for**: a rod that slides out of a socket and stops at both ends.
+**Use for**: a 3-part rod or piston that slides out of an open-chamber cylinder and stops at both ends via a twist-lock bayonet mouth collar.
 
-**Call**: `j = K.telescoping_tube(outer, inner, (0, 0, 0), 'Z', tube_diameter=20, travel=30, control='tube')`
+**Call**: `res = K.telescoping_tube(outer, inner, (0, 0, 0), 'Z', tube_diameter=14, travel=24, control='Piston')`
 
-**You provide**: `outer` with its mouth face at the pivot, 43+ mm deep, 36+ mm across; `inner`, a solid rod of `tube_diameter` reaching 23+ mm behind the pivot. `axis` points out of the mouth.
+**You provide**: `outer` with its mouth face at the pivot and solid depth for chamber + collar; `inner` rod of `tube_diameter` reaching behind the pivot. `axis` points out of the mouth.
 
-**Key options**: `travel` 10 to 40; `tube_diameter` 10 to 30; `lip` 5 to 8; `flange_thickness` 3 to 5; `neck_clearance` 0.6.
+**Key options**: `travel` 10 to 40; `tube_diameter` 12 to 28; `flange_thickness` 4; `collar_depth` 9.0; `clearance` 0.35; `turn` 45.
 
-**Prints as**: print-in-place, mouth up; PLA or PETG.
-
-**Validation**: assembly, geometry and fit pass (overhang warnings); mechanics passed, verified, 209 of 209 probes, axis vertical and along X. A 3 mm lip passed vertical but sagged sideways.
+**Prints & assembles**: outer tube, flanged inner rod, and mouth collar print separately upright with flat bases; PLA or PETG. Drop inner rod into chamber, insert collar, twist 45° to lock (`step_twist` on collar, `step_translate` on inner rod).
 
 ## pin_slot
 
-**Use for**: a block that slides on a headed pin in a closed slot.
+**Use for**: a 4-part latch or slider guided by a separate headed stadium pin through a through-slot, retained by a keyed double-D snap cap (`retainer='snap'`, full 6-DOF, cannot unscrew during motion).
 
-**Call**: `j = K.pin_slot(plate, block, (0, 0, 0), '+X', '+Z', travel=24, control='slide')`
+**Call**: `res = K.pin_slot(plate, block, (0, 0, 0), '+X', '+Z', travel=24, control='Latch')`
 
-**You provide**: `plate` with a flat top at the pivot, 8+ mm thick, 14+ mm wide, `travel` + 20 mm long; `block` over the pivot at least 4 mm tall. Axes as `dovetail_slide`.
+**You provide**: `plate` with a flat top at the pivot, at least 8 mm thick, 16 mm wide, and long enough for the slot; `block` over the pivot at least 5 mm tall. Axes as `dovetail_slide`.
 
-**Key options**: `travel` 10 to 40; `pin_diameter` 4 to 6; `pin_length` 6 to 12; `head_diameter` 9 to 14; `head_length` 14 to 24.
+**Key options**: `travel` 10 to 40; `pin_diameter` 6.5 to 9 (7.5 default); `pin_length` 14 to 24; `head_overhang` 3.0; `clearance` 0.35.
 
-**Prints as**: print-in-place, plate upright (the lid bridges); PLA or PETG.
-
-**Validation**: assembly, geometry and fit pass (overhang warnings); mechanics passed, verified, 187 of 187 probes; same rotated. A round pin spins freely and fails `unretained_part`, so pin and head are ovals.
+**Prints & assembles**: plate, block, stadium pin, and keyed snap cap print flat separately; PLA or PETG. Insert stadium pin through plate slot and block bore, then press-snap the keyed cap onto the pin tip (`step_snap` on cap, `step_translate` on pin and block).

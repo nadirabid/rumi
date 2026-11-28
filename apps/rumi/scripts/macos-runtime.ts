@@ -8,6 +8,7 @@ import { inventoryDesktopRuntime } from '../src/runtime-tree.ts'
 import type { MacOSSigningEnvironment } from './desktop-release-environment.mjs'
 import { cachedMacOSSignature, pruneMacOSSignatureCache } from './macos-signature-cache.ts'
 import { macOSCachePolicy } from './macos-cache-policy.ts'
+import { cadRuntimePythonAliases } from './prepare-cad-runtime.ts'
 import { signMacOSRuntimeCode, verifyMacOSRuntimeCode } from './verify-macos-signature.mjs'
 
 const MACH_O_MAGICS = new Set(['cafebabe', 'cafebabf', 'cefaedfe', 'cffaedfe', 'feedface', 'feedfacf', 'bebafeca', 'bfbafeca'])
@@ -20,8 +21,7 @@ function magic(path: string): string {
   } finally { closeSync(descriptor) }
 }
 
-async function primaryRuntimeFiles(root: string): Promise<string[]> {
-  const aliases = await primaryRuntimePythonAliases(root, await readPrimaryRuntime(root))
+function runtimeFilesWithAliases(root: string, aliases: ReadonlyMap<string, string>): string[] {
   const files: string[] = []
   for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
     const path = relative(root, join(entry.parentPath, entry.name)).split(sep).join('/')
@@ -32,6 +32,14 @@ async function primaryRuntimeFiles(root: string): Promise<string[]> {
   return files.sort()
 }
 
+async function primaryRuntimeFiles(root: string): Promise<string[]> {
+  return runtimeFilesWithAliases(root, await primaryRuntimePythonAliases(root, await readPrimaryRuntime(root)))
+}
+
+function cadRuntimeFiles(root: string): string[] {
+  return runtimeFilesWithAliases(root, cadRuntimePythonAliases(root))
+}
+
 /**
  * Sign and verify every materialized Mach-O file, awaiting all signers on failure.
  * @param root - Self-contained production runtime.
@@ -39,14 +47,18 @@ async function primaryRuntimeFiles(root: string): Promise<string[]> {
  * @param expected - Required signing identity.
  * @param arch - Target runtime architecture, independent of the signing host.
  * @param cacheDirectory - Optional content-addressed cache; requires the keychain-owned signing probe.
- * @param kind - Primary payloads admit validated Python aliases; Desktop application runtimes reject every link.
+ * @param kind - Primary and CAD payloads admit validated Python aliases; Desktop application runtimes reject every link.
  * @returns Number of signed native files.
  */
 export async function signMacOSRuntime(
   root: string, appId: string, expected: MacOSSigningEnvironment, arch: 'arm64' | 'x64', cacheDirectory?: string,
-  kind: 'desktop' | 'primary' = 'desktop',
+  kind: 'desktop' | 'primary' | 'cad' = 'desktop',
 ): Promise<number> {
-  const inventory = kind === 'primary' ? await primaryRuntimeFiles(root) : inventoryDesktopRuntime(root).map(file => file.path)
+  const inventory = kind === 'primary'
+    ? await primaryRuntimeFiles(root)
+    : kind === 'cad'
+      ? cadRuntimeFiles(root)
+      : inventoryDesktopRuntime(root).map(file => file.path)
   const files = inventory.filter(path => MACH_O_MAGICS.has(magic(join(root, path))))
   const policy = cacheDirectory === undefined ? undefined : macOSCachePolicy(process.env.DSH_DESKTOP_MACOS_SIGNING_PROBE ?? '')
   let hits = 0

@@ -9,7 +9,7 @@
  * @module @rumi/print-studio
  */
 
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { homedir } from 'node:os'
 import z from '@deepseek-ai/schemastery'
 import * as skillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
@@ -22,7 +22,7 @@ import {
 import { loginMessageToken, accessCodeFor, devices as cloudDevices } from './printer/cloud.js'
 import { createAppSetup } from './printer/app-setup.js'
 import { readPrinterStatus } from './printer/monitor.js'
-import { applyBlender } from './blender/host.js'
+import { applyCad } from './cad/host.js'
 import { applySkillReminders, createProjectSkillReviewStore, skillReviewDomain } from './skill-reminders.js'
 import { createBadgeReviewConfig, capturePrintBadgeRevisions, reviewPrintBadges } from './badges/review.js'
 import { reviewHabitBadges } from './badges/review-habits.js'
@@ -43,6 +43,9 @@ export const Config = z.object({
   badgeDatabase: z.string().min(1).default(join(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi'), 'print-studio', 'badges.sqlite')),
   appDownloadTimeoutSeconds: z.number().step(1).min(30).max(3600).default(900),
   appDownloadRetries: z.number().step(1).min(0).max(5).default(2),
+  cadExecutable: z.string().default(''),
+  cadHome: z.string().default(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi')),
+  // Retained for existing saved profiles; unused by the build123d CAD workflow.
   blenderExecutable: z.string().default(''),
   bulletExecutable: z.string().default(''),
   blenderHome: z.string().default(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi')),
@@ -59,6 +62,7 @@ export const Config = z.object({
     movementSampleDegrees: z.number().min(1).max(90).default(30),
     movementSampleMm: z.number().min(0.1).max(10).default(2),
     assemblySampleMm: z.number().min(0.01).max(2).default(0.2),
+    assemblySampleDegrees: z.number().min(0.5).max(45).default(5),
     timeStepSeconds: z.number().min(0.0001).max(0.001).default(0.00025),
     iterations: z.number().step(1).min(10).max(100).default(40),
     restDurationSeconds: z.number().min(0.01).max(0.1).default(0.02),
@@ -69,7 +73,8 @@ export const Config = z.object({
     torqueNm: z.number().min(0.000001).max(1).default(0.05),
     linearToleranceMm: z.number().min(0.01).max(2).default(0.5),
     angularToleranceDegrees: z.number().min(0.1).max(10).default(5),
-    maxPenetrationMm: z.number().min(0.001).max(0.5).default(0.15),
+    initialPenetrationMm: z.number().min(0.001).max(1).default(0.15),
+    maxPenetrationMm: z.number().min(0.001).max(1).default(0.45),
     retentionTravelMm: z.number().min(0.1).max(10).default(2),
     retentionTiltDegrees: z.number().min(1).max(45).default(15),
   }).default({}),
@@ -185,6 +190,16 @@ export async function collectStatus(ctx, options = {}) {
 }
 
 /**
+ * Resolve this package's `skills/` directory on disk, mapping packaged `app.asar`
+ * paths to their unpacked sibling so skill references remain readable outside ASAR.
+ * @param {string} [base] - Package root directory.
+ * @returns {string} On-disk skills directory path.
+ */
+export function resolveSkillsDirectory(base = import.meta.dirname) {
+  return join(base, 'skills').replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`)
+}
+
+/**
  * Publish this package's `skills/` directory as a skill provider.
  *
  * The stock provider keeps `includeDefaultRoots` off so this instance serves
@@ -196,7 +211,7 @@ function mountSkills(ctx) {
   ctx.plugin(skillFilesystem, {
     providerName: 'rumi-print-studio',
     includeDefaultRoots: false,
-    customSkillDirs: [join(import.meta.dirname, 'skills')],
+    customSkillDirs: [resolveSkillsDirectory()],
   })
 }
 
@@ -226,7 +241,7 @@ export async function apply(ctx, config) {
   ctx.plugin(mechanicalWorkflow)
   const checkNamedRegions = registerRegionAudits(ctx)
   applyViewer(ctx, defineTool, config.viewerDiagnosticsDirectory, config.viewerLoadTimeoutMs, config)
-  applyBlender(ctx, defineTool, config)
+  applyCad(ctx, defineTool, config)
   const legacySkillReviews = await ctx.storageDomain.open(skillReviewDomain).catch(() => {
     ctx.logger.warn('Print Studio could not open the earlier Bison review records for import.')
     return undefined

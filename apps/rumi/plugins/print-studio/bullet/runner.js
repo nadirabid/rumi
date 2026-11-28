@@ -75,7 +75,7 @@ export function validateBulletReport(report, expected) {
   if (expected.connections.some(connection => connection.kind !== 'fixed') && !expected.manufacturing.steps?.length) {
     return { ...report, status: report.status === 'needs_repair' ? 'needs_repair' : 'review', assemblyVerified: false,
       checks: [...report.checks, { code: 'assembly_path_required', severity: 'warning', count: 1,
-        message: 'Declare removal paths for every nonroot part to verify assembly after separate printing. Snapping, flexing and threaded insertion remain unverified.' }],
+        message: 'Declare removal paths or actions (translate, rotate, snap) for every nonroot part to verify assembly after separate printing.' }],
       coverage: { ...report.coverage, complete: false } }
   }
   return report

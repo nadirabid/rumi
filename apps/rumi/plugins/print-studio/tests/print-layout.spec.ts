@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { JSDOM } from 'jsdom'
 import { strFromU8, unzipSync } from 'three/addons/libs/fflate.module.js'
-import { printParts, arrangePrintParts, createPrintPreview, layoutIssues } from '../viewer/viewport/print-layout.js'
+import { printParts, arrangePrintParts, createPrintPreview, layoutIssues, evaluatePartOrientation } from '../viewer/viewport/print-layout.js'
 import { parsePrintLayout, printLayoutIdentity } from '../viewer/print-layout/state.js'
 import { readPrintLayout, savePrintLayout, registerPrintLayout } from '../viewer/print-layout/host.js'
 import { makePrint3mf } from '../viewer/print-layout/three-mf.js'
@@ -177,14 +177,14 @@ it('rejects stale and malformed HTTP saves and restores only the matching source
   }
   let requiresSeparatePrint = false
   registerPrintLayout({ effect: callback => callback(), connection: { fetch: { register } } },
-    async (_id, operation) => operation({ design, cwd, requiresSeparatePrint, model: design.path, volume: options.volume }), options)
+    async (_id, operation) => operation({ design, cwd, requiresSeparatePrint, model: design.path, volume: options.volume, validationStatus: 'needs_repair' }), options)
   const route = routes.get('/api/print-studio/viewer/layout')!
   const layout = arrangePrintParts(printParts(model()), { ...options, identity: printLayoutIdentity(design, options.volume) })
   const post = (hash: string, body: string) => route(new Request(`http://localhost/layout?sessionId=s&sourceHash=${hash}`, { method: 'POST', body }))
   expect((await post('old', JSON.stringify(layout))).status).toBe(409)
   expect((await post('a', '{}')).status).toBe(400)
   expect((await post('a', JSON.stringify(layout))).status).toBe(200)
-  expect(await (await route(new Request('http://localhost/layout?sessionId=s'))).json()).toMatchObject({ layout, stale: false })
+  expect(await (await route(new Request('http://localhost/layout?sessionId=s'))).json()).toMatchObject({ layout, stale: false, validationStatus: 'needs_repair' })
   const open = routes.get('/api/print-studio/viewer/open-plate')!
   const openPlate = (body: FormData) => open(new Request('http://localhost/open-plate?sessionId=s&sourceHash=a', { method: 'POST', body }))
   const payload = new FormData()
@@ -212,5 +212,46 @@ it('rejects stale and malformed HTTP saves and restores only the matching source
   }
   requiresSeparatePrint = false
   design.contentHash = 'b'
-  expect(await (await route(new Request('http://localhost/layout?sessionId=s'))).json()).toMatchObject({ layout: null, stale: true })
+  expect(await (await route(new Request('http://localhost/layout?sessionId=s'))).json()).toMatchObject({ layout: null, stale: true, validationStatus: 'needs_repair' })
+})
+
+it('orients parts by flat bed-contact area and overhangs instead of blindly minimizing Z height', () => {
+  // Cylinder standing along Z (radius 6, height 24): standing has flat circular base and zero overhang,
+  // whereas lying flat has lower Z (12 vs 24) but near-zero bed contact and curved underside overhang.
+  const cylRoot = new THREE.Group()
+  const cylGeo = new THREE.CylinderGeometry(6, 6, 24, 32)
+  cylGeo.rotateX(Math.PI / 2) // align cylinder axis along Z
+  const cyl = new THREE.Mesh(cylGeo, new THREE.MeshStandardMaterial())
+  cyl.name = 'axle'
+  cylRoot.add(cyl)
+  const [axlePart] = printParts({ root: cylRoot })
+  const standing = evaluatePartOrientation(axlePart, [0, 0, 0])
+  const lying = evaluatePartOrientation(axlePart, [90, 0, 0])
+  expect(standing.bedContactArea).toBeGreaterThan(100)
+  expect(standing.overhangArea).toBeCloseTo(0, 3)
+  expect(lying.overhangArea).toBeGreaterThan(50)
+  expect(standing.score).toBeLessThan(lying.score)
+  const cylLayout = arrangePrintParts([axlePart], { ...options, volume: { x: 100, y: 100, z: 100 } })
+  expect(cylLayout.parts[0]!.rotation[0] % 180).toBe(0)
+  expect(cylLayout.parts[0]!.rotation[1] % 180).toBe(0)
+
+  // Mushroom cap: wide flat top flange (+Z) on a narrow stem (-Z). Flipping upside down puts the
+  // wide flange flat on the bed with zero overhang instead of printing the flange mid-air.
+  const capRoot = new THREE.Group()
+  const stem = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 12), new THREE.MeshStandardMaterial())
+  stem.name = 'cap'; stem.position.set(0, 0, 6)
+  const flange = new THREE.Mesh(new THREE.BoxGeometry(24, 24, 3), stem.material)
+  flange.name = 'cap'; flange.position.set(0, 0, 13.5)
+  capRoot.add(stem, flange)
+  const [capPart] = printParts({
+    root: capRoot,
+    robot: { assembly: { parts: [{ id: 'cap', mesh: 'cap' }], connections: [], manufacturing: { mode: 'separate' } } },
+  })
+  const upright = evaluatePartOrientation(capPart, [0, 0, 0])
+  const flipped = evaluatePartOrientation(capPart, [180, 0, 0])
+  expect(flipped.bedContactArea).toBeGreaterThan(upright.bedContactArea)
+  expect(flipped.overhangArea).toBeLessThan(upright.overhangArea)
+  expect(flipped.score).toBeLessThan(upright.score)
+  const capLayout = arrangePrintParts([capPart], { ...options, volume: { x: 100, y: 100, z: 100 } })
+  expect(capLayout.parts[0]!.rotation[0]).toBe(180)
 })

@@ -162,9 +162,9 @@ it('cancels active work on disposal and waits for its settlement', async () => {
 
 it('retains unavailable failures without treating them as completed stages', async () => {
   const f = await fixture()
-  f.run.mockRejectedValue(new Error('Missing Blender'))
-  await expect(f.call('mechanics')).rejects.toThrow('Missing Blender')
-  expect(f.validation.read('a').models[0]).toMatchObject({ status: 'unavailable', completedStages: [], error: 'Missing Blender' })
+  f.run.mockRejectedValue(new Error('Missing CAD runtime'))
+  await expect(f.call('mechanics')).rejects.toThrow('Missing CAD runtime')
+  expect(f.validation.read('a').models[0]).toMatchObject({ status: 'unavailable', completedStages: [], error: 'Missing CAD runtime' })
 })
 
 it('preserves required movement across restart and blocks narrowed declarations', async () => {

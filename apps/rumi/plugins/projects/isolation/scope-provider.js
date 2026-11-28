@@ -7,7 +7,7 @@ import { canonical, checkedPath, projectRoot, PROJECT_DIAGNOSTICS_DIRECTORY } fr
 
 const TOOLS = new Set(['bash', 'read', 'write', 'edit', 'str_replace_editor', 'glob', 'grep', 'read_image', 'skill',
   'web_search', 'web_fetch', 'todo_write',
-  'load_workspace_dependencies', 'job_output', 'job_list', 'job_kill', 'blender_status',
+  'load_workspace_dependencies', 'job_output', 'job_list', 'job_kill', 'cad_status',
   'print_studio_status', 'print_studio_progress',
   'viewer_cursor_snapshot', 'viewer_analyze_surfaces', 'viewer_working_model', 'viewer_load', 'viewer_transform', 'viewer_highlight',
   'viewer_controls', 'viewer_camera', 'mesh_open', 'mesh_transform', 'mesh_remove',
@@ -15,7 +15,23 @@ const TOOLS = new Set(['bash', 'read', 'write', 'edit', 'str_replace_editor', 'g
 const checkout = resolve(import.meta.dirname, '../../../../..')
 const applicationRoots = import.meta.dirname.includes('.app/Contents/')
   ? [import.meta.dirname.slice(0, import.meta.dirname.indexOf('.app/Contents/') + '.app/Contents'.length)]
-  : ['node_modules', 'packages', 'vendor', 'apps/rumi/plugins'].map(path => join(checkout, path))
+  : ['node_modules', 'packages', 'vendor', 'apps/rumi/plugins', 'apps/rumi/.desktop-build/dev-cad'].map(path => join(checkout, path))
+
+const BAMBU_PROFILES_SUFFIX = join('BambuStudio.app', 'Contents', 'Resources', 'profiles')
+
+/**
+ * Candidate read-only Bambu Studio profile directories for `inspect-printer`.
+ * @param {string} [home] User home directory.
+ * @param {string} [rumiHome] Rumi home directory.
+ * @returns {string[]} Absolute Bambu Studio profile roots.
+ */
+export function bambuProfileRoots(home = homedir(), rumiHome = process.env.DSH_RUMI_HOME || join(home, '.rumi')) {
+  return [
+    join('/Applications', BAMBU_PROFILES_SUFFIX),
+    join(home, 'Applications', BAMBU_PROFILES_SUFFIX),
+    join(rumiHome, 'print-studio', 'applications', BAMBU_PROFILES_SUFFIX),
+  ]
+}
 
 /** Bind the provider to the shipped service definitions. @param {object} dependencies Service bases and schemas. @returns {Function} Cordis provider. */
 export function createProjectScope({ Service, z }) {
@@ -25,13 +41,19 @@ export function createProjectScope({ Service, z }) {
       instructionMaxBytes: z.number().step(1).min(1).max(1048576).default(65536),
       workspaceRoot: z.string().default(join(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi'), 'workspace')),
       runtimeRoots: z.array(z.string()).default(['/System', '/usr', '/bin', '/sbin', '/opt/homebrew', ...applicationRoots,
-        join(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi'), 'dsh-runtimes')]),
+        join(process.env.DSH_RUMI_HOME || join(homedir(), '.rumi'), 'dsh-runtimes'), ...bambuProfileRoots()]),
     })
     constructor(ctx, config) {
       super(ctx, 'rumiProjectScope')
       if (process.platform !== 'darwin') throw new Error('Rumi project isolation requires the macOS sandbox')
       this.workspaceRoot = config.workspaceRoot
-      this.runtimeRoots = config.runtimeRoots.map(canonical)
+      this.runtimeRoots = config.runtimeRoots.flatMap(path => {
+        try { return [canonical(path)] }
+        catch (error) {
+          if (error && (error.code === 'ENOENT' || error.code === 'EACCES' || error.code === 'ENOTDIR')) return []
+          throw error
+        }
+      })
       this.storage = new AsyncLocalStorage()
       ctx.effect(() => ctx.systemPrompt.section({
         name: 'rumi:project-instructions', order: ctx.systemPrompt.getSectionOrder('TOOL_WORKFLOW'), interpolate: false,

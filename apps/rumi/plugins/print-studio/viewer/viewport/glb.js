@@ -1,4 +1,4 @@
-/** Load Blender exports into the viewer's millimetre, Z-up coordinate system. */
+/** Load legacy GLB exports into the viewer's millimetre, Z-up coordinate system. */
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { validateGlb } from '../glb.js'

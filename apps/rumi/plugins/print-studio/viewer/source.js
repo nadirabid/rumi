@@ -360,7 +360,7 @@ export async function createSource(ctx, path, workspace) {
     clearShape(id) { if (id !== state.analog?.id) throw new Error('Shape controls changed'); state.analog = null; state.highlight = null },
     async saveParameters(id) {
       if (format !== 'javascript' || state.analog?.operation !== 'parameters' || state.analog.id !== id || !state.analog.frozen) throw new Error('Freeze parameter controls before saving')
-      if (state.analog.finish === 'blender') throw new Error('This preview must be finished in Blender using its frozen recipe')
+      if (state.analog.finish === 'cad' || state.analog.finish === 'blender') throw new Error('This preview must be finished in the CAD source using its frozen recipe')
       const values = { ...state.parameters, ...controlValues(state.analog, state.analog.values) }
       if ((await scan()).hash !== state.contentHash || !inside(await realpath(workspace), await realpath(root))) throw new Error('Model changed before parameter save')
       const temporary = resolve(root, `.rumi-parameters-${randomUUID()}.tmp`)

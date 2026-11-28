@@ -89,7 +89,7 @@ The following items are not passing evidence and must remain visible during revi
 
 ## Validation tool qualification
 
-Packaging runs the two Print Studio validation tools through the actual Host profile and project-isolation policy, using the bundled Blender and Bullet executables on a solid and a captive-wheel assembly. Both reach acceptance; cached results, cross-project denial, stale-revision rejection and four tool calls within one recorded turn are checked. This keyless test uses a scripted model adapter; it does not measure whether a live model follows the modeling skill.
+Packaging runs the two Print Studio validation tools through the actual Host profile and project-isolation policy, using the bundled CAD Python and Bullet executables on a solid and a separate-print wheel assembly. Both reach acceptance; cached results, cross-project denial, stale-revision rejection and four tool calls within one recorded turn are checked. This keyless test uses a scripted model adapter; it does not measure whether a live model follows the modeling skill.
 
 After packaging, qualify the installed macOS app with:
 

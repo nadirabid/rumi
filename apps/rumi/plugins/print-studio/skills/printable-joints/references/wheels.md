@@ -1,71 +1,61 @@
-Rumi requires moving parts to print separately. Recipes labeled print-in-place below are legacy geometry references; do not use their captive versions for new movable prints. A separately assembleable variant still requires validation, and deformation or assembly routes outside the checker remain unverified.
+All wheel and axle recipes in `cad/joints/wheels.py` are **separate-print** assemblies. Every part prints flat on the bed and assembles afterward without print-in-place captivity.
 
 ## wheel
 
-**Use for**: the wheel blank that `captive_axle` and `axle_clip` mount; make it first.
+**Use for**: a flat-printable wheel blank that `bayonet_axle` or `snap_axle` mounts; make it first.
 
-**Call**: `w = K.wheel('FrontLeftWheel', (-40, 44, 14), '-X', diameter=28, width=10, tread=12)`
+**Call**: `w = K.wheel('FrontLeftWheel', (-40, 44, 14), '-X', diameter=30, width=10, tread=12)`
 
-**You provide**: the pivot on the body's side face and the axis pointing away from the body. The disc's inner face sits `standoff + end_play` (1.3 mm) off the pivot.
+**You provide**: the pivot on the body's side face and the axis pointing away from the body. The disc's inner face sits `standoff + end_play` (1.35 mm default) off the pivot, with chamfered rim edges.
 
-**Key options**: `diameter` 20 to 60; `width` 8 to 14; `tread` 0 to 16 ribs; keep `end_play` 0.3 and `standoff` 1.
+**Key options**: `diameter` 20 to 60; `width` 8 to 14; `tread` 0 to 16 ribs; `end_play` 0.35; `standoff` 1.0; `chamfer_size` 0.5.
 
-**Prints as**: part of the assembled print, axis horizontal; PLA or PETG.
+**Prints as**: flat on the bed (axis vertical); PLA or PETG.
 
-**Validation**: no separate run; it is the wheel in the `captive_axle` sample.
+## bayonet_axle
 
-## captive_axle
+**Use for**: a wheel or roller spinning on a smooth stub axle, retained by a separate quarter-turn twist-lock hub cap (3 separate parts: body+axle, wheel, cap).
 
-**Use for**: a wheel or roller that spins on a stub axle growing out of the body.
+**Call**: `res = K.bayonet_axle(body, w, (-40, 44, 14), '-X', width=10, axle_diameter=8, control='front left wheel')`
 
-**Call**: `j = K.captive_axle(body, w, (-40, 44, 14), '-X', width=10, control='front left wheel')`
+**You provide**: a solid `body` under the pivot; a `wheel` blank made at the same pivot, axis, and `width`.
 
-**You provide**: a solid `body` under the pivot; a `wheel` made at the same pivot, axis and `width`.
+**Key options**: `axle_diameter` 6 to 12; `clearance` 0.35; `end_play` 0.35; `cap_diameter`; `turn` 90; `recess` `None` (default: counterbores the outer face when `width >= 8` and hub radius clears the wall so the cap sits compactly with less cantilever leverage, automatically falling back to external on thin/narrow rotors; pass `True` to require a counterbore or `False` for an external cap); `limits` `(-180, 180)`.
 
-**Key options**: `axle_diameter` 4 to 8; `head_overhang` 1.2 to 2; keep `snap` False and `recess` True.
+**Prints & assembles**: body upright, wheel flat, bayonet cap flat on its outer face; PLA or PETG. Slide wheel onto axle, push cap on, twist 90° to lock. Declares `revolute` wheel joint + `fixed` (`retainer='bayonet'`) cap joint and automatic `step_twist` + `step_translate` disassembly actions. Records `wheel-and-axle` badge evidence.
 
-**Prints as**: print-in-place, axle and head fused to the body; PLA or PETG.
+## snap_axle
 
-**Validation**: four-wheel sample (tread 12): assembly, geometry (warnings) and fit pass; mechanics passed, verified, 225 of 225 probes per wheel. `snap=True` fails `excessive_penetration` 0.16 to 0.20 mm (reported, not re-run).
+**Use for**: a 2-part wheel mounting where a split cantilevered barbed stub axle snaps through a counterbored wheel hub (no separate cap needed).
+
+**Call**: `res = K.snap_axle(body, w, (-40, 44, 14), '-X', width=10, axle_diameter=8, barb=1.0, control='front left wheel')`
+
+**You provide**: a solid `body` under the pivot; a `wheel` blank at the same pivot, axis, and `width`.
+
+**Key options**: `axle_diameter` 6 to 10; `barb` 0.8 to 1.2; `clearance` 0.35; `recess` True; `limits` `(-180, 180)`.
+
+**Prints & assembles**: body + wheel separate; PETG recommended for compliant snap fingers (PLA works for light assembly). Declares `revolute` joint + `step_snap` disassembly action. Records `wheel-and-axle` badge evidence.
 
 ## through_axle
 
-**Use for**: one axle through the body with a wheel on each end, turning together.
+**Use for**: two wheels turning together on one removable double-D through-axle passing through the body, retained by a keyed double-D snap cap (4 separate parts: body, axle with integral left wheel `.axle`, keyed right wheel `.wheel_right`, and keyed snap cap `.cap`).
 
-**Call**: `j = K.through_axle(body, 'RearAxle', (0, -22, 14), 'X', body_width=40, wheel_diameter=28, wheel_width=8, tread=10)`
+**Call**: `res = K.through_axle(body, 'RearAxle', (0, -22, 14), 'X', body_width=40, wheel_diameter=30, wheel_width=8, tread=10)`
 
-**You provide**: a solid `body` whose two faces are `body_width` apart, centred on the pivot along the axis. `child` is a new name; paint it via `K.bpy.data.objects['RearAxle']`.
+**You provide**: a solid `body` whose two side faces are `body_width` apart, centred on the pivot along the axis.
 
-**Key options**: `axle_diameter` 4 to 8; `wheel_diameter` 16 to 60; `wheel_width` 4 to 14; `tread`.
+**Key options**: `axle_diameter` 7 to 12 (8.5 default); `wheel_diameter` 20 to 60; `wheel_width` 6 to 14; `tread`; `limits`.
 
-**Prints as**: print-in-place, one solid, axle horizontal; PLA or PETG.
-
-**Validation**: assembly, geometry (warnings) and fit pass; mechanics passed, verified, 165 of 165 probes; same at pivot (37, -22, 14), axis Y. Wheels bearing straight on a flat box face read 0.16 to 0.99 mm penetration, hence the small bearing rings.
+**Prints & assembles**: axle/left-wheel unit, keyed right wheel, and keyed double-D snap cap print flat separately (`retainer='snap'`, full 6-DOF, cannot unscrew while rolling). Insert axle through body bore, slide keyed right wheel onto the D-end, and snap the cap on. Records `wheel-and-axle` badge evidence.
 
 ## tyre
 
-**Use for**: a separate soft tyre seated on a hub.
+**Use for**: a separate soft TPU tyre seated in a keyed rim channel on a rigid hub (2 parts).
 
-**Call**: `j = K.tyre(hub, 'Tyre', (0, 0, 0), 'Z', hub_diameter=40, width=14, tyre_diameter=50, flange=2.5)`
+**Call**: `res = K.tyre(hub, 'Tyre', (0, 0, 0), 'Z', hub_diameter=40, width=14, tyre_diameter=50, flange=2.0)`
 
-**You provide**: `hub`, a solid disc centred on the pivot, `width` thick; `child` is a new name for the tyre. The recipe cuts a channel and pegs in the hub.
+**You provide**: `hub`, a solid disc centred on the pivot, `width` thick; `child` is a new name for the tyre. The recipe cuts a rim channel and anti-spin pegs into the hub.
 
-**Key options**: `flange` 2 to 3; `rim_depth` 2.5 to 4; `pegs` 6; `tread` 0 or 24.
+**Key options**: `flange` 2.0 to 3.0; `rim_depth` 2.0 to 4.0; `pegs` 6; `tread` 0 or 20; `gap` 0.3.
 
-**Prints as**: separate; tyre in TPU, stretched over a flange; hub in PLA or PETG.
-
-**Validation**: two samples (axis Z at the origin; axis -X at (37, -22, 14)): assembly, geometry and fit pass; mechanics passed, verified, 13 of 13 probes each. Without pegs the tyre spins and fails `unretained_part`.
-
-## axle_clip
-
-**Use for**: keeping a wheel on a stub axle with a collar at the axle end.
-
-**Call**: `j = K.axle_clip(body, w, (40, 30, 14), '+X', width=10, control='wheel')`
-
-**You provide**: the same `body`, `wheel`, pivot, axis and `width` as `captive_axle`.
-
-**Key options**: `collar_overhang` 1.5 to 2.5; `collar_height` 2. `open_clip=True` adds a groove and a separate C-clip (two joint records).
-
-**Prints as**: print-in-place, collar fused to the axle; PLA or PETG.
-
-**Validation**: two-wheel sample: assembly, geometry and fit pass; mechanics passed, verified, 185 of 185 probes per wheel; one wheel at another pivot and axis passed (165 of 165). `open_clip=True`: the clip spins in its groove and fails `unretained_part`; not verifiable.
+**Prints & assembles**: hub in PLA or PETG; tyre in TPU, stretched over the flange onto the locating pegs. Declares `fixed` (`retainer='snap'`) joint + `step_snap` disassembly action.

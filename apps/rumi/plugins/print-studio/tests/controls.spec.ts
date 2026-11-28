@@ -97,7 +97,7 @@ it('freezes the latest parameter values, saves atomically, reloads them, and can
   } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-it('keeps a Blender preview frozen with its latest values and refuses to save it as a final parameter model', async () => {
+it.each(['cad', 'blender'] as const)('keeps a %s preview frozen with its latest values and refuses to save it as a final parameter model', async (finish) => {
   const root = await mkdtemp(join(tmpdir(), 'rumi-preview-')), ctx = new Context()
   try {
     const path = join(root, 'model.js')
@@ -105,12 +105,12 @@ it('keeps a Blender preview frozen with its latest values and refuses to save it
     const scoped = ctx as Context & { connection: { fetch: { register: () => () => void } } }
     scoped.connection = { fetch: { register: () => () => {} } }
     const source = await createSource(scoped, path, root), state = source.state()
-    const open = source.shape({ ...state, ...spec, finish: 'blender', original: 'original.blend', originalHash: 'hash', edit: 'Tilt both openings by eyeTilt degrees; preserve the shell.' })
+    const open = source.shape({ ...state, ...spec, finish, original: 'original.step', originalHash: 'hash', edit: 'Tilt both openings by eyeTilt degrees; preserve the shell.' })
     source.shapeFeedback({ id: open.id, url: state.url, status: 'rendered' })
     source.requestShapeFreeze(open.id)
     source.shapeFeedback({ id: open.id, url: state.url, status: 'frozen', sequence: 1, values: { eyeTilt: -15 } })
-    expect(source.freezeShape(open.id)).toMatchObject({ finish: 'blender', original: 'original.blend', originalHash: 'hash', values: { eyeTilt: -15 } })
-    await expect(source.saveParameters(open.id)).rejects.toThrow('finished in Blender')
+    expect(source.freezeShape(open.id)).toMatchObject({ finish, original: 'original.step', originalHash: 'hash', values: { eyeTilt: -15 } })
+    await expect(source.saveParameters(open.id)).rejects.toThrow('finished in the CAD source')
     expect(source.state().analog?.frozen).toBe(true)
     await expect(readFile(join(root, '.rumi-parameters.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }) }

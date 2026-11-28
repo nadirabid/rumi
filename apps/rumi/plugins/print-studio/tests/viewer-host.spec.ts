@@ -55,7 +55,7 @@ it('documents creating multiple models and bringing a named entry into view', as
     setup: await readFile(new URL('../skills/print-studio-setup/SKILL.md', import.meta.url), 'utf8'),
     fdm: await readFile(new URL('../skills/fdm-design/SKILL.md', import.meta.url), 'utf8'),
     joints: await readFile(new URL('../skills/printable-joints/SKILL.md', import.meta.url), 'utf8'),
-    blender: await readFile(new URL('../skills/blender-modeling/SKILL.md', import.meta.url), 'utf8'),
+    cad: await readFile(new URL('../skills/cad-modeling/SKILL.md', import.meta.url), 'utf8'),
     instructions: await readFile(new URL('../AGENTS_TEMPLATE.md', import.meta.url), 'utf8'),
     load: f.raw('viewer_load').description,
     surfaceAnalysis: f.raw('viewer_analyze_surfaces').description,
@@ -72,9 +72,9 @@ it('documents creating multiple models and bringing a named entry into view', as
   }).toMatchSnapshot()
 })
 
-it('exposes Blender preview fields on the controls tool', () => {
+it('exposes CAD preview fields on the controls tool', () => {
   const tool = fixture().raw('viewer_controls')
-  expect(tool.parameters.properties).toMatchObject({ finish: { enum: ['parameters', 'blender'] }, original: { type: 'string' }, edit: { type: 'string' } })
+  expect(tool.parameters.properties).toMatchObject({ finish: { enum: ['parameters', 'cad', 'blender'] }, original: { type: 'string' }, edit: { type: 'string' } })
 })
 
 function fixture(source: Uint8Array = stl(box()), cwd = '/workspace', loadTimeoutMs = 1, validationConfig?: { validationStateDirectory: string }) {

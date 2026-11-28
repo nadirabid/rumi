@@ -8,7 +8,10 @@ import subprocess
 import sys
 import unittest
 sys.dont_write_bytecode = True
-from fixtures import request, box, slider, wheel, assembly, two_wheels, loose_pin, loose_cap, revolution
+from fixtures import (
+    request, box, slider, wheel, assembly, two_wheels, loose_pin, loose_cap, revolution,
+    bayonet_lock, threaded_bolt_nut, snap_collar,
+)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('executable', type=Path)
@@ -250,6 +253,160 @@ class NativeTests(unittest.TestCase):
         value=request();value['bodies'][0]['triangles'][0][0]=-1
         code,result=run(value)
         self.assertEqual(code,2,result);self.assertEqual(result['error']['code'],'invalid_request')
+
+    def test_separate_slider_accepts_translate_actions(self):
+        value = slider()
+        value['assembly']['manufacturing'] = dict(
+            mode='separate',
+            steps=[dict(part='moving', actions=[dict(kind='translate', delta=[10, 0, 0]), dict(kind='translate', delta=[10, 0, 0])])],
+        )
+        result = self.assert_verified(value)
+        self.assertEqual(result['coverage']['assemblySteps'], ['moving'])
+
+    def test_bayonet_retainer_passes_10_dof_and_twist_translate_disassembly(self):
+        value = bayonet_lock()
+        result = self.assert_verified(value)
+        self.assertEqual(result['coverage']['assemblySteps'], ['cap'])
+        probes = [p for p in result['connections'][0]['probes'] if p['kind'] == 'retention']
+        self.assertEqual(len(probes), 10)
+        self.assertEqual(result['connections'][0]['retainer'], 'bayonet')
+
+    def test_bayonet_without_lugs_fails_axial_retention(self):
+        value = bayonet_lock(with_lugs=False)
+        code, result = run(value)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'needs_repair', result)
+        self.assertEqual(result['checks'][0]['code'], 'unretained_part')
+
+    def test_bayonet_as_rigid_retainer_fails_unscrewing_torque(self):
+        value = bayonet_lock(with_lugs=True, retainer='rigid')
+        code, result = run(value)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'needs_repair', result)
+        self.assertEqual(result['checks'][0]['code'], 'unretained_part')
+
+    def test_bayonet_disassembly_rejects_pullout_without_twist(self):
+        value = bayonet_lock()
+        value['assembly']['manufacturing']['steps'] = [dict(part='cap', actions=[dict(kind='translate', delta=[0, 0, 20])])]
+        code, result = run(value)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'needs_repair', result)
+        self.assertEqual(result['checks'][0]['code'], 'assembly_path_interference')
+
+    def test_threaded_retainer_passes_and_helical_unscrewing_succeeds(self):
+        value = threaded_bolt_nut()
+        result = self.assert_verified(value)
+        self.assertEqual(result['coverage']['assemblySteps'], ['nut'])
+        probes = [p for p in result['connections'][0]['probes'] if p['kind'] == 'retention']
+        self.assertEqual(len(probes), 10)
+
+    def test_threaded_disassembly_rejects_wrong_pitch(self):
+        value = threaded_bolt_nut()
+        value['assembly']['manufacturing']['steps'] = [
+            dict(part='nut', actions=[dict(kind='rotate', pivot=[0, 0, 0], axis=[0, 0, 1], degrees=990, pitchMm=0)]),
+        ]
+        code, result = run(value)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'needs_repair', result)
+        self.assertEqual(result['checks'][0]['code'], 'assembly_path_interference')
+        self.assertEqual(result['checks'][0]['details']['kind'], 'rotate')
+
+    def test_snap_collar_passes_retention_and_bounded_snap_disassembly(self):
+        value = snap_collar(max_interference=0.9)
+        result = self.assert_verified(value)
+        self.assertEqual(result['coverage']['assemblySteps'], ['collar'])
+        probes = [p for p in result['connections'][0]['probes'] if p['kind'] == 'retention']
+        self.assertEqual(len(probes), 12)
+
+    def test_snap_rejects_interference_above_limit(self):
+        value = snap_collar(max_interference=0.2)
+        code, result = run(value)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'needs_repair', result)
+        self.assertEqual(result['checks'][0]['code'], 'assembly_path_interference')
+        self.assertEqual(result['checks'][0]['details']['reason'], 'snap_interference_exceeded')
+
+    def test_snap_rejects_endpoint_interference(self):
+        value = snap_collar(max_interference=0.9)
+        value['assembly']['manufacturing']['steps'] = [
+            dict(part='collar', actions=[dict(kind='snap', delta=[0, 0, 5], maxInterferenceMm=0.9)]),
+        ]
+        code, result = run(value)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'needs_repair', result)
+        self.assertEqual(result['checks'][0]['code'], 'assembly_path_interference')
+        self.assertEqual(result['checks'][0]['details']['reason'], 'snap_end_interference')
+
+    def test_snap_rejects_unrelated_third_part_collision(self):
+        value = snap_collar(max_interference=1.5, with_guard=True)
+        code, result = run(value)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'needs_repair', result)
+        codes = [c['code'] for c in result['checks']]
+        self.assertIn('assembly_path_interference', codes)
+        interference = next(c for c in result['checks'] if c['code'] == 'assembly_path_interference')
+        self.assertEqual(interference['details']['reason'], 'snap_unrelated_part_interference')
+        self.assertEqual(interference['details']['collision']['parts'], ['collar', 'guard'])
+
+    def test_friction_retainer_emits_unverified_warning(self):
+        value = assembly(
+            [box('base', [0, 0, 0], [5, 5, 2]), box('peg', [0, 0, 4.2], [2, 2, 2])],
+            'base',
+            [dict(id='press_fit', parent='base', child='peg', kind='fixed', retainer='friction')],
+        )
+        code, result = run(value)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'review', result)
+        self.assertFalse(result['assemblyVerified'])
+        self.assertFalse(result['coverage']['complete'])
+        self.assertEqual(result['checks'][0]['code'], 'retainer_unverified_friction')
+        self.assertEqual(result['checks'][0]['severity'], 'warning')
+        self.assertEqual(result['checks'][0]['connection'], 'press_fit')
+
+    def test_split_penetration_enforces_strict_initial_and_relaxed_dynamic(self):
+        # Rest interference of 0.25 mm fails initialPenetrationMm=0.15 even when maxPenetrationMm=0.35.
+        value = slider(True)
+        value['settings']['maxPenetrationMm'] = 0.35
+        code, result = run(value)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'needs_repair', result)
+        self.assertEqual(result['checks'][0]['code'], 'initial_interference')
+        self.assertIn('collision', result['checks'][0]['details'])
+        # Explicit initialPenetrationMm also applies strictly to rigid assembly routes.
+        route = slider()
+        route['settings'].update(maxPenetrationMm=0.35, initialPenetrationMm=0.05)
+        route['assembly']['manufacturing'] = dict(mode='separate', steps=[dict(part='moving', path=[[0, 0, 0], [0, 20, 0]])])
+        code, result = run(route)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'needs_repair', result)
+        self.assertEqual(result['checks'][0]['code'], 'assembly_path_interference')
+
+    def test_invalid_v2_retainer_and_action_declarations_fail_loud(self):
+        bad_bayonet = bayonet_lock()
+        del bad_bayonet['assembly']['connections'][0]['axis']
+        code, result = run(bad_bayonet)
+        self.assertEqual(code, 2, result)
+        self.assertEqual(result['error']['code'], 'invalid_request')
+
+        bad_snap = snap_collar(max_interference=3.0)
+        code, result = run(bad_snap)
+        self.assertEqual(code, 2, result)
+        self.assertEqual(result['error']['code'], 'invalid_request')
+
+        bad_revolute = wheel()
+        bad_revolute['assembly']['connections'][0]['retainer'] = 'bayonet'
+        code, result = run(bad_revolute)
+        self.assertEqual(code, 2, result)
+        self.assertEqual(result['error']['code'], 'invalid_request')
+
+        bad_step = slider()
+        bad_step['assembly']['manufacturing'] = dict(
+            mode='separate',
+            steps=[dict(part='moving', path=[[0, 0, 0], [20, 0, 0]], actions=[dict(kind='translate', delta=[20, 0, 0])])],
+        )
+        code, result = run(bad_step)
+        self.assertEqual(code, 2, result)
+        self.assertEqual(result['error']['code'], 'invalid_request')
 
 
 if __name__=='__main__':unittest.main(argv=['native.py',*remaining],verbosity=2)

@@ -1,5 +1,4 @@
 /** Surface deformation follows the part's own ring and meridian coordinates. */
-import { execFileSync } from 'node:child_process'
 import { expect, it } from 'vitest'
 import * as THREE from 'three'
 import { normalizeShape } from '../viewer/analog/spec.js'
@@ -86,7 +85,7 @@ it('previews without touching the saved geometry until disposed', () => {
   expect(node.geometry).toBe(geometry)
 })
 
-it.each(['profile', 'facet', 'ring', 'channel'])('matches Python with expanded preview vertices and unique bake vertices for %s', (kind) => {
+it.each(['profile', 'facet', 'ring', 'channel'])('produces identical deltas from expanded preview vertices and unique vertices for %s', (kind) => {
   const recipe = normalizeShape({ operation: 'surface', label: 'Profile', parts: ['Shell'],
     uAt: -90,
     ...(kind === 'profile' ? { form: { kind, at: [.2, .6, .9] }, values: { p0: 6, p1: -3, p2: 11 },
@@ -94,19 +93,13 @@ it.each(['profile', 'facet', 'ring', 'channel'])('matches Python with expanded p
       : kind === 'facet' ? { form: { kind, from: 0, to: 1, planes: [{ normal: [0, -1, 0], offset: 90 }] }, values: { amount: 1 }, controls: [control('amount', 0, 1)] }
         : kind === 'ring' ? { form: { kind, from: 0, to: 1, millimetres: 10 }, values: { amount: .7 }, controls: [control('amount', -1, 1)] }
           : { form: { kind, from: 0, to: 1, widthMillimetres: 40, at: [0] }, values: { depth: 5 }, controls: [control('depth', -10, 10)] }) })
-  const context = surfaceContext([...samples, ...samples.slice(0, 40)], recipe.uAt)
+  const expanded = surfaceContext([...samples, ...samples.slice(0, 40)], recipe.uAt)
+  const unique = surfaceContext(samples, recipe.uAt)
   const probes = [[0, -100, 20], [30, -95, 120], [-70, -70, 180], [100, 0, 90], [0, 100, 40]]
-  const code = `import runpy,json,sys
-m = runpy.run_path('apps/rumi/plugins/print-studio/blender/surface.py')
-data = json.load(sys.stdin)
-m['validate_surface'](data['recipe'])
-context = m['surface_context']([tuple(p) for p in data['points']], data['recipe'].get('uAt', -90))
-print(json.dumps([[p, m['surface_point'](list(p), data['recipe'], context)] for p in data['probes']]))`
-  const actual = JSON.parse(execFileSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', code],
-    { input: JSON.stringify({ recipe, points, probes }), encoding: 'utf8' }))
-  for (const [index, [point, moved]] of actual.entries()) {
-    const delta = surfaceDelta(point, context, recipe.form, recipe.values)
-    for (const axis of [0, 1, 2]) expect(moved[axis]).toBeCloseTo(probes[index][axis] + delta[axis], 6)
+  for (const point of probes) {
+    const a = surfaceDelta(point, expanded, recipe.form, recipe.values)
+    const b = surfaceDelta(point, unique, recipe.form, recipe.values)
+    for (const axis of [0, 1, 2]) expect(a[axis]).toBeCloseTo(b[axis], 6)
   }
 })
 

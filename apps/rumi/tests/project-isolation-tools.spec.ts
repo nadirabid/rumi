@@ -17,7 +17,7 @@ import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import { createValidation } from '../plugins/print-studio/viewer/validation.js'
 import { registerValidationTools } from '../plugins/print-studio/viewer/validation-tools.js'
-import { createProjectScope } from '../plugins/projects/isolation/scope-provider.js'
+import { bambuProfileRoots, createProjectScope } from '../plugins/projects/isolation/scope-provider.js'
 import { createProjectPolicy } from '../plugins/projects/isolation/policy-provider.js'
 import { createProjectFileSystem } from '../plugins/projects/isolation/filesystem-provider.js'
 const ProjectScope = createProjectScope({ Service, z })
@@ -214,4 +214,39 @@ it.skipIf(process.platform !== 'darwin')('admits both explicit validation tools 
     expect(result.isError).toBe(true)
     expect(JSON.stringify(result.content)).toContain('Project isolation denied access')
   }
+})
+
+it.skipIf(process.platform !== 'darwin')('allows read-only access to Bambu Studio profile directories while denying writes and sibling paths', async () => {
+  const fakeHome = await mkdtemp(join(tmpdir(), 'rumi-bambu-home-'))
+  cleanup.push(() => rm(fakeHome, { recursive: true, force: true }))
+  const rumiHome = join(fakeHome, '.rumi')
+  const profileDir = join(rumiHome, 'print-studio', 'applications', 'BambuStudio.app', 'Contents', 'Resources', 'profiles', 'BBL', 'machine')
+  const siblingSecret = join(rumiHome, 'print-studio', 'secret.txt')
+  await mkdir(profileDir, { recursive: true })
+  const profileFile = join(profileDir, 'Bambu Lab H2D 0.4 nozzle.json')
+  await writeFile(profileFile, JSON.stringify({ name: 'Bambu Lab H2D 0.4 nozzle' }))
+  await writeFile(siblingSecret, 'private print-studio config')
+  const roots = bambuProfileRoots(fakeHome, rumiHome)
+  expect(roots).toEqual([
+    '/Applications/BambuStudio.app/Contents/Resources/profiles',
+    join(fakeHome, 'Applications', 'BambuStudio.app', 'Contents', 'Resources', 'profiles'),
+    join(rumiHome, 'print-studio', 'applications', 'BambuStudio.app', 'Contents', 'Resources', 'profiles'),
+  ])
+  expect(ProjectScope.Config({}).runtimeRoots).toEqual(expect.arrayContaining([
+    '/Applications/BambuStudio.app/Contents/Resources/profiles',
+  ]))
+  const f = await fixture(roots)
+  f.ctx.tools.register(defineTool({
+    name: 'write', description: 'Attempt to mutate a file.', parameters: { path: { type: 'string', required: true } },
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+    presentCall: () => ({ card: 'generic', title: 'Write file' }),
+    async execute(args, { signal }) {
+      await f.ctx.fs.writeText(await f.ctx.fs.resolve(args.path), 'mutated', {}, signal)
+      return 'written'
+    },
+  }))
+  const run = (name: string, path: string) => executeModelToolFixture(f.ctx, { callId: ToolCallId(name), name, arguments: { path }, agent: f.agent, signal: new AbortController().signal })
+  expect(await run('read', profileFile)).toMatchObject({ isError: false, content: [{ type: 'text', text: JSON.stringify({ name: 'Bambu Lab H2D 0.4 nozzle' }) }] })
+  expect(await run('write', profileFile)).toMatchObject({ isError: true })
+  expect(await run('read', siblingSecret)).toMatchObject({ isError: true })
 })

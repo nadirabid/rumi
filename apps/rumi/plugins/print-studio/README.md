@@ -2,19 +2,19 @@
 
 English | [中文](README.zh.md)
 
-Print Studio is Rumi’s built-in plugin for 3D printing projects. It connects the modeling agent, Blender, the Three.js preview and Bambu Studio. The agent edits a model in Blender, the viewer displays the saved revision, and the user can arrange its parts on plates for slicing in Bambu Studio.
+Print Studio is Rumi’s built-in plugin for 3D printing projects. It connects the modeling agent, the bundled `build123d` CAD engine, the Three.js preview and Bambu Studio. The agent builds parametric B-Rep solids in `build123d`, publishes STEP and USD revisions, the viewer displays the saved revision, and the user can arrange its parts on plates for slicing in Bambu Studio.
 
 ## Where to make a change
 
 | Area | Implementation | Maintainer reference |
 |---|---|---|
-| Model creation, publishing and undo | [Blender helpers](blender/) | [Model files and revisions](docs/models/README.md) |
+| Model creation, publishing and undo | [CAD helpers](cad/) | [Model files and revisions](docs/models/README.md) |
 | Preview, pointing, hover labels and the agent’s work target | [Viewer](viewer/) | [Mesh preview and selection](docs/viewer/README.md) |
 | Joint movement and interactive mesh edits | [Edit controls](viewer/analog/) and [movement controls](viewer/movement-controls.js) | [Movement and mesh edit controls](docs/controls/README.md) |
-| Geometry, clearances and mechanical acceptance | [Blender checks](blender/validate.py) and [Bullet checks](bullet/) | [Model validation](docs/validation/README.md) |
+| Geometry, clearances and mechanical acceptance | [CAD checks](cad/validate.py) and [Bullet checks](bullet/) | [Model validation](docs/validation/README.md) |
 | Printer setup, monitoring and slicer handoff | [Host](index.js), [settings card](client.js) and [native sign-in](desktop/) | [Printers and print layout](docs/printing/README.md) |
 
-To change what the modeling agent knows, start with the [print project instructions](AGENTS_TEMPLATE.md). The [skills directory](skills/) holds task-specific guidance, including [Blender modeling](skills/blender-modeling/SKILL.md) and [naming model regions](skills/name-model-regions/SKILL.md).
+To change what the modeling agent knows, start with the [print project instructions](AGENTS_TEMPLATE.md). The [skills directory](skills/) holds task-specific guidance, including [CAD modeling](skills/cad-modeling/SKILL.md) and [naming model regions](skills/name-model-regions/SKILL.md).
 
 ## Mechanical badges
 
@@ -42,4 +42,4 @@ Each print project stores one JSON diagnostic per session turn in its `.rumi-dia
 
 After editing the viewer, rebuild its browser bundle with `pnpm --filter dsh-rumi run build:print-studio-client`. Package behavior tests live in [tests/](tests/). For changes that affect the installed app, follow [Rumi’s build instructions](../../../../RUMI.md#build) and [installed validation checks](../../tests/README.md#validation-tool-qualification).
 
-The [Blender badge fixture](tests/blender-badge-revisions.py) checks six construction receipts and rejects a stale receipt after a geometry edit. Pass `-- /absolute/scratch-directory` to retain the designs. Running `node apps/rumi/plugins/print-studio/tests/qualify-badges.mjs /absolute/scratch-directory` from the repository root then tests the live DeepSeek reviewer on those designs, including an untagged fold and a shallow groove given the same request. This uses the configured DeepSeek API account.
+The [CAD joints suite](tests/cad-joints.py) checks all separate-print recipes, construction receipts, and disassembly paths against `cad/validate.py` and `rumi-bullet`. Running `node apps/rumi/plugins/print-studio/tests/qualify-badges.mjs /absolute/scratch-directory` from the repository root tests the live DeepSeek reviewer on prepared designs using the configured DeepSeek API account.

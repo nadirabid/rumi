@@ -40,6 +40,26 @@ it.skipIf(process.platform === 'win32')('signs a shared Python interpreter once 
   await expect(signMacOSRuntime(path, 'com.example.app', identity, 'arm64')).rejects.toThrow('unsupported filesystem entry')
 })
 
+it.skipIf(process.platform === 'win32')('signs the CAD Python interpreter once and retains validated relative aliases', async () => {
+  const path = root()
+  const bin = join(path, 'python/bin')
+  const site = join(path, 'python/lib/python3.12/site-packages/OCP')
+  mkdirSync(bin, { recursive: true })
+  mkdirSync(site, { recursive: true })
+  writeFileSync(join(path, 'runtime.json'), JSON.stringify({
+    schemaVersion: 1, target: 'mac-arm64', platform: 'darwin', arch: 'arm64',
+    python: '3.12.14', pythonRelease: '20260901', build123d: '0.13.0', pythonPackages: {},
+  }))
+  writeFileSync(join(bin, 'python3.12'), Buffer.from('cffaedfe00000000', 'hex'))
+  writeFileSync(join(site, 'OCP.so'), Buffer.from('cffaedfe00000000', 'hex'))
+  for (const name of ['python', 'python3']) symlinkSync('python3.12', join(bin, name))
+  await expect(signMacOSRuntime(path, 'com.example.app', identity, 'arm64', undefined, 'cad')).resolves.toBe(2)
+  expect(signMacOSRuntimeCode).toHaveBeenCalledTimes(2)
+  for (const name of ['python', 'python3']) expect(readlinkSync(join(bin, name))).toBe('python3.12')
+  symlinkSync('OCP.so', join(site, 'extra-link'))
+  await expect(signMacOSRuntime(path, 'com.example.app', identity, 'arm64', undefined, 'cad')).rejects.toThrow('unsupported filesystem entry')
+})
+
 // The signer must inspect real file symlinks, including dangling and cyclic ones.
 it.skipIf(process.platform === 'win32').each(['unknown', 'absolute', 'escaping', 'dangling', 'chained', 'directory'])('rejects a %s runtime link before signing any file', async (kind) => {
   const path = root()

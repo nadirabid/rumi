@@ -1,4 +1,4 @@
-/** Real USD-to-Blender acceptance probe. Run with an input JSON containing source and blend, and an output directory; add --verify-published after running the Blender acceptance probe. */
+/** Real USD surface preview acceptance probe. Run with an input JSON containing source, and an output directory; add --verify-published after publishing the CAD revision. */
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createHash } from 'node:crypto'

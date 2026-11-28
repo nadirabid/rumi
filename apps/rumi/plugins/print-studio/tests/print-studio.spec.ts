@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
+import { Config, resolveSkillsDirectory } from '../index.js'
 import {
   detectSlicer, parsePrinterResponse, printerConfigPath, printStudioNextSteps, readPrinterConfig, writePrinterConfig,
 } from '../printer/probe.js'
@@ -140,4 +141,13 @@ it('asks for a bound-printer fix after a cloud sign-in without a code, and survi
     printer: { ...base.printer, hasAccessCode: true },
   }
   expect(printStudioNextSteps(rejected).map(step => step.id)).toEqual(['auth-failed'])
+})
+
+it('maps packaged ASAR skill roots to app.asar.unpacked and uses updated mechanics defaults', () => {
+  expect(resolveSkillsDirectory('/Applications/Rumi.app/Contents/Resources/app.asar/dsh/node_modules/@rumi/print-studio'))
+    .toBe('/Applications/Rumi.app/Contents/Resources/app.asar.unpacked/dsh/node_modules/@rumi/print-studio/skills')
+  expect(resolveSkillsDirectory('/tmp/print-studio')).toBe('/tmp/print-studio/skills')
+  const config = Config({})
+  expect(config.mechanics.initialPenetrationMm).toBe(0.15)
+  expect(config.mechanics.maxPenetrationMm).toBe(0.45)
 })

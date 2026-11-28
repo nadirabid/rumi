@@ -5,7 +5,7 @@ description: "Design, validate, and save live shape adjustments the user can try
 
 # Mesh edit controls
 
-Use this skill when someone wants to adjust a shape themselves. A direct instruction such as “make it 20 mm wide” can be a source edit; a request to explore needs controls before applying the change. For existing joint movement, follow [blender-modeling](../blender-modeling/SKILL.md#movement-controls).
+Use this skill when someone wants to adjust a shape themselves. A direct instruction such as “make it 20 mm wide” can be a source edit; a request to explore needs controls before applying the change. For existing joint movement, follow [cad-modeling](../cad-modeling/SKILL.md#movement-controls).
 
 ## Understand the edit
 
@@ -22,7 +22,7 @@ Choose a small set of useful adjustments. For each, define its geometric effect,
 - For other custom variations that preserve mesh connectivity, author [displacement fields](references/fields.md). Derive the mapping from the current construction, measured profile, or cross-sections. Evaluate source parameter changes on temporary copies when useful. Keep the generator in the project so it can be revised.
 - New holes, count changes, and other unsupported live reconstruction need a specific explanation and an agreed alternative. Do not silently replace requested controls with static variants or a completed edit.
 
-Check existing field files against the current revision and request before reusing them. Preserve the editable Blender original. Executable JavaScript previews and `operation: parameters` are unavailable.
+Check existing field files against the current revision and request before reusing them. Preserve the editable `build123d` source and STEP/B-Rep revisions. Executable JavaScript previews and `operation: parameters` are unavailable.
 
 ## Verify and present
 
@@ -45,7 +45,10 @@ Preserve wanted unsaved adjustments; ask if keeping them is unclear. Close an ex
 Keep controls open during exploration. Satisfaction or moving to another task resolves the latest visible edit first. Do not use the original opening values in place of the person’s adjustments.
 
 1. Freeze with `viewer_controls`, `action: freeze`, and the current control `id`. A failed freeze does not authorize saving stale values.
-2. Call `blender_status`, open the original `.blend` matching the selected USD, and load the returned helper with `runpy`. Call `helper["apply_shape_controls"](recipePath)`, then publish and load the new revision using [Blender modeling](../blender-modeling/SKILL.md#edit-and-publish). The helper checks the source USD hash and applies the frozen deformation; do not approximate it with another operator. It bakes evaluated modifiers on affected parts, so retain the original revision and modifier stack. Verify the published preview and that `meshState` has cleared the temporary edit and highlight before reporting a save.
+2. Call `cad_status` and inspect the frozen recipe JSON (`helper["load_control_recipe"](recipePath)` and `helper["summarize_control_recipe"](recipe)`). Translate that visual input back into exact `build123d` B-Rep edits in your `source/` script:
+   - For `operation: cut`, call `helper["cut_solid"](part, recipe)` on the target solids for an exact B-Rep half-space cut with planar capping and preserved cavity openings.
+   - For `bulge`, `bend`, `twist`, `taper`, `surface`, and `fields`, update your parametric `build123d` dimensions, sketches, lofts, sweeps, or fillets to match the frozen target dimensions/profiles cleanly in exact B-Rep while preserving mating faces, wall thickness, and exact joint clearances.
+   Then publish and load the new revision using [CAD modeling](../cad-modeling/SKILL.md#edit-and-publish). Verify the published preview, `RUMI_CHECKS`, and that `meshState` has cleared the temporary edit and highlight before reporting a save.
 3. For explicit cancel or revert, close the current `id` to restore the saved preview. If the source changes, reread state and reopen controls.
 
 Failed previews preserve the last successful geometry and values. Failed execution leaves the original untouched on disk; report the error and allow reopening with the saved values. Unresolved controls are not a saved edit. A saved shape is not certified print-ready.

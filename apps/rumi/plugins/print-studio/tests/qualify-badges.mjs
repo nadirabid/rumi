@@ -1,4 +1,4 @@
-/** Exercise the production reviewer and DeepSeek API route against labeled Blender revisions. */
+/** Exercise the production reviewer and DeepSeek API route against labeled CAD revisions. */
 import assert from 'node:assert/strict'
 import { realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'

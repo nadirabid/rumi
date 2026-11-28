@@ -31,7 +31,7 @@ describe('mesh checks', () => {
       suggested: { scale: null, rotate: false },
     })
     expect(result.checks).toEqual([
-      { code: 'blender_validation', severity: 'pending', data: {} },
+      { code: 'cad_validation', severity: 'pending', data: {} },
     ])
     expect(positions).toEqual(original)
   })
@@ -39,7 +39,7 @@ describe('mesh checks', () => {
   it('adds fit checks and an explicit pending slice only when a build volume is given', () => {
     const result = analyzeMesh(box(), { volume })
     expect(result.checks.map(check => [check.code, check.severity])).toEqual([
-      ['size_ok', 'ok'], ['blender_validation', 'pending'], ['slicer_verification', 'pending'],
+      ['size_ok', 'ok'], ['cad_validation', 'pending'], ['slicer_verification', 'pending'],
     ])
     expect(result.status).toBe('review')
     expect(analyzeMesh(box(), { volume: { x: 5, y: 320, z: 325 } })).toMatchObject({ status: 'blocked', suggested: { scale: 5 / 12, rotate: true } })
@@ -65,9 +65,9 @@ describe('mesh checks', () => {
     expect(result.checks.some(check => check.code === 'oversized')).toBe(false)
   })
 
-  it('defers topology, intersection and overhang analysis to Blender', () => {
+  it('defers topology, intersection and overhang analysis to CAD validation', () => {
     for (const positions of [box().slice(9), [...box(), ...box()], [...box(), ...box(4, 4, 4, [20, 0, 20])]]) {
-      expect(analyzeMesh(positions).checks).toEqual([{ code: 'blender_validation', severity: 'pending', data: {} }])
+      expect(analyzeMesh(positions).checks).toEqual([{ code: 'cad_validation', severity: 'pending', data: {} }])
       expect(analyzeMesh(positions).status).toBe('review')
     }
     expect(codes([0, 0, 0, 12, 0, 0, 12, 12, 0])).toContain('flat_mesh')

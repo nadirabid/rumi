@@ -78,7 +78,7 @@ it.each([
   } finally { disposeModel(model.root) }
 })
 
-it('loads Blender USD geometry and derives its joint control from the Isaac relationships', async () => {
+it('loads CAD USD geometry and derives its joint control from the Isaac relationships', async () => {
   const model = await parseUsdModel(robotUsd().buffer)
   try {
     expect(model.motionIssue).toBeUndefined()
@@ -169,4 +169,21 @@ it('keeps legacy moving models inspectable while identifying their separate-prin
     expect(model.motionDefinitions[0].axes[0]).toMatchObject({ min: 0, max: 90 })
   } finally { disposeModel(model.root) }
   expect(usdRequiresSeparatePrint(new TextEncoder().encode(text.replace('PhysicsRevoluteJoint', 'PhysicsFixedJoint')))).toBe(false)
+})
+
+it('parses fixed-joint rumi:retainer and lock axis metadata for bayonet and threaded retainers', async () => {
+  const text = validateUsd(robotUsd())
+    .replace('PhysicsRevoluteJoint "DoorHinge"', 'PhysicsFixedJoint "CapLock"')
+    .replace('float physics:lowerLimit = 0\n', '')
+    .replace('float physics:upperLimit = 90\n', '')
+    .replace('string rumi:control = "Door"', 'token rumi:retainer = "bayonet"')
+    .replace('rel isaac:physics:robotJoints = </Model/DoorHinge>', 'rel isaac:physics:robotJoints = </Model/CapLock>')
+  const model = await parseUsdModel(new TextEncoder().encode(text).buffer)
+  try {
+    expect(model.motionIssue).toBeUndefined()
+    expect(model.robot.assembly.connections).toEqual([{
+      id: 'CapLock', parent: 'Body', child: 'Door', kind: 'fixed',
+      retainer: 'bayonet', axis: [0, 0, 1], pivot: [15, 0, 0],
+    }])
+  } finally { disposeModel(model.root) }
 })

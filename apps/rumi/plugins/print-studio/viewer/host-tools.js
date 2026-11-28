@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
-import { checkControlGeometry } from '../blender/control-geometry.js'
+import { checkControlGeometry } from '../cad/control-geometry.js'
 import { createHistory } from './document.js'
 import { STL_LIMITS, encodeStl, parseStl } from './stl.js'
 import { discoverModels, saveSelection } from './catalog.js'
@@ -82,9 +82,9 @@ export function registerViewerTools({
 
   register({
     name: 'viewer_load',
-    description: 'Select a Blender-exported USD in the Three.js viewer. Use models/<name>/model.usda; the viewer discovers these entries and reloads completed exports automatically. '
+    description: 'Select a CAD-exported USD in the Three.js viewer. Use models/<name>/model.usda; the viewer discovers these entries and reloads completed exports automatically. '
       + 'USD uses metres and Z up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. '
-      + 'Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. '
+      + 'Use cad_status and the cad-modeling skill for B-Rep solid editing with build123d Python scripts. Keep STEP/B-Rep originals and revision exports. '
       + 'Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. '
       + 'Executable .js/.mjs previews are disabled by project isolation; export USD instead. '
       + 'Reloading identical source bytes preserves staged controls and their review while requesting fresh renderer feedback. Changed source bytes invalidate them. '
@@ -255,7 +255,7 @@ export function registerViewerTools({
 
   register({
     name: 'viewer_controls',
-    description: 'Prepare, validate, review, and present temporary mesh edit controls. prepare (or open) stages controls without showing them and requires an expected effect and preserved features for every axis. validate generates actual-mesh before/after and displacement-overlay images for endpoints and combinations. Inspect every image, then review each axis and combined effects using the evidenceId; accept only useful, well-behaved edits, otherwise revise and prepare again. present requires accepted current evidence. Changes to the model, fields, parts or ranges require new validation. Pending work is reminded in context. Freeze the latest visible values before saving in Blender; close cancels. Read mesh-edit-controls for intent and quality guidance. Persistent joint controls are authored in USD, independently of this workflow.',
+    description: 'Prepare, validate, review, and present temporary visual mesh edit controls on the USD preview. prepare (or open) stages controls without showing them and requires an expected effect and preserved features for every axis. validate generates actual-mesh before/after and displacement-overlay images for endpoints and combinations. Inspect every image, then review each axis and combined effects using the evidenceId; accept only useful, well-behaved edits, otherwise revise and prepare again. present requires accepted current evidence. Changes to the model, fields, parts or ranges require new validation. Pending work is reminded in context. Freeze the latest visible values into a recipe JSON before translating the edit back into exact build123d B-Rep CAD edits (cut_solid for cuts; parametric dimensions, lofts, or fillets for deformations while preserving exact joints); close cancels. Read mesh-edit-controls for intent and quality guidance. Persistent joint controls are authored in USD, independently of this workflow.',
     parameters: {
       action: { type: 'string', required: true, enum: ['prepare', 'open', 'validate', 'review', 'present', 'freeze', 'save', 'close'] },
       id: { type: 'string', description: 'Prepared control review id for validate/review/present, or active analog id for freeze/close.' },
@@ -270,9 +270,9 @@ export function registerViewerTools({
       operation: { type: 'string', enum: ['surface', 'fields', 'parameters', 'bulge', 'bend', 'twist', 'taper', 'cut'], description: 'surface supports connected side-view profiles, radial bands, grooves, and explicit planar patches. fields blends displacement lattices. Other adapters are fixed USD edits. JavaScript parameters are disabled.' },
       form: { type: 'object', additionalProperties: true, description: 'For surface: profile {kind:"profile", at:[t,...], pinned?:[stationIndex,...], links?:{stationIndex:earlierStationIndex}, directions?:[[front,up],...], lateral?} binds p0,p1,... for unpinned stations; pinned stations stay at zero and have no control. Linked stations share the earlier station control and do not get a separate value. directions supplies unit vectors in the side-view plane; defaults point outward at each station. Equal linked directions create a rigid section. Values are travel in mm to 2–8 rising stations: t=.25 front mid-height, .5 crown, .75 back mid-height. Station displacements blend smoothly across the outline, including Z; the underside seam at 0/1 is pinned. lateral is 1–8, default 1. ring {kind:"ring",from,to,millimetres} binds amount. channel {kind:"channel",at:[degrees],from,to,widthMillimetres} binds depth in mm; width is arc length. facet {kind:"facet",from,to,planes:[{normal:[x,y,z],offset}],wallThickness?} binds amount in 0..1. Planes use unit outward normals and offsets in model mm; 1–12 planes must be opposing or perpendicular. At amount=1, points beyond each plane project onto it inside the band core. For oriented hollow shells, wallThickness in mm offsets inward-facing surfaces onto separate inner planes; ambiguous rim edges are rejected. Without it, only shallow patches or solid parts are suitable. from/to are normalized selection height, with edge fade .01–.5 (default .08). Every axis requires a control with reset 0 and range within ±1000. Verify thickness and fit; these mappings do not certify them.' },
       uAt: { type: 'number', description: 'For surface: front direction around model Z in degrees, default -90 (-Y). All selected parts share one bounds-derived frame.' },
-      finish: { type: 'string', enum: ['parameters', 'blender'], description: 'For parameter controls: parameters saves a final JavaScript model; blender finishes a temporary preview on a preserved original.' },
-      original: { type: 'string', description: 'Preserved source path for a Blender-finished preview.' },
-      edit: { type: 'string', description: 'Semantic Blender edit recipe, including how parameter values affect the original and what must be preserved.' },
+      finish: { type: 'string', enum: ['parameters', 'cad', 'blender'], description: 'For parameter controls: parameters saves a final JavaScript model; cad finishes a temporary preview on a preserved CAD source (blender accepted for legacy markers).' },
+      original: { type: 'string', description: 'Preserved source path for a CAD-finished preview.' },
+      edit: { type: 'string', description: 'Semantic CAD edit recipe, including how parameter values affect the original and what must be preserved.' },
       fieldsPath: { type: 'string', description: 'Project-local JSON file containing the fields array; use instead of inline fields for generated lattices.' },
       fields: { type: 'array', items: { type: 'object', additionalProperties: true }, description: 'For operation fields: {key, origin:[x,y,z], spacing:[x,y,z], dimensions:[nx,ny,nz], offsets:[dx,dy,dz,...]}. Model-local mm; x fastest. 2–16 samples per axis, zero boundary offsets, at most 12 fields. Values/ranges within -1..1, reset 0. Read mesh-edit-controls.' },
       center: { type: 'array', items: { type: 'number' }, description: 'Three model-local coordinates, mm.' },
@@ -336,7 +336,7 @@ export function registerViewerTools({
           try {
             const geometryRequest = record.source.controlReview.geometryRequest(args.id)
             if (geometryRequest) {
-              if (!validationConfig) throw new Error('Control geometry validation requires the bundled Blender configuration')
+              if (!validationConfig) throw new Error('Control geometry validation requires the bundled CAD configuration')
               const geometry = await checkControlGeometry(validationConfig, record.source.snapshotBytes(), geometryRequest, exec.signal)
               await record.source.poll({ force: true })
               const checked = record.source.controlReview.geometry(args.id, geometry)
@@ -402,10 +402,10 @@ export function registerViewerTools({
             } catch (error) { if (error.code !== 'ENOENT') throw error }
             if (metadata !== undefined) {
               if (!metadata || typeof metadata.original !== 'string' || !metadata.original || typeof metadata.edit !== 'string' || !metadata.edit) throw new Error('Invalid .rumi-preview.json: provide original and edit')
-              finish = 'blender'; original = metadata.original; edit = metadata.edit
+              finish = metadata.finish === 'blender' ? 'blender' : 'cad'; original = metadata.original; edit = metadata.edit
             }
           }
-          if (args.action === 'open' && finish === 'blender') {
+          if (args.action === 'open' && (finish === 'cad' || finish === 'blender')) {
             if (typeof original !== 'string' || !original) throw new Error('Provide the preserved original path')
             original = await realpath(resolve(record.cwd, original))
             const inside = relative(await realpath(record.cwd), original)
@@ -448,7 +448,7 @@ export function registerViewerTools({
         if (args.action === 'freeze') {
           await record.source.poll()
           const recipe = record.source.freezeShape(args.id)
-          if (recipe.finish === 'blender' && createHash('sha256').update(await readFile(recipe.original)).digest('hex') !== recipe.originalHash) throw new Error('Preserved original changed; reopen controls with the correct source')
+          if ((recipe.finish === 'cad' || recipe.finish === 'blender') && createHash('sha256').update(await readFile(recipe.original)).digest('hex') !== recipe.originalHash) throw new Error('Preserved original changed; reopen controls with the correct source')
           const directory = resolve(record.cwd, 'artifacts', 'shape-controls')
           await mkdir(directory, { recursive: true })
           const inside = relative(await realpath(record.cwd), await realpath(directory))

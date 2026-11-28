@@ -75,7 +75,24 @@ function robotDescription(specs, objects) {
         const directions = frames.map(frame => new THREE.Vector3(...axis).applyQuaternion(frame.quaternion).transformDirection(frame.object.matrixWorld))
         if (directions[0].distanceTo(directions[1]) > .00001) throw new Error('Fixed joint body frame rotations must agree at the saved rest pose')
       }
-      return connection
+      const retainer = attribute(path, 'rumi:retainer')
+      const axisName = attribute(path, 'physics:axis')
+      const retainerAxis = attribute(path, 'rumi:retainerAxis')
+      let axisVector
+      if (axisName !== undefined) {
+        const localAxis = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] }[axisName]
+        if (!localAxis) throw new Error('Joint axis must be X, Y or Z')
+        axisVector = new THREE.Vector3(...localAxis).applyQuaternion(frames[0].quaternion).transformDirection(frames[0].object.matrixWorld).toArray()
+      } else if (Array.isArray(retainerAxis) && retainerAxis.length === 3 && retainerAxis.every(Number.isFinite)) {
+        axisVector = [...retainerAxis]
+      }
+      const hasPos = attribute(path, 'physics:localPos0') !== undefined
+      return {
+        ...connection,
+        ...(retainer === undefined ? {} : { retainer }),
+        ...(axisVector === undefined ? {} : { axis: axisVector }),
+        ...(hasPos ? { pivot: frames[0].pivot.toArray() } : {}),
+      }
     }
     const parent = frames[0].object
     const axisName = attribute(path, 'physics:axis', 'X')

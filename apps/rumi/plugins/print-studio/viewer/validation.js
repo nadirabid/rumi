@@ -6,12 +6,12 @@ import { discoverModels } from './catalog.js'
 import { normalizePlacement } from './transform.js'
 import { parseStl, STL_LIMITS } from './stl.js'
 import { validateUsd, USD_MAX_BYTES } from './usd.js'
-import { runValidationStage } from '../blender/validation-runner.js'
+import { runValidationStage } from '../cad/validation-runner.js'
 import { runBullet } from '../bullet/runner.js'
 import { validationState, preserveMovement } from './validation-state.js'
 import { summarizeValidationReport, summarizeValidationState } from './validation-summary.js'
 
-const POLICY_VERSION = 6
+const POLICY_VERSION = 7
 const blocking = report => report.checks.some(check => check.count && check.severity === 'error')
 const passedMechanics = report => report?.status === 'passed' && report.assemblyVerified === true && report.coverage?.complete === true
 
@@ -189,7 +189,7 @@ export function createValidation(ctx, config, { view, notify, run = runValidatio
       throw error
     } finally { notify(id) }
   }
-  /** Run one Blender stage for the current revision; false when the revision changed meanwhile. */
+  /** Run one CAD validation stage for the current revision; false when the revision changed meanwhile. */
   async function runCheap(id, item, stage, current, signal) {
     const bytes = await bytesFor(id, item, signal)
     const format = new TextDecoder().decode(bytes.subarray(0, 10)).startsWith('#usda 1.0') ? 'usd' : 'stl'

@@ -58,66 +58,72 @@ exports[`delivers the saved model path in the first agent request on an ordinary
 
 exports[`documents creating multiple models and bringing a named entry into view 1`] = `
 {
-  "analog": "Prepare, validate, review, and present temporary mesh edit controls. prepare (or open) stages controls without showing them and requires an expected effect and preserved features for every axis. validate generates actual-mesh before/after and displacement-overlay images for endpoints and combinations. Inspect every image, then review each axis and combined effects using the evidenceId; accept only useful, well-behaved edits, otherwise revise and prepare again. present requires accepted current evidence. Changes to the model, fields, parts or ranges require new validation. Pending work is reminded in context. Freeze the latest visible values before saving in Blender; close cancels. Read mesh-edit-controls for intent and quality guidance. Persistent joint controls are authored in USD, independently of this workflow.",
-  "blender": "---
-name: blender-modeling
-description: "Create, import, revise, or restore meshes with Blender Python. Publish and validate the editable USD revision."
+  "analog": "Prepare, validate, review, and present temporary visual mesh edit controls on the USD preview. prepare (or open) stages controls without showing them and requires an expected effect and preserved features for every axis. validate generates actual-mesh before/after and displacement-overlay images for endpoints and combinations. Inspect every image, then review each axis and combined effects using the evidenceId; accept only useful, well-behaved edits, otherwise revise and prepare again. present requires accepted current evidence. Changes to the model, fields, parts or ranges require new validation. Pending work is reminded in context. Freeze the latest visible values into a recipe JSON before translating the edit back into exact build123d B-Rep CAD edits (cut_solid for cuts; parametric dimensions, lofts, or fillets for deformations while preserving exact joints); close cancels. Read mesh-edit-controls for intent and quality guidance. Persistent joint controls are authored in USD, independently of this workflow.",
+  "cad": "---
+name: cad-modeling
+description: "Create, import, revise, or restore B-Rep CAD models with build123d Python. Publish and validate STEP and editable USD revisions."
 ---
 
-# Blender modeling
+# CAD modeling
 
-Call \`blender_status\` for the executable and helper paths. Run Blender through the ordinary shell tool, using its permissions and cancellation; do not build a separate execution service. If Blender is unavailable, report the setup action returned by the tool.
+Call \`cad_status\` for the bundled \`build123d\` Python executable, export helper, and joints kit paths. Run scripts through the ordinary shell tool (\`"<executable>" "<script>"\`), using its permissions and cancellation; do not build a separate execution service. If the CAD runtime is unavailable, report the setup action returned by the tool.
 
 ## Use checks at each stage
 
 - **Explore drafts.** Keep testing alternatives while draft findings are open. Fix a defect immediately when it prevents the next experiment. Compare drafts against the requested silhouette, details and dimensions, and keep the best draft for comparison.
-- **Refine the fit.** Once the parts have the intended shape, locate crossings or lost clearance. After each repair, check that the shape, wall thickness and fit still meet the request. If an error count goes down but the design gets worse, return to the better draft and try a different construction.
+- **Refine the fit.** Once the parts have the intended shape, check exact surface clearances and per-part print orientation findings in \`RUMI_CHECKS\`. After each repair, verify that shape, wall thickness, and fit still meet the request. If an error count goes down but the design gets worse, return to the better draft and try a different construction.
 - **Validate the chosen revision.** Resolve blocking geometry and fit errors before calling \`validation_mechanics\` or \`validation_accept\`. A draft with open findings can still be used for visual review.
 
 ## Start from the joints kit
 
-For any model with more than one part, or with a wheel, hinge, slider, snap or gear, read \`printable-joints\` first and build with its kit. It supplies millimetre primitives, cleaned Boolean operations, joint recipes and \`K.publish\`, which writes the whole USD assembly, so the script needs no \`configure_robot\`. Design moving parts for [separate printing and assembly](../printable-joints/SKILL.md#separate-printing-for-moving-parts); this is required, not a choice. Revisions, the viewer and validation below apply unchanged.
+For any model with more than one part, or with a wheel, hinge, slider, snap, bayonet, fastener, or gear, read [printable-joints](../printable-joints/SKILL.md) first and build with its kit (\`joints\` path from \`cad_status\`). It supplies millimetre \`build123d\` primitives, clean Boolean helpers, separate-print joint recipes, disassembly actions, and \`K.publish\`, which writes the STEP, B-Rep, and USD assembly in one call. Design moving parts for [separate printing and assembly](../printable-joints/SKILL.md#separate-printing-for-moving-parts); this is required, not a choice.
 
 ## Solid construction defaults
 
-Use these defaults from the first modeling operation, including edits to existing models. They reduce mesh defects but do not establish printability.
+Use these defaults from the first modeling operation, including edits to existing models. They produce valid OpenCASCADE B-Rep solids and reduce print defects, though they do not certify print readiness.
 
-- Build each physical part from closed solid primitives or capped extrusions of simple, non-self-intersecting profiles with positive thickness. Prefer these methods over manually assembling vertices and faces; avoid zero-thickness surfaces, duplicate geometry and internal faces.
-- Use Boolean union to fuse material and difference to cut holes, with \`solver = 'EXACT'\`. Give solids intended for union meaningful overlap and extend through-hole cutters beyond both outer surfaces. Avoid tangent-only connections and unnecessarily coincident boundaries; inspect the result even with the Exact solver.
-- Joining Blender objects does not fuse their geometry. Union pieces intended to form one solid, while keeping separate mechanical parts and their clearances distinct.
-- Establish the main solid before bevels and other finishing operations. Keep bevel widths compatible with nearby features and wall thickness; inspect the evaluated result for collapsed features and self-intersections.
-- Reserve voxel remeshing for organic geometry where changes to topology, sharpness and detail are acceptable. Preserve the original, choose a voxel size that resolves the smallest required feature, and recheck dimensions. Do not use it as routine repair for threads, mating surfaces, thin walls or moving-part clearances, or remesh separate moving parts into one solid.
-- Inspect evaluated geometry after significant topology changes. \`Mesh.validate()\` checks and can repair mesh data; it does not establish manifoldness. Use 3D Print Toolbox findings to diagnose defects. Prefer correcting the construction that caused a defect over broad automatic cleanup; inspect any cleanup result for lost features and changed dimensions.
+- Work directly in **millimetres, Z up** using \`build123d\` (\`Box\`, \`Cylinder\`, \`Sphere\`, \`Cone\`, \`extrude\`, \`revolve\`, \`loft\`, \`sweep\`, and 2D sketches). Cursor snapshots, measurements, and highlight regions use the exact same model-local millimetre Z-up coordinates.
+- Give every physical part a unique \`.label\` (its part name) and an optional \`.color\` (\`(r, g, b)\` tuple in \`0..1\` or \`build123d.Color\`). Each part must be a single closed \`Solid\` (not disconnected shells in one part).
+- Fuse material with exact B-Rep Boolean union (\`a + b\`) and cut holes with Boolean difference (\`a - cutter\`). Give fused pieces meaningful overlap (at least 0.5 mm) and extend through-hole cutters past both outer faces. Keep separate mechanical parts and their clearances distinct.
+- Build the primary solid before adding \`fillet\` or \`chamfer\` edges. Keep fillet and chamfer radii strictly smaller than adjacent wall thicknesses and edge lengths, and check \`BRepCheck\` status in \`RUMI_CHECKS\`.
+- For symmetric objects, construct one half and mirror it cleanly (\`mirror(part, Plane.YZ)\` or \`K.mirror\`). Keep mating surfaces, bores, and resting faces analytically flat or cylindrical for accurate printing and clean print-bed orientation.
+- Design each separate part with a flat resting face when practical so it prints cleanly without unnecessary supports. Inspect \`printOrientations\` in \`RUMI_CHECKS\` and \`report.json\` to check each part's bed-contact area and overhangs in its optimal print orientation rather than its assembled pose.
 
 ## Edit and publish
 
-1. Read the current \`meshState\` context and the existing project files. Create another model folder only when the user explicitly requests or agrees to a separate model; clarify ambiguous intent before writing files. For edits and fixes, publish revisions in the existing model folder. Preserve existing models. For an existing Blender model, find its latest successful revision report under \`models/<name>/revisions/\` and open that report's \`blend\` path. Use the selected revision when the user asks to revert. For a USD, legacy GLB or STL import, use the helper's \`import_mesh\`. Legacy JavaScript previews are disabled by project isolation; migrate their actual geometry to USD using confined tools rather than approximating it from screenshots. Do not overwrite their source.
-2. Write a reproducible Python script under \`source/\`. Run \`"<executable>" --background --factory-startup --python-exit-code 1 --python "<script>"\`. This runs a full Blender process without a window; ordinary system Python cannot import \`bpy\`.
-3. Work in **metres, Z up** in Blender. Rumi's viewer, measurements and Gaussian regions use **millimetres, Z up**. Divide model-local cursor/highlight coordinates and radii by 1,000 before using them in Blender; account for object transforms when selecting vertices. Standard USD export/import handles the USD coordinate frame. Do not apply viewer placement to an editing selection twice.
-4. Follow the solid construction defaults above when choosing Blender modifiers and mesh operations. For symmetric objects construct one half and mirror it about an explicit plane; measure symmetry after evaluated modifiers. Keep planar faces planar, bevel widths consistent, sharp boundaries deliberate, and smooth normals confined to intended smooth surfaces. More subdivisions or smooth shading alone do not correct a lumpy silhouette. Inspect front, side and three-quarter views. Distinguish topology checks from visual/reference fidelity.
-5. Load the helper returned by \`blender_status\` with \`helper = runpy.run_path(helper_path)\`, then call \`helper["publish"]("models/<name>")\`. Use \`runpy\` so importing the helper does not write bytecode into the installed application. It saves an immutable \`.blend\` and USD revision, prints the paths and \`RUMI_CHECKS\`, and atomically updates \`model.usda\`. Keep named parts, modifiers, and movement declarations in the editable original. Preview limits are 200,000 triangles and 64 MiB; preserve detailed assets separately if a lighter preview is required. Do not silently simplify the print deliverable.
-6. Call \`viewer_load\` on \`models/<name>/model.usda\`. Saved models display independently of validation. Check \`RUMI_CHECKS\` and \`meshState.validation\` for findings. Use \`viewer_camera\`, \`viewer_cursor_snapshot\`, and \`viewer_highlight\` for iteration.
-7. Before ending the turn, follow [Name Model Regions](../name-model-regions/SKILL.md) for the final revision you leave saved.
+1. Read the current \`meshState\` context and the existing project files. Create another model folder only when the user explicitly requests or agrees to a separate model; clarify ambiguous intent before writing files. For edits and fixes, revise the script in \`source/\` and publish new revisions in the existing model folder. Preserve existing models. For an imported STEP or B-Rep asset, use \`helper["import_step"](path)\` or \`helper["import_brep"](path)\`. Legacy JavaScript previews are disabled by project isolation; migrate their actual geometry into \`build123d\` rather than approximating it from screenshots.
+2. Write a reproducible Python script under \`source/\` (for example \`source/build_car.py\`). Run \`"<executable>" "source/build_car.py"\` through the shell tool.
+3. Load the helper returned by \`cad_status\` with \`helper = runpy.run_path(helper_path)\` so importing never writes bytecode into the installed application. Call \`helper["publish"]("models/<name>", parts, assembly=...)\` (or \`K.publish(...)\` from the joints kit).
+4. \`publish\` tessellates each B-Rep solid cleanly (<= 200,000 triangles and <= 64 MiB), saves an immutable revision under \`models/<name>/revisions/<uuid>/\` containing \`model.step\`, \`parts/<name>.brep\`, \`assembly.json\`, \`model.usda\`, and \`report.json\`, atomically updates \`models/<name>/model.usda\`, prints \`RUMI_MODEL <json>\`, and spawns \`cad/validate.py\` to print \`RUMI_CHECKS <json>\`.
+5. Call \`viewer_load\` on \`models/<name>/model.usda\`. Saved models display independently of validation. Inspect \`RUMI_CHECKS\` (exact \`BRepExtrema\` part clearances, solid validity, and per-part print-orientation overhangs/bed contact) and \`meshState.validation\`. Use \`viewer_camera\`, \`viewer_cursor_snapshot\`, and \`viewer_highlight\` for visual inspection.
+6. Before ending the turn, follow [Name Model Regions](../name-model-regions/SKILL.md) for the final revision you leave saved.
 
-## Efficient geometry edits
+## Undo and revision restore
 
-For rim or outline proximity, use the joints kit's \`K.outline_distances(points, outlines)\` instead of Python loops over every vertex and segment. Pass finite 2D coordinates in one consistent unit; outlines are closed automatically. The returned NumPy array gives exact point-to-segment distances in the same unit, including zero-length segments. For an X/Z rim band in millimetres: \`distances = K.outline_distances([(v.co.x * 1000, v.co.z * 1000) for v in bm.verts], outlines_mm)\`, then select \`[v for v, distance in zip(bm.verts, distances) if distance < band_mm]\`. Account for object transforms when the outline is not in mesh-local coordinates. Keep the same smoothing operations, topology and publish checks.
+To revert to an earlier saved revision, call \`helper["restore_revision"]("models/<name>", "<revision-directory-name>")\` instead of rebuilding it. Identify the intended revision from its \`report.json\` and preview; do not guess from directory ordering. Restoration atomically restores the exact saved \`model.usda\`, retains all revisions, and returns the matching \`step\` and \`brep\` paths. Call \`viewer_load\` on \`models/<name>/model.usda\` afterward. Restoration leaves validation pending; run explicit validation before claiming acceptance.
 
-Reuse the editable original of the intended revision when changing only one feature; do not regenerate unrelated geometry. For visual inspection use \`viewer_camera\` and \`viewer_cursor_snapshot\` before starting separate Blender renders. Preserve full geometry and clearance checks on each published edit.
+## Translate frozen visual edit controls to B-Rep
 
-To revert to an existing saved revision, call \`helper["restore_revision"]("models/<name>", "<revision-directory-name>")\` instead of rebuilding it. Identify the intended revision from its report and preview; do not guess from directory ordering. This atomically restores the exact saved USD, retains all revisions and returns the matching \`.blend\` path. It leaves the current Blender scene unchanged, so open the returned \`.blend\` before further edits. Call \`viewer_load\` on the canonical \`model.usda\` afterward. Restoration leaves validation pending; use the explicit validation tools before claiming acceptance or readiness.
+When the person uses \`viewer_controls\` to explore a shape or planar cut visually on the USD preview and accepts their adjustment:
+
+1. Freeze the controls with \`viewer_controls\` (\`action: freeze\`) to write the recipe JSON under \`artifacts/shape-controls/\`.
+2. Load the recipe in your \`build123d\` script with \`recipe = helper["load_control_recipe"](recipe_path)\` and inspect \`summary = helper["summarize_control_recipe"](recipe)\`.
+3. Apply the frozen input cleanly in exact B-Rep:
+   - **Planar cut (\`operation == "cut"\`):** call \`part = helper["cut_solid"](part, recipe)\` on each target solid to perform an exact B-Rep half-space cut with planar capping and preserved cavity openings.
+   - **Deformations (\`bulge\`, \`bend\`, \`twist\`, \`taper\`, \`surface\`, \`fields\`):** read the frozen values, target planes, profile station shifts, or displacement summary from \`summary\`, then update your parametric \`build123d\` dimensions, sketch points, lofts, sweeps, or fillets to realize that exact shape in clean B-Rep while preserving wall thickness, mating faces, and joint clearances.
+4. Publish the updated B-Rep model, reload with \`viewer_load\`, and confirm \`RUMI_CHECKS\` and \`meshState\` before reporting the saved edit.
 
 ## Declare physical movement
 
-Every multi-part or movable model requires a complete assembly description. Give each physical piece a unique mesh name and include retaining pins, caps and axles. Disconnected solids cannot become one rigid piece by grouping or joining their mesh objects. Preserve requested features, connectors, names, controls and movement ranges through repairs and conversions.
+Every multi-part or movable model requires a complete assembly description. Give each physical piece a unique part name and include retaining pins, caps, and axles. Disconnected solids cannot become one rigid piece by grouping them. Preserve requested features, connectors, names, controls, and movement ranges through repairs.
 
-Use [Printable Joints](../printable-joints/SKILL.md) for kit-built assemblies. For a custom USD exporter callback, follow [USD assembly declarations](references/usd-assembly.md) for joint frames, limits, and metadata.
+Use [Printable Joints](../printable-joints/SKILL.md) for kit-built assemblies. For custom assembly authoring, follow [USD assembly declarations](references/usd-assembly.md) for joint frames, retainers, disassembly actions, limits, and metadata.
 
 ## Movement controls
 
 Use [control-widgets](../control-widgets/SKILL.md) to choose widgets and labels. Publish control layout changes in a model revision. Operating those controls afterward changes only the local preview pose, not saved geometry or validation input; pose changes need no freeze or save. Keep physical joint declarations and connectors intact when editing the UI.
 
-Without UI declarations, revolute and prismatic joints generate sliders labeled by \`rumi:control\` or the child mesh name. To choose widgets, set the default prim’s string attribute \`rumi:motionControls\` to a JSON array. Each item has \`kind\`, \`label\`, and \`axes\`; each axis references an absolute joint prim path and may set \`step\`. For example:
+Without UI declarations, revolute and prismatic joints generate sliders labeled by \`rumi:control\` or the child mesh name. To choose widgets, pass \`controls\` to \`K.publish\` (or set \`assembly["controls"]\` / \`rumi:motionControls\`). Each item has \`kind\`, \`label\`, and \`axes\`; each axis references an absolute joint prim path and may set \`step\`:
 
 \`\`\`python
 controls = [dict(kind="pad", label="Aim", axes=[
@@ -128,35 +134,33 @@ K.publish("models/turret", root=base, joints=joints, mode="separate",
           steps=steps, controls=controls)
 \`\`\`
 
-The kit writes joints under \`/Model/Joints/<USD identifier of joint id>\`. Use the actual exported paths. For direct USD authoring, set \`root.CreateAttribute("rumi:motionControls", Sdf.ValueTypeNames.String, custom=False).Set(json.dumps(controls))\` inside \`configure_robot\`.
-
 A slider or curve references one movable joint; a pad references two independent movements, horizontal then vertical. Joint limits supply axis ranges; reset returns to the saved pose at zero. Steps use degrees for rotation and millimetres for translation; defaults are 1 degree or 0.1 mm, capped to the range width. UI declarations cannot override limits or reset. Unspecified movements retain automatic sliders.
 
 Joints sharing \`rumi:control\` share one value and must use matching units and overlapping limits. Reference that group once through any member joint. Repeated bindings, missing or fixed joints, unsupported widgets, and invalid steps withhold movement controls with a viewer diagnostic; geometry stays visible. The preview supports trees with up to 12 independent movements and preserves fixed descendants. Closed loops remain unsupported.
 
-After publishing, inspect \`viewer_load\` feedback under \`design.motion\` and exercise each axis and reset. Invalid UI metadata does not change the physical validation result. Preview movement does not establish mechanical feasibility. Temporary mesh edits disable movement controls while keeping the panel visible. Reset the pose before source-bound cursor edits. Compatible pose values survive revisions and model switching while the viewer remains mounted; reopening starts at the saved pose.
+After publishing, inspect \`viewer_load\` feedback under \`design.motion\` and exercise each axis and reset. Invalid UI metadata does not change the physical validation result. Preview movement does not establish mechanical feasibility. Temporary mesh edits disable movement controls while keeping the panel visible. Reset the pose before source-bound cursor edits.
 
 ## Clearances and retention
 
-Keep at least 0.3 mm between separate parts everywhere in the saved pose: radial gaps in bores, end-play and door-to-frame gaps. \`RUMI_CHECKS\` reports \`insufficient_clearance\` as an error below 0.2 mm and lists the pairs and gaps. Parts joined by a fixed joint may touch.
+Keep at least 0.3 mm between separate moving parts everywhere in the saved pose: radial gaps in bores, end-play, and door-to-frame gaps. \`RUMI_CHECKS\` measures exact B-Rep surface-to-surface clearance (\`BRepExtrema_DistShapeShape\`) and reports \`insufficient_clearance\` as an error below 0.2 mm, listing the pairs and exact gaps. Parts joined by a \`fixed\` joint may touch flush without error, while overlapping fixed volumes still fail.
 
-Play is expected. Retention passes when the connector stops the part; the pivot may travel up to 2 mm and tilt up to 15°. Never reduce clearances to reduce drift.
+Play is expected. Retention passes when the connector stops the part; the pivot may travel up to 2 mm and tilt up to 15°. Never tighten clearances to reduce drift.
 
-Repair \`unretained_part\` and \`unstable_at_rest\` by adding or enlarging the feature that captures the part: a cap, shoulder, flange or collar wider than the bore, or a pin through both knuckles. Do not tighten the fit. Repair \`insufficient_clearance\` by widening the listed gaps while keeping the capturing feature.
+Repair \`unretained_part\` and \`unstable_at_rest\` by adding or enlarging the capturing feature: a bayonet cap, snap flange, collar wider than the bore, or removable pin with locking cap. Do not tighten the fit. Repair \`insufficient_clearance\` by widening the listed gaps while keeping the capturing feature.
 
 ## Pointing and print export
 
-Follow [Clarify Mesh Changes](../clarify-mesh-changes/SKILL.md) for captured pointing references. Recompute selections after a topology change. Gaussian regions describe soft influence around a point.
+Follow [Clarify Mesh Changes](../clarify-mesh-changes/SKILL.md) for captured pointing references. Recompute selections after a geometry change. Gaussian regions describe soft influence around a point.
 
-Export print meshes from the intended evaluated solids. Follow [FDM Design](../fdm-design/SKILL.md) for geometry constraints and [Prepare Print Job](../prepare-print-job/SKILL.md) for slicing and placement.
+Follow [FDM Design](../fdm-design/SKILL.md) for printability constraints and [Prepare Print Job](../prepare-print-job/SKILL.md) for plate arrangement and Bambu Studio handoff.
 
 ## Validate a finished revision
 
-Every \`publish\` checks the new revision in a separate Blender process and prints \`RUMI_CHECKS <json>\` with Toolbox geometry findings, part clearance, any assembly declaration error and \`dimensionsMm\`. Only findings with a nonzero count appear. Read the report after each publish and judge warnings against the intended design. If the status is \`unavailable\`, call \`blender_status\` once in this project and publish again. Use the built-in validation tools to check the chosen revision.
+Every \`publish\` checks the new revision in a clean CAD Python subprocess and prints \`RUMI_CHECKS <json>\` with B-Rep solid validity, mesh/overhang findings (evaluated per part in its optimal print orientation), exact part-to-part clearance, any assembly declaration error, \`printOrientations\`, and \`dimensionsMm\`. Only findings with a nonzero count appear. Read the report after each publish and judge warnings against the intended design. If the status is \`unavailable\`, call \`cad_status\` once in this project and publish again.
 
-The open viewer automatically checks the selected saved revision and cancels superseded checks; it does not accept revisions or start repair turns. Explicit tools reuse completed stages. When the design is ready and \`RUMI_CHECKS\` has no blocking errors, call \`validation_mechanics\` once with the model \`path\`. The host re-runs any missing cheap checks for that revision first and stops with their findings if one blocks. Otherwise it runs Bullet, the costly stage (up to ten minutes), testing whole-assembly contacts, retention, sampled movement, declared sequences and removal paths with only the root held. Do not weaken settings, omit parts, narrow movement or substitute a reduced assembly to obtain a pass; incomplete coverage remains unverified. Then call \`validation_accept\` with the \`path\` and \`fingerprint\` it returned. For moving assemblies, declare removal paths for every nonroot part; missing paths produce \`assembly_path_required\` and block acceptance while retaining the motion findings. Only an \`accepted\` result supports an acceptance claim, and it does not certify slicing, deformation, strength, assembly accessibility or print readiness. A printer volume that was never configured means printer fit is unchecked.
+The open viewer refreshes check status for the selected saved revision without accepting revisions or starting repair turns. Explicit tools reuse completed stages. When the design is ready and \`RUMI_CHECKS\` has no blocking errors, call \`validation_mechanics\` once with the model \`path\`. The host runs any missing assembly, geometry, and fit checks for that revision first and stops with their findings if one blocks. Otherwise it runs Bullet (up to ten minutes), testing whole-assembly contacts, retention, sampled movement, declared sequences, and disassembly \`actions\` / \`path\` steps with only the root held. Do not weaken settings, omit parts, narrow movement, or substitute a reduced assembly to obtain a pass; incomplete coverage remains unverified. Then call \`validation_accept\` with the \`path\` and \`fingerprint\` it returned. For moving assemblies, declare disassembly steps for every nonroot part; missing steps produce \`assembly_path_required\` and block acceptance while retaining motion findings. Only an \`accepted\` result supports an acceptance claim, and it does not certify slicing, deformation, strength, assembly accessibility, or print readiness. A printer volume that was never configured means printer fit is unchecked.
 
-After any repair or placement change, publish again and repeat for the new revision; never report a previous revision's results as current. Validation never starts follow-up turns, so finish repairs in this turn. Preserve requested features, connectors, controls and full movement ranges. If checks fail or cannot be resolved safely, report the remaining limitation briefly instead of claiming acceptance.
+After any repair or placement change, publish again and repeat for the new revision; never report a previous revision's results as current. Validation never starts follow-up turns, so finish repairs in this turn. Preserve requested features, connectors, controls, and full movement ranges. If checks fail or cannot be resolved safely, report the remaining limitation briefly instead of claiming acceptance.
 ",
   "clarification": "---
 name: clarify-mesh-changes
@@ -177,7 +181,7 @@ For a new mark, use the cursor capture attached to that utterance or call \`view
 
 ## Use the selection for the edit
 
-Whenever the requested edit depends on a selected region, identify its geometry before the first Blender call. Read the STL at the captured or highlighted mesh path and use its triangles to drive the edit. If the reference is a saved surface name, resolve its triangles on the current model. Carry the same selection through follow-ups while it remains the intended target. Resolve it again if the model revision changes. The hit point identifies where the person clicked. The full selection determines the region’s extent.
+Whenever the requested edit depends on a selected region, identify its geometry before the first CAD edit. Read the STL at the captured or highlighted mesh path and use its triangles to drive the edit. If the reference is a saved surface name, resolve its triangles on the current model. Carry the same selection through follow-ups while it remains the intended target. Resolve it again if the model revision changes. The hit point identifies where the person clicked. The full selection determines the region’s extent.
 
 When another part must fit the selection, derive its mating geometry from the selected surface or the 3D edge it shares with adjacent faces. Check clearance and overlap across the full interface, including edges and corners, before reporting the fit.
 
@@ -189,7 +193,7 @@ For an editable model loaded with \`viewer_load\`, call \`viewer_highlight\` wit
 
 When the geometry supports a useful feature name, supply \`regionName\` and use a fresh path for each distinct overlay. Use the person's language and choose words they can reuse, such as “tail tip” or “inner corner of the tail.” Match the name to the triangles the overlay covers. If the person asks what they pointed at, show the captured selection before answering. Leave the name unset when the geometry only supports an unnamed patch.
 
-Copy evaluated triangles from the source for exact parts. For steering-wheel spokes and wheel axles, put just those disconnected patches in one STL. For a band on a curved body, clip copies of the body faces to the band and export the resulting surface. The viewer draws the submitted triangles directly. A closed cutting volume would display its own faces. For Blender sources authored in metres, transform evaluated triangle vertices by the object world matrix and multiply by 1000 once. Keep the editable original intact.
+Copy evaluated triangles from the source for exact parts. For steering-wheel spokes and wheel axles, put just those disconnected patches in one STL. For a band on a curved body, clip copies of the body faces to the band and export the resulting surface. The viewer draws the submitted triangles directly. A closed cutting volume would display its own faces. \`build123d\` parts are already in model-local millimetres, Z up; keep the editable source intact.
 
 The tool waits for a matching receipt from the visible viewer. Only \`rendered\` confirms rendering; \`not_rendered\` or \`superseded\` does not. On failure, explain that the highlight is not confirmed, ask the person to open the preview, and retry. Never say “I have highlighted it” before a \`rendered\` result. Rendering still does not establish that the person saw or approved it. Use their reply in context, including corrections or a choice you offered. On \`stale_model\`, read the state again and resolve build errors. Ask for a fresh pin for a person's selection or recompute a proposed region against the new source. Highlights are temporary and clear when the source revision changes or another model loads. Imported STL objects do not support this tool.
 
@@ -233,7 +237,7 @@ Preserve the requested design while considering these constraints. They guide de
 2. **Inspect the geometry you have.** Read the current \`meshState\` and the model's source. Record overall dimensions, the thinnest walls and posts, hole diameters, gap sizes, and which parts must move or stay separate. These numbers decide every constraint below; do not assess them from the render alone.
 3. **Choose an orientation.** Pick the resting face for the first layer, then check what the choice costs: supported area, bridge spans, layer direction against expected load, and whether surface finish matters on the face touching the bed. Orientation is a design decision made now, not a slicer setting fixed later.
 4. **Apply the constraints that the facts and the geometry disagree on.** Each numbered constraint above names a decision. When a requested design cannot meet one, say which and why, and offer the smallest change that resolves it before building.
-5. **Validate before claiming readiness.** Run the model checks described in [blender-modeling](../blender-modeling/SKILL.md#validate-a-finished-revision), then slice and inspect the preview for unsupported regions, thin walls and layer time. Report what was checked and what remains unverified.
+5. **Validate before claiming readiness.** Run the model checks described in [cad-modeling](../cad-modeling/SKILL.md#validate-a-finished-revision), then slice and inspect the preview for unsupported regions, thin walls and layer time. Report what was checked and what remains unverified.
 
 ## Report the checks before recommending a change
 
@@ -265,29 +269,29 @@ This project is for designing and creating 3d prints.
 
 The primary plugin to enable that is print-studio, a Cordis plugin.
 
-The plugin provides the ability to design, iteratively, the 3d mesh through its accompanying renderer.
+The plugin provides the ability to design, iteratively, the 3d model through its accompanying renderer.
 
-The plugin provides the ability to prep and print the mesh to the user's personal 3D printer.
+The plugin provides the ability to prep and print the model to the user's personal 3D printer.
 
 ### Editable designs
 
-Use background Blender Python scripts for saved mesh assets and Three.js for viewing or parameterized interactive models. When someone asks to adjust a model themselves, read \`mesh-edit-controls\`, infer the desired geometric variation and preserved features, and choose or construct faithful bindings before exposing controls. Generate model-specific fields when appropriate; do not depend on prepared presets or silently substitute a completed edit. Call \`blender_status\`, then read the \`blender-modeling\` skill. Keep editable \`.blend\` originals and immutable revisions under \`models/<name>/revisions/\`; publish \`models/<name>/model.usda\` with the provided helper. Create a separate model only after an explicit user request or agreement; otherwise edit the existing model and keep its revisions in the same model folder. Preserve existing models when adding an authorized model. The viewer discovers model folders and reloads completed USD exports automatically.
+Use \`build123d\` B-Rep CAD Python scripts for saved 3D models and Three.js for viewing. When someone asks to adjust a model themselves, read \`mesh-edit-controls\`, infer the desired geometric variation and preserved features, and choose or construct faithful bindings before exposing controls. Generate model-specific fields when appropriate; do not depend on prepared presets or silently substitute a completed edit. Call \`cad_status\`, then read the \`cad-modeling\` skill. Keep reproducible \`build123d\` scripts under \`source/\` and immutable STEP, B-Rep, and USD revisions under \`models/<name>/revisions/\`; publish \`models/<name>/model.usda\` with the provided helper. Create a separate model only after an explicit user request or agreement; otherwise edit the existing model and keep its revisions in the same model folder. Preserve existing models when adding an authorized model. The viewer discovers model folders and reloads completed USD exports automatically.
 
-Blender works in metres, Z up. Standard USD files use metres, Z up; the viewer converts them to millimetres, Z up. Cursor and highlight regions are model-local millimetres before viewer placement: divide by 1,000 for Blender and respect object transforms. Keep named parts and modifiers. Use the existing shell tool to execute scripts with Blender's \`--background --python-exit-code 1 --python\` options; no Blender window is needed.
+\`build123d\` works directly in **millimetres, Z up** — matching the viewer, measurements, cursor snapshots, and highlight regions with no unit scaling. Standard exported USD files use metres, Z up; the helper and viewer handle that conversion automatically. Keep named parts and parametric construction in your source scripts. Use the existing shell tool to run scripts with the \`cad_status\` Python executable (\`"<executable>" "<script>"\`); no GUI window is needed.
 
-Call \`viewer_load\` with a USD path to bring it into view; use the current \`meshState\` context for models, selection, load errors and measurements. Self-contained static USD previews support at most 64 MiB and 200,000 triangles. Keep detailed print originals when explicitly making a lighter preview. Failed exports or loads retain the last successful preview and are not completed edits. Use \`viewer_transform\` for placement and \`viewer_camera\` for the viewing angle. Preview checks do not establish print readiness.
+Call \`viewer_load\` with a USD path to bring it into view; use the current \`meshState\` context for models, selection, load errors and measurements. Self-contained static USD previews support at most 64 MiB and 200,000 triangles. Keep detailed STEP/B-Rep originals when explicitly making a lighter preview. Failed exports or loads retain the last successful preview and are not completed edits. Use \`viewer_transform\` for placement and \`viewer_camera\` for the viewing angle. Preview checks do not establish print readiness.
 
-Executable \`model.js\`/\`model.mjs\` previews are disabled by project isolation. Preserve them when migrating their actual geometry into Blender. Do not modify the viewer or approximate an existing model from a screenshot.
+Executable \`model.js\`/\`model.mjs\` previews are disabled by project isolation. Preserve them when migrating their actual geometry into \`build123d\`. Do not modify the viewer or approximate an existing model from a screenshot.
 
 ### Movable prints
 
-Build physical connectors and publish a complete assembly for multi-part or movable models, following \`blender-modeling\`, \`printable-joints\` and \`control-widgets\`. All moving physical parts must print separately and assemble afterward; follow the separate-printing requirement in \`printable-joints\` before designing connectors. Preserve rotation and sliding after assembly. Do not offer print-in-place, silently relabel captive geometry, or fix moving joints to bypass this requirement. Use a compatible \`printable-joints\` recipe for each wheel, hinge, slider or snap before designing one by hand. Include every mesh, pin, cap, connection and movement control; preserve requested movement and full ranges during repairs. Keep at least 0.3 mm between separate parts and capture parts with connector geometry rather than tight fits; see \`blender-modeling\`. Use findings from each publish to guide iteration. When the design is ready, resolve blocking findings and follow the finished-revision workflow in \`blender-modeling\`. The open viewer refreshes checks for the selected saved revision automatically; explicit validation tools reuse completed stages. No automatic repair turns run. Models remain visible while validation and repair run. Read the matching \`meshState.validation\` report before claiming acceptance. Unsupported or incomplete checks remain unverified; a probe pass does not certify material strength or print readiness.
+Build physical connectors and publish a complete assembly for multi-part or movable models, following \`cad-modeling\`, \`printable-joints\` and \`control-widgets\`. All moving physical parts must print separately and assemble afterward; follow the separate-printing requirement in \`printable-joints\` before designing connectors. Preserve rotation and sliding after assembly. Do not offer print-in-place, silently relabel captive geometry, or fix moving joints to bypass this requirement. Use a compatible \`printable-joints\` recipe for each wheel, hinge, slider, bayonet, snap, or gear before designing one by hand. Include every mesh, pin, cap, axle, connection, disassembly step, and movement control; preserve requested movement and full ranges during repairs. Keep at least 0.3 mm between separate moving parts and capture parts with assembled retainer geometry rather than tight fits; see \`cad-modeling\`. Use findings from each publish (\`RUMI_CHECKS\`) to guide iteration. When the design is ready, resolve blocking findings and follow the finished-revision workflow in \`cad-modeling\`. The open viewer refreshes checks for the selected saved revision automatically; explicit validation tools reuse completed stages. No automatic repair turns run. Models remain visible while validation and repair run. Read the matching \`meshState.validation\` report before claiming acceptance. Unsupported or incomplete checks remain unverified; a probe pass does not certify material strength or print readiness.
 
 ### Model references
 
 Use the request's captured model selection as a default for an unnamed model, with explicit names and captured pointing references taking precedence. Later browsing does not redirect ongoing work. Clarify conflicting references before editing. Call \`viewer_working_model\` with a discovered entry before inspecting or editing it; update the declaration when changing targets and clear it before clarification. The green dot identifies your declared work independently of the selected model and clears when your agent stops. Read the current \`meshState\` context for both selection and working models. Use \`viewer_load\` only to change what the person sees.
 
-The viewer renders every source through USD in Three.js. Keep editable originals; Publish data-only USD from the confined modeling tools; STL imports are converted automatically. Declare assembly joints for movement controls; temporary edit controls use the supported USD deformation operations.
+The viewer renders every source through USD in Three.js. Keep editable \`build123d\` source scripts and STEP/B-Rep revisions; publish data-only USD from the confined modeling tools; STL imports are converted automatically. Declare assembly joints for movement controls; temporary edit controls use the supported USD preview deformation operations and freeze a recipe JSON that you translate back into exact B-Rep CAD edits.
 ",
   "interactive": "---
 name: control-widgets
@@ -296,7 +300,7 @@ description: "Choose and declare sliders, two-axis pads, and scalar curve widget
 
 # Control widgets
 
-Choose a widget after identifying what the person should be able to vary. Use [mesh-edit-controls](../mesh-edit-controls/SKILL.md) to design geometric edits and [blender-modeling](../blender-modeling/SKILL.md#movement-controls) to bind joint movement.
+Choose a widget after identifying what the person should be able to vary. Use [mesh-edit-controls](../mesh-edit-controls/SKILL.md) to design geometric edits and [cad-modeling](../cad-modeling/SKILL.md#movement-controls) to bind joint movement.
 
 ## Choose the widget
 
@@ -318,91 +322,89 @@ Controls support keyboard input and per-control reset. Verify that each axis cha
 ",
   "joints": "---
 name: printable-joints
-description: "Build separately printed assemblies with Blender joint recipes for wheels, hinges, sliders, snaps, and gears."
+description: "Build separately printed assemblies with build123d CAD joint recipes for wheels, hinges, sliders, snaps, bayonets, threads, and gears."
 ---
 
 # Printable joints
 
-\`blender_status\` returns a \`joints\` path. Load it at the top of the build script:
+\`cad_status\` returns a \`joints\` path (\`cad/rumi_joints.py\`). Load it at the top of your \`build123d\` script:
 
 \`\`\`python
 import runpy, types
 K = types.SimpleNamespace(**runpy.run_path(joints_path))
 \`\`\`
 
-The kit works in **millimetres, Z up** and creates the Blender geometry in metres for you. Do not mix raw \`bpy\` coordinates with kit calls. Parts keep identity transforms, which the joint frames need.
+The kit works directly in **millimetres, Z up** using exact OpenCASCADE B-Rep solids (\`build123d\`). Every recipe builds **separately printable** parts with real retaining hardware (quarter-turn bayonet caps, split snap barbs, removable pins, end-stop plugs, or collars), returns a \`RecipeResult\` with \`.parts\`, \`.joints\`, \`.steps\`, and \`.features\`, and registers its pieces so \`K.publish\` writes STEP, B-Rep, and self-contained ASCII USD with complete topologically ordered disassembly \`actions\` automatically.
 
 Use a compatible recipe before designing a connector by hand.
 
-See the [kit API](references/kit.md) for primitives, booleans, transforms, and publishing.
+See the [kit API](references/kit.md) for primitives, fillets/chamfers, exact Booleans, disassembly step helpers, and publishing.
 
 ## Separate printing for moving parts
 
-Rumi requires every moving physical part to be printed separately and assembled afterward. Joint kind still describes movement after assembly: fixed, rotating or sliding. Do not offer print-in-place as an option or ask the user to choose a manufacturing mode. Publish movable assemblies with explicit \`mode='separate'\`; omitting the mode or using \`print-in-place\` is rejected. Single-piece static models need no manufacturing choice.
+Rumi requires every moving physical part to be printed separately and assembled afterward. Joint kind still describes movement after assembly: \`fixed\`, \`revolute\`, or \`prismatic\`. Do not offer print-in-place as an option or ask the user to choose a manufacturing mode. Publish movable assemblies with explicit \`mode='separate'\`; omitting the mode or using \`print-in-place\` is rejected. Single-piece static models need no manufacturing choice.
 
-Design the assembly before choosing connectors. Provide accessible insertion paths, an assembly order and separate pins or retainers where needed. Explain it briefly: “The wheels and doors print separately, then attach so they still spin and open.” Consider bed orientation, support removal, joint clearances, materials, strength and repairability. Keep requested movement; never fuse a moving part or change it to a fixed joint to meet the requirement.
+Design the assembly before choosing connectors. Provide accessible insertion paths, an assembly order, and separate pins, caps, or collars where needed. Explain it briefly: “The wheels and doors print separately, then attach with locking caps so they still spin and open.” Consider flat bed orientation, support removal, joint clearances, materials, strength, and repairability. Keep requested movement; never fuse a moving part or change it to a fixed joint to meet the requirement.
 
-Recipes described below or in their cards as print-in-place are legacy geometry references, not supported designs for new movable prints. Do not use their captive defaults or change a manufacturing label to make them appear compatible. Use a separately assembleable variant only when the card identifies one, or design removable connectors with the kit and declare them with \`K.joint\`. Existing printed-assembled models remain inspectable, but their connectors must be reviewed and redesigned before republishing or arranging for printing. Preserve their previous revisions.
+Every moving recipe in this kit is a separate-print design — there are no print-in-place moving joints. When building a custom connector, declare it with \`K.joint(...)\` (setting \`retainer\` on fixed retainers: \`'rigid'\`, \`'bayonet'\`, \`'threaded'\`, \`'snap'\`, or \`'friction'\`) and declare a disassembly step for every nonroot part using \`K.step_translate\`, \`K.step_twist\`, or \`K.step_snap\`.
 
-Run the geometry, clearance, collision, retention and movement workflow in [finished-revision validation](../blender-modeling/SKILL.md#validate-a-finished-revision). Describe the assembly order and pass \`steps=[dict(part="part_name", path=[[0, 0, 0], [dx, dy, dz], ...]), ...]\` to \`K.publish\` for every nonroot part. Offsets use millimetres and each path starts at zero. Missing paths leave the mechanical result under review and block acceptance, even when motion probes pass. Bullet checks supplied translation paths in reverse; it does not discover them or simulate snapping, flexing or threaded insertion. Missing or unsupported assembly evidence remains unverified even when movement checks pass. The \`separate\` declaration and plate placement are not proof that assembly is possible.
+Run the geometry, clearance, collision, retention, and movement workflow in [finished-revision validation](../cad-modeling/SKILL.md#validate-a-finished-revision). Bullet checks each nonroot part's disassembly \`actions\` (\`translate\`, \`rotate\` with optional helical \`pitchMm\`, and bounded elastic \`snap\` with \`maxInterferenceMm\`) plus full retention and motion probes with only the root held. Missing steps produce \`assembly_path_required\` and block acceptance. The \`separate\` declaration and plate placement alone are not proof that assembly is possible.
 
 ## Build order
 
-1. Plan assembly after separate printing, then block out each physical part as a simple solid with its real outer size and position.
+1. Call \`K.start()\`, plan assembly after separate printing, and block out each physical part as a solid with its real outer size and position in millimetres.
 2. Choose each joint's pivot and axis from those coordinates.
-3. Call the recipe. It adds and cuts the mating features on both parts and returns the joint record. A recipe raises an error that says what to move when a part does not reach the joint.
-4. Add detail and colour. Build one side and \`K.mirror\` it for pairs.
-5. Publish the assembled pose with \`K.publish\`, read \`RUMI_CHECKS\`, then follow [Blender modeling](../blender-modeling/SKILL.md#edit-and-publish) for region labels and preview. The viewer derives a separate plate layout from the physical parts.
+3. Call the recipe. It adds and cuts the mating features on both parts, creates any separate retainer hardware (caps, pins, collars, plugs), and records the joint records and disassembly \`actions\`. A recipe raises an error explaining what to move when a part does not reach the joint.
+4. Add detail, fillets/chamfers, and colour (\`K.paint\`). Build one side and \`K.mirror\` it for pairs.
+5. Publish the assembled pose with \`K.publish("models/<name>", root=base, joints=joints, mode="separate", controls=controls)\`. \`K.publish\` auto-collects recipe-created parts, joints, topologically ordered disassembly steps, and badge features, prints \`RUMI_MODEL\` and \`RUMI_CHECKS\`, and updates \`model.usda\`. Follow [CAD modeling](../cad-modeling/SKILL.md#edit-and-publish) for region labels, \`viewer_load\`, and \`validation_mechanics\` + \`validation_accept\`.
 
-Choose movement widgets through [blender-modeling](../blender-modeling/SKILL.md#movement-controls). Pass their declarations as \`controls\` to \`K.publish\`; joint geometry and limits remain the movement definition.
+Choose movement widgets through [cad-modeling](../cad-modeling/SKILL.md#movement-controls). Pass their declarations as \`controls\` to \`K.publish\`; joint geometry and limits remain the movement definition.
 
 ## Recipes are starting points
 
-Each recipe was checked alone at its default size on a small sample; your whole model still has to pass its own checks. Resize a recipe through its options, and keep clearances and minimum walls as they are when you scale a model up or down. When no recipe fits, model the connector with the kit and declare it with \`K.joint\`; copy the nearest recipe's proportions.
+Each recipe is checked alone at its default size on a sample fixture; your whole model still has to pass its own \`RUMI_CHECKS\` and \`validation_mechanics\`. Resize a recipe through its options, and keep clearances (at least 0.3 mm for moving fits) and minimum walls intact when scaling a model up or down. When no recipe fits, model the connector with the kit and declare it with \`K.joint\` + \`K.step_*\`; copy the nearest recipe's proportions.
 
 What the mechanics check needs, whichever way you build:
 
-- Only the root part is held. Every other part must be caught by shape in every direction: an assembled retainer wider than its bore, a removable pin secured by a cap, a lip over an insertable slider. Friction, press fits, magnets and glue hold nothing in the check.
-- Provide retention geometry that can be assembled after separate printing. A join held only by friction stays unverified; report that limitation rather than switching to print-in-place to obtain a pass. Fuse parts with \`K.join\` only when the design calls for one physical piece.
-- Keep 0.3 mm between different parts. Let flat faces and round pins in round bores carry loads; cone tips, slots and sharp edges in a bearing surface read as \`excessive_penetration\`.
-- Recipes marked **over limit** below can read 0.16–0.39 mm \`excessive_penetration\` against the 0.15 mm limit while the part is captive. Do not tighten clearances or redesign repeatedly to chase it; after one repair attempt report the model as built and unverified.
+- Only the root part is held. Every other part must be caught by shape in every direction: a quarter-turn bayonet cap, a snap barb/ring wider than the bore, a removable keyed pin with locking cap, or an end-stop plug closing a slide. Friction, press fits, magnets, and glue hold nothing in the rigid check (\`retainer='friction'\` reports \`retainer_unverified_friction\`).
+- Keep at least 0.3 mm between separate moving parts (\`RUMI_CHECKS\` uses exact \`BRepExtrema\` surface distance and flags \`< 0.2 mm\` as \`insufficient_clearance\`). Fixed mates may touch flush (\`0.0 mm\`) without error, while overlapping fixed volumes fail.
+- Provide disassembly \`actions\` for every nonroot part (\`K.publish\` collects recipe steps automatically in topological removal order — caps/pins/plugs first, then moving parts).
 
 ## Catalog
 
-Mechanics column: **passes** means the recipe's sample passed \`validation_mechanics\` at the default limits. **over limit** means the part is captive and passes rest and retention, but a probe read \`excessive_penetration\` just above 0.15 mm. **unverified** means the check cannot confirm it by design; say so to the user.
+All moving recipes print as separate pieces with real retainers and auto-generated disassembly \`actions\`. **verifiable** recipes pass \`cad/validate.py\` and \`rumi-bullet\` v2; **unverified** recipes rely on friction, magnets, or external metal hardware and stay marked unverified by design.
 
-| Need | Recipe | Mechanics | Card |
+| Need | Recipe | Parts & retainer | Card |
 |---|---|---|---|
-| Wheel that spins on a body | \`K.wheel\` then \`K.captive_axle\` | passes | \`wheels.md\` |
-| Two wheels turning together on one axle | \`K.through_axle\` | passes | \`wheels.md\` |
-| Soft tyre on a rigid hub | \`K.tyre\` | passes | \`wheels.md\` |
-| Wheel held on by a collar | \`K.axle_clip\` | passes (\`open_clip=True\` unverified) | \`wheels.md\` |
-| Door, lid or flap | \`K.barrel_hinge\` | over limit, 0.16–0.39 mm | \`rotation.md\` |
-| Door that clips onto a post | \`K.clip_hinge\` | over limit, 0.18–0.34 mm | \`rotation.md\` |
-| Fold line in one flexible part | \`K.living_hinge\` | one part, nothing to check | \`rotation.md\` |
-| Tilting head or arm | \`K.ball_socket\` | over limit, 0.27–0.35 mm; one tilt axis | \`rotation.md\` |
-| Turntable, turret, spinner | \`K.turntable_plate\` then \`K.turntable\` | passes | \`rotation.md\` |
-| Shaft turning inside a housing | \`K.bearing\` | passes | \`rotation.md\` |
-| Sliding carriage or drawer | \`K.dovetail_slide\`, \`K.tslot_rail\` | passes | \`sliders.md\` |
-| Telescoping tube, piston | \`K.telescoping_tube\` | passes | \`sliders.md\` |
-| Latch or slider in a slot | \`K.pin_slot\` | passes | \`sliders.md\` |
-| Snap two parts together | \`K.snap_hook\` | passes | \`fasteners.md\` |
-| Round snap-on lid | \`K.snap_lid\` | passes | \`fasteners.md\` |
-| Flat-pack wall into a base | \`K.tab_slot\` | over limit, 0.16 mm | \`fasteners.md\` |
-| Twist-lock cap | \`K.bayonet_lock\` | over limit, 0.20 mm | \`fasteners.md\` |
-| Printed bolt and nut | \`K.bolt_nut\` | unverified: the nut can unscrew | \`fasteners.md\` |
-| Push-fit pegs, dog-bone key, magnets, metal insert | \`K.press_pegs\`, \`K.dogbone_key\`, \`K.magnet_pockets\`, \`K.insert_boss\` | unverified: held by friction, magnetism or hardware | \`fasteners.md\` |
-| Meshing gears | \`K.gear_pair\` (blank: \`K.spur_gear\`) | passes up to ratio 1.45 | \`mechanisms.md\` |
-| Rack and pinion | \`K.rack_pinion\` | passes | \`mechanisms.md\` |
-| One-way ratchet | \`K.ratchet\` | passes; axis must be horizontal | \`mechanisms.md\` |
-| Slider that clicks between positions | \`K.detent_slider\` | passes | \`mechanisms.md\` |
-| Cam lifting a follower | \`K.cam_follower\` | over limit, 0.22 mm | \`mechanisms.md\` |
-| Crank driving a slider | \`K.crank_slider\` | unverified: closed loop | \`mechanisms.md\` |
-| One-piece spring | \`K.flexure_spring\` | one part, nothing to check | \`mechanisms.md\` |
+| Wheel spinning on a stub axle (twist-lock cap) | \`K.wheel\` then \`K.bayonet_axle\` | 3 parts: axle + wheel + 90° bayonet cap | \`wheels.md\` |
+| Wheel snapping onto a split stub axle | \`K.wheel\` then \`K.snap_axle\` | 2 parts: split barbed axle + counterbored wheel | \`wheels.md\` |
+| Two wheels turning together on one axle | \`K.through_axle\` | 4 parts: body + axle/left wheel + keyed right wheel + keyed snap cap | \`wheels.md\` |
+| Soft tyre on a rigid hub | \`K.tyre\` | 2 parts: pegged hub + snap-on TPU tyre | \`wheels.md\` |
+| Door, lid, or flap (pin hinge) | \`K.pin_hinge\` (alias \`K.barrel_hinge\`) | 4 parts: parent/child knuckles + keyed pin + bayonet cap | \`rotation.md\` |
+| Door that clips onto a post | \`K.snap_hinge\` | 2 parts: post + compliant C-clip leaf | \`rotation.md\` |
+| Fold line in one flexible part | \`K.living_hinge\` | 1 part (PP/PETG/TPU, no rigid joint) | \`rotation.md\` |
+| Tilting head or arm | \`K.ball_socket\` | 2 parts: slotted compliant socket + ball stem | \`rotation.md\` |
+| Turntable, turret, spinner | \`K.turntable_plate\` then \`K.turntable\` | 3 parts: bayonet post + platter + 90° hub cap | \`rotation.md\` |
+| Shaft turning inside a housing | \`K.bearing\` | 3 parts: bored housing + flanged rotor + snap retainer cap | \`rotation.md\` |
+| Sliding carriage or drawer | \`K.dovetail_slide\`, \`K.tslot_rail\` | 3 parts: open-ended rail + slider + snap end-stop plug | \`sliders.md\` |
+| Telescoping tube, piston | \`K.telescoping_tube\` | 3 parts: open chamber + flanged rod + twist-lock mouth collar | \`sliders.md\` |
+| Latch or slider in a slot | \`K.pin_slot\` | 4 parts: slotted plate + bored block + stadium pin + keyed snap cap | \`sliders.md\` |
+| Snap two parts together | \`K.snap_hook\` | 2 parts: chamfered window + cantilever hook | \`fasteners.md\` |
+| Round snap-on lid | \`K.snap_lid\` | 2 parts: beaded rim + grooved keyed skirt | \`fasteners.md\` |
+| Flat-pack wall into a base | \`K.tab_slot\` | 2 parts: slotted plate + barbed tabs | \`fasteners.md\` |
+| Twist-lock cap | \`K.bayonet_lock\` | 2 parts: L-slot socket + lugged plug (\`retainer='bayonet'\`) | \`fasteners.md\` |
+| Printed bolt and nut | \`K.bolt_nut\` | 2 parts: analytic B-Rep helical thread (\`retainer='threaded'\`) | \`fasteners.md\` |
+| Push-fit pegs, dog-bone key, magnets, metal insert | \`K.press_pegs\`, \`K.dogbone_key\`, \`K.magnet_pockets\`, \`K.insert_boss\` | unverified: held by friction, magnetism, or hardware | \`fasteners.md\` |
+| Meshing gears | \`K.gear_pair\` (blank: \`K.spur_gear\`) | 5 parts: base + 2 gears + 2 bayonet hub caps | \`mechanisms.md\` |
+| Rack and pinion | \`K.rack_pinion\` | 6 parts: base + pinion + rack + 3 bayonet caps | \`mechanisms.md\` |
+| One-way ratchet | \`K.ratchet\` | 5 parts: base + wheel + pawl + 2 bayonet caps | \`mechanisms.md\` |
+| Cam lifting a follower | \`K.cam_follower\` | 5 parts: base + cam + follower + bayonet cam cap + keyed snap cap | \`mechanisms.md\` |
+| Slider that clicks between positions | \`K.detent_slider\` | 4 parts: base + slider + 2 bayonet caps | \`mechanisms.md\` |
+| One-piece spring | \`K.flexure_spring\` | 1 part (no rigid joint) | \`mechanisms.md\` |
 
-Read the card before the first use of a recipe. Each family's file under \`references/\` beside this skill gives every recipe's call, what the parts must provide, the options worth changing, how it prints, and what validation reported. A recipe sample passing motion probes does not establish separate assembly feasibility.
+Read the card before the first use of a recipe. Each family's file under \`references/\` beside this skill gives every recipe's call, what the parts must provide, the options worth changing, and how it prints and assembles.
 ",
-  "load": "Select a Blender-exported USD in the Three.js viewer. Use models/<name>/model.usda; the viewer discovers these entries and reloads completed exports automatically. USD uses metres and Z up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use blender_status and the blender-modeling skill for editing with background Blender scripts. Keep .blend originals and revision exports. Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Executable .js/.mjs previews are disabled by project isolation; export USD instead. Reloading identical source bytes preserves staged controls and their review while requesting fresh renderer feedback. Changed source bytes invalidate them. Saved models display immediately; use validation_mechanics then validation_accept before claiming acceptance. Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.",
+  "load": "Select a CAD-exported USD in the Three.js viewer. Use models/<name>/model.usda; the viewer discovers these entries and reloads completed exports automatically. USD uses metres and Z up; the viewer converts to millimetres and Z up for measurements, placement and Gaussian regions. Use cad_status and the cad-modeling skill for B-Rep solid editing with build123d Python scripts. Keep STEP/B-Rep originals and revision exports. Self-contained static USD only, at most 64 MiB and 200,000 preview triangles. Preserve detailed originals when making a lighter preview. Executable .js/.mjs previews are disabled by project isolation; export USD instead. Reloading identical source bytes preserves staged controls and their review while requesting fresh renderer feedback. Changed source bytes invalidate them. Saved models display immediately; use validation_mechanics then validation_accept before claiming acceptance. Waits for renderer feedback for the exact source revision, placement and build volume. Returns load.status ready with design.report measurements and effective design.parameters, or an explicit build_failed, source_failed, viewer_hidden, timeout, superseded, cancelled or unavailable outcome. Only ready acknowledges a visible rendered model; timeout is not evidence of an unsupported model. Loading does not certify print readiness.",
   "meshEdits": "---
 name: mesh-edit-controls
 description: "Design, validate, and save live shape adjustments the user can try in the mesh viewer."
@@ -410,7 +412,7 @@ description: "Design, validate, and save live shape adjustments the user can try
 
 # Mesh edit controls
 
-Use this skill when someone wants to adjust a shape themselves. A direct instruction such as “make it 20 mm wide” can be a source edit; a request to explore needs controls before applying the change. For existing joint movement, follow [blender-modeling](../blender-modeling/SKILL.md#movement-controls).
+Use this skill when someone wants to adjust a shape themselves. A direct instruction such as “make it 20 mm wide” can be a source edit; a request to explore needs controls before applying the change. For existing joint movement, follow [cad-modeling](../cad-modeling/SKILL.md#movement-controls).
 
 ## Understand the edit
 
@@ -427,7 +429,7 @@ Choose a small set of useful adjustments. For each, define its geometric effect,
 - For other custom variations that preserve mesh connectivity, author [displacement fields](references/fields.md). Derive the mapping from the current construction, measured profile, or cross-sections. Evaluate source parameter changes on temporary copies when useful. Keep the generator in the project so it can be revised.
 - New holes, count changes, and other unsupported live reconstruction need a specific explanation and an agreed alternative. Do not silently replace requested controls with static variants or a completed edit.
 
-Check existing field files against the current revision and request before reusing them. Preserve the editable Blender original. Executable JavaScript previews and \`operation: parameters\` are unavailable.
+Check existing field files against the current revision and request before reusing them. Preserve the editable \`build123d\` source and STEP/B-Rep revisions. Executable JavaScript previews and \`operation: parameters\` are unavailable.
 
 ## Verify and present
 
@@ -450,7 +452,10 @@ Preserve wanted unsaved adjustments; ask if keeping them is unclear. Close an ex
 Keep controls open during exploration. Satisfaction or moving to another task resolves the latest visible edit first. Do not use the original opening values in place of the person’s adjustments.
 
 1. Freeze with \`viewer_controls\`, \`action: freeze\`, and the current control \`id\`. A failed freeze does not authorize saving stale values.
-2. Call \`blender_status\`, open the original \`.blend\` matching the selected USD, and load the returned helper with \`runpy\`. Call \`helper["apply_shape_controls"](recipePath)\`, then publish and load the new revision using [Blender modeling](../blender-modeling/SKILL.md#edit-and-publish). The helper checks the source USD hash and applies the frozen deformation; do not approximate it with another operator. It bakes evaluated modifiers on affected parts, so retain the original revision and modifier stack. Verify the published preview and that \`meshState\` has cleared the temporary edit and highlight before reporting a save.
+2. Call \`cad_status\` and inspect the frozen recipe JSON (\`helper["load_control_recipe"](recipePath)\` and \`helper["summarize_control_recipe"](recipe)\`). Translate that visual input back into exact \`build123d\` B-Rep edits in your \`source/\` script:
+   - For \`operation: cut\`, call \`helper["cut_solid"](part, recipe)\` on the target solids for an exact B-Rep half-space cut with planar capping and preserved cavity openings.
+   - For \`bulge\`, \`bend\`, \`twist\`, \`taper\`, \`surface\`, and \`fields\`, update your parametric \`build123d\` dimensions, sketches, lofts, sweeps, or fillets to match the frozen target dimensions/profiles cleanly in exact B-Rep while preserving mating faces, wall thickness, and exact joint clearances.
+   Then publish and load the new revision using [CAD modeling](../cad-modeling/SKILL.md#edit-and-publish). Verify the published preview, \`RUMI_CHECKS\`, and that \`meshState\` has cleared the temporary edit and highlight before reporting a save.
 3. For explicit cancel or revert, close the current \`id\` to restore the saved preview. If the source changes, reread state and reopen controls.
 
 Failed previews preserve the last successful geometry and values. Failed execution leaves the original untouched on disk; report the error and allow reopening with the saved values. Unresolved controls are not a saved edit. A saved shape is not certified print-ready.
@@ -502,7 +507,7 @@ description: "Name model features from rendered images, model source and mesh me
 
 # Name model regions
 
-Read the construction source when available. Use background Blender from \`blender_status\` to render the saved USD from two useful angles into project scratch storage. Open both PNGs with \`read_image\`. Render and open a close-up when details are hard to distinguish.
+Read the \`build123d\` construction source when available. Use \`viewer_camera\` and \`viewer_cursor_snapshot\` (or inspect saved preview captures) to view the model from two useful angles, opening close-ups when details are hard to distinguish.
 
 Name the recognizable parts first. On creation or refresh, inspect each broad region for smaller features someone could point to or change independently. Repeat inside those features wherever the geometry supports another distinction. A handle might contain a grip with a thumb rest. A lip, recess or transition can be distinct even on one smooth surface. Keep uniform areas whole unless a landmark, a functional direction such as a vehicle's front, or the person's explicit request distinguishes specific sections. Use short names in the person's language and add familiar aliases.
 
@@ -592,11 +597,11 @@ description: "Bind a live bulge, bend, twist, taper, or planar cut to a selected
 
 # Built-in mesh operations
 
-Use [mesh-edit-controls](../mesh-edit-controls/SKILL.md) to establish the intended change, verify it, and manage preview, save, or cancel. Use [control-widgets](../control-widgets/SKILL.md) for widget declarations. Built-in operations preview the existing geometry and materials locally; do not rebuild Blender while someone drags.
+Use [mesh-edit-controls](../mesh-edit-controls/SKILL.md) to establish the intended change, verify it, and manage preview, save, or cancel. Use [control-widgets](../control-widgets/SKILL.md) for widget declarations. Built-in operations preview the existing geometry and materials locally; do not rebuild the CAD script while someone drags.
 
 ## Select the region
 
-Read \`meshState\` and the original Blender source. Supply the current model’s exact \`path\`, \`revision\`, and \`url\`, a short region label, and exact mesh names in \`parts\`. An empty parts list selects every mesh in the region. Use \`viewer_highlight\` to establish a deformation region; cuts use the automatic cut-plane guide instead.
+Read \`meshState\` and the \`build123d\` CAD source. Supply the current model’s exact \`path\`, \`revision\`, and \`url\`, a short region label, and exact mesh names in \`parts\`. An empty parts list selects every mesh in the region. Use \`viewer_highlight\` to establish a deformation region; cuts use the automatic cut-plane guide instead.
 
 \`center\` is model-local XYZ millimetres. The local frame has N = \`direction\`, U = world-up cross N, and V = N cross U; near a vertical N, world-up is Y instead of Z. \`radii\` are extents along U, V, N. Choose a region that excludes protected features. Influence is compact and zero outside this ellipsoid. The ellipsoid limits deformations, not cuts.
 
@@ -618,7 +623,7 @@ Start with zero deformation unless the person requested an initial change. Defin
 
 For a bottom cut, use \`operation: cut\`, \`direction: [0,0,1]\` to retain the upper side, and \`center\` at the proposed height. Amount moves the plane by \`(amount*2-1)*limit\` along direction; .5 is the proposed height. Angle tilts along V and spread leans along U, each spanning -60 to +60 degrees with .5 untilted. Positive tilt raises the plane toward positive V; positive lean raises it toward positive U. Set every radius at least as large as limit; radii do not clip the cut footprint. Select all parts that should share the edge.
 
-Opening a cut clears prior mesh overlays and displays a continuous teal guide at the actual plane. A rendered cut receipt confirms the guide and controls. The guide disappears on freeze or close; other region highlights are rejected until the cut resolves. The viewer previews capped cross-sections; saving uses a Blender intersection that preserves cavity openings.
+Opening a cut clears prior mesh overlays and displays a continuous teal guide at the actual plane. A rendered cut receipt confirms the guide and controls. The guide disappears on freeze or close; other region highlights are rejected until the cut resolves. The viewer previews capped cross-sections; saving uses \`helper["cut_solid"](part, recipe)\` in \`build123d\` for an exact B-Rep half-space cut that preserves cavity openings.
 
 Open controls before applying the requested cut. To restore material below an already cut edge, use the matching earlier revision.
 
@@ -887,7 +892,7 @@ The following information describes your current session. It replaces earlier ve
 exports[`publishes the analog workflow in model instructions and removes it on unload 1`] = `
 "You are an AI agent powered by DeepSeek Harness.
 
-For each new interactive mesh edit or correction, load the current mesh-edit-controls skill even if earlier conversation turns contain control advice. Design the interaction from their intent and the current model: identify the feature, useful degrees of freedom, and what must stay fixed before choosing an operation. Use surface profiles for connected outline changes and target-plane facets for flat patches when appropriate. Measure their effect and preserve interfaces; moving two parts together does not establish fit or wall thickness. Use built-in operations only when their actual geometry math matches that edit; otherwise generate model-specific displacement fields for supported connectivity-preserving variations. Do not require prepared controls files, subject-specific presets, or special user wording. Prepare a small set of meaningful controls with expected effects and preserved features. Run viewer_controls validation, inspect every returned before/after and displacement image, assess each axis and combined extremes, then present. Follow the pending-review context; generating evidence is not a quality pass. Revise unsuitable controls and revalidate. A rendered receipt confirms delivery, not suitability. When the person says controls are wrong or ineffective, re-read the skill, inspect the binding and revise the interaction; do not re-label the same operation or silently make a static edit. Preserve wanted unsaved adjustments and never bake a rejected preview. Executable JavaScript previews remain disabled. Keep controls open while exploring; freeze the latest visible values and apply the frozen recipe in Blender only when resolving an accepted edit. Close on explicit cancel. Verify the published revision before claiming a save."
+For each new interactive mesh edit or correction, load the current mesh-edit-controls skill even if earlier conversation turns contain control advice. Design the interaction from their intent and the current model: identify the feature, useful degrees of freedom, and what must stay fixed before choosing an operation. Use surface profiles for connected outline changes and target-plane facets for flat patches when appropriate. Measure their effect and preserve interfaces; moving two parts together does not establish fit or wall thickness. Use built-in operations only when their actual geometry math matches that edit; otherwise generate model-specific displacement fields for supported connectivity-preserving variations. Do not require prepared controls files, subject-specific presets, or special user wording. Prepare a small set of meaningful controls with expected effects and preserved features. Run viewer_controls validation, inspect every returned before/after and displacement image, assess each axis and combined extremes, then present. Follow the pending-review context; generating evidence is not a quality pass. Revise unsuitable controls and revalidate. A rendered receipt confirms delivery, not suitability. When the person says controls are wrong or ineffective, re-read the skill, inspect the binding and revise the interaction; do not re-label the same operation or silently make a static edit. Preserve wanted unsaved adjustments and never bake a rejected preview. Executable JavaScript previews remain disabled. Keep controls open while exploring; freeze the latest visible values and translate the frozen recipe into exact build123d CAD edits (using cut_solid for exact cuts, and updating parametric dimensions, lofts, or fillets for deformations while preserving exact joints) only when resolving an accepted edit. Close on explicit cancel. Verify the published revision before claiming a save."
 `;
 
 exports[`records a refused presentation and repeats the pending review in the next agent request 1`] = `
@@ -899,7 +904,7 @@ exports[`records a refused presentation and repeats the pending review in the ne
 ]
 `;
 
-exports[`records explicit validation tools and their results within one agent turn > explicit validation instructions 1`] = `"For multi-part or movable prints, read blender-modeling and joints, build connectors from the joints recipes, and publish a complete assembly with every physical mesh, root fixture, connection, axis, pivot and full movement range. Moving parts must print separately and assemble afterward; publish with mode="separate" and connectors with practical insertion and retention. Legacy print-in-place movement requires redesign, not just relabeling. Include pins, caps and axles. JavaScript models export assembly and bind every motionControls axis to its connection; controls use degrees or millimetres. Blender publish preserves assembly metadata. Preserve requested features, connectors, controls and ranges during repairs. Use RUMI_CHECKS from each publish to guide draft iteration. Keep exploring while draft findings are open. Once the design is ready, resolve blocking findings before calling validation_mechanics once and then validation_accept with the returned fingerprint. The bundled Bullet checker holds only the root, without ideal joints. The open viewer refreshes checks for the selected saved revision automatically; explicit validation tools reuse completed stages. No automatic repair turns run. Read the matching meshState.validation report before claiming acceptance. Missing descriptions, disconnected pieces and blocked movement require repair. Unavailable, unsupported or incomplete checks remain unverified. A passing rigid-contact test does not certify assembly accessibility, deformation, material strength or slicer readiness."`;
+exports[`records explicit validation tools and their results within one agent turn > explicit validation instructions 1`] = `"For multi-part or movable prints, read cad-modeling and printable-joints, build connectors from the separate-print joints recipes, and publish a complete assembly with every physical mesh, root fixture, connection, axis, pivot and full movement range. Moving parts must print separately and assemble afterward; publish with mode="separate", connectors with practical insertion and retention (retainer where applicable), and disassembly actions (translate, rotate, snap) or paths for every nonroot part. Legacy print-in-place movement requires redesign, not just relabeling. Include pins, caps and axles. CAD publish writes STEP and USDA revisions and preserves assembly metadata. Preserve requested features, connectors, controls and ranges during repairs. Use RUMI_CHECKS from each publish to guide draft iteration. Keep exploring while draft findings are open. Once the design is ready, resolve blocking findings before calling validation_mechanics once and then validation_accept with the returned fingerprint. The bundled Bullet checker holds only the root, without ideal joints. The open viewer refreshes checks for the selected saved revision automatically; explicit validation tools reuse completed stages. No automatic repair turns run. Read the matching meshState.validation report before claiming acceptance. Missing descriptions, disconnected pieces and blocked movement require repair. Unavailable, unsupported or incomplete checks remain unverified. A passing rigid-contact test does not certify assembly accessibility, deformation, material strength or slicer readiness."`;
 
 exports[`records explicit validation tools and their results within one agent turn 1`] = `
 [

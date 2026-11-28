@@ -116,7 +116,7 @@ function publishResult(f: Awaited<ReturnType<typeof fixture>>, overrides: Record
   const receipt = { preview: f.current, revisionUsd: f.revision, savedFileStat: f.target.statKey,
     sourceHash: f.sourceHash, ...overrides }
   return { type: 'tool/ptc-dispatch', seq: 12, data: { name: 'bash', isError: failed,
-    arguments: { command: 'Blender --python source/build.py' },
+    arguments: { command: '/app/runtime/cad/cad-python source/build.py' },
     content: [{ type: 'text', text: `RUMI_MODEL ${JSON.stringify(receipt)}\n` }] } }
 }
 
@@ -262,7 +262,7 @@ it('binds script hints to the saved publication and strips non-geometry strings'
     'print("password is fixture-secret")',
   ].join('\n'))
   const events = [{
-    type: 'tool/ptc-dispatch', seq: 4, data: { name: 'bash', arguments: { command: 'Blender --python source/build.py' },
+    type: 'tool/ptc-dispatch', seq: 4, data: { name: 'bash', arguments: { command: '/app/runtime/cad/cad-python source/build.py' },
       content: [{ type: 'text', text: `RUMI_MODEL ${JSON.stringify({ preview: f.current, revisionUsd: f.revision })}\n` }] },
   }]
   const evidence = await readPrintBadgeEvidence(f.root, f.target, events, signal)

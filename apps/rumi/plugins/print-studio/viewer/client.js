@@ -165,6 +165,12 @@ export function installViewer(ctx, React, primitives) {
           printOptions.current = saved.options
           owner.openPrintLayout(action === 'fresh' ? null : owner.printLayoutState().layout ?? autosave.draft(saveKey) ?? saved.layout, saved.options)
           if (saved.stale) setPrintMessage('layoutChanged')
+          else if (saved.validationStatus === 'needs_repair') setPrintMessage('validationRepair')
+          else if (saved.validationStatus === 'unavailable') setPrintMessage('validationUnavailable')
+          else if (saved.validationStatus === 'review') setPrintMessage('validationReview')
+          else if (saved.validationStatus === 'unverified') setPrintMessage('layoutChecksMissing')
+          else if (saved.validationStatus === 'passed') setPrintMessage('validationChecksPassed')
+          else if (saved.validationStatus === 'accepted') setPrintMessage('layoutModelChecked')
         } else {
           if (!await autosave.flush(saveKey) || controller.signal.aborted || layoutSaveKey(printTarget.current) !== saveKey) return
           const response = await fetch(`${ROUTE}/open-plate?${query}`, { method: 'POST', signal: controller.signal, body: owner.exportPrintPlate() })

@@ -27,9 +27,10 @@ export function normalizeShape(value) {
   if (value.operation === 'parameters') {
     const values = parameterValues(value.values), controls = normalizeControls(value.controls, values)
     const finish = value.finish ?? 'parameters'
-    if (!['parameters', 'blender'].includes(finish)) throw new Error('Choose parameters or blender for finishing')
-    if (finish === 'blender' && (typeof value.original !== 'string' || !value.original.trim() || typeof value.edit !== 'string' || !value.edit.trim() || value.edit.length > 4000)) throw new Error('Blender previews require the preserved original path and an edit recipe')
-    return { version: 2, operation: 'parameters', label: value.label.trim(), controls, values, finish, ...(finish === 'blender' ? { original: value.original, originalHash: value.originalHash, edit: value.edit.trim() } : {}) }
+    if (!['parameters', 'cad', 'blender'].includes(finish)) throw new Error('Choose parameters or cad for finishing')
+    const external = finish === 'cad' || finish === 'blender'
+    if (external && (typeof value.original !== 'string' || !value.original.trim() || typeof value.edit !== 'string' || !value.edit.trim() || value.edit.length > 4000)) throw new Error('CAD previews require the preserved original path and an edit recipe')
+    return { version: 2, operation: 'parameters', label: value.label.trim(), controls, values, finish, ...(external ? { original: value.original, originalHash: value.originalHash, edit: value.edit.trim() } : {}) }
   }
   if (value.operation === 'surface') return normalizeSurface(value)
   const vector = (key, positive = false) => {
@@ -58,7 +59,7 @@ export function shapeFrame(n) {
   return [u,v,n]
 }
 
-/** CPU reference matching the shader and Blender helper. @param {number[]} point Model-local point. @param {object} spec Validated recipe. @returns {number[]} Deformed point. */
+/** CPU reference matching the shader and CAD helper. @param {number[]} point Model-local point. @param {object} spec Validated recipe. @returns {number[]} Deformed point. */
 export function deformPoint(point, spec) {
   if (spec.operation === 'cut') throw new Error('A cut changes topology; use cutPlane instead of deformPoint')
   const [u,v,n] = shapeFrame(spec.direction), a = spec.values

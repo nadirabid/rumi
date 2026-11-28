@@ -53,7 +53,7 @@ export function createElectronBuilderConfig(
   if (!unsigned && !skipNotarization) resolveMacOSNotarizationEnvironment(env)
   const buildPaths = desktopTargetBuildPaths(resolveDesktopBuildTarget(env, hostPlatform, hostArch))
   const output = desktopArtifactOutput(buildPaths, { unsigned, skipNotarization })
-  const unpack = ['**/@rumi/print-studio/blender/**', '**/*.{node,dylib,so}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg']
+  const unpack = ['**/@rumi/print-studio/cad/**', '**/@rumi/print-studio/skills/**', '**/*.{node,dylib,so}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg']
   const update = unsigned ? undefined : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
   if (preparedRuntime !== undefined) buildPaths.dsh = preparedRuntime
   // electron-builder merges extraMetadata into the packaged manifest, so a build version here reaches
@@ -117,7 +117,7 @@ export function createElectronBuilderConfig(
       entitlements: fileURLToPath(new URL('./macos-entitlements.plist', import.meta.url)),
       entitlementsInherit: fileURLToPath(new URL('./macos-entitlements.plist', import.meta.url)),
       // Prepared runtime files retain their signatures; PAK resources are sealed by their enclosing bundle.
-      signIgnore: ['/Contents/Resources/app\\.asar\\.unpacked/dsh(?:/|$)', '/Contents/Resources/runtime/primary-runtime(?:/|$)', '/Contents/Resources/runtime/blender(?:/|$)', '\\.pak$'],
+      signIgnore: ['/Contents/Resources/app\\.asar\\.unpacked/dsh(?:/|$)', '/Contents/Resources/runtime/primary-runtime(?:/|$)', '/Contents/Resources/runtime/cad(?:/|$)', '\\.pak$'],
       notarize: !unsigned && !skipNotarization,
       target: unsigned ? ['dmg'] : ['dmg', 'zip'],
     },

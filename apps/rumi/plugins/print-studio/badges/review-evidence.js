@@ -124,8 +124,9 @@ function acceptedCommands(events) {
               }] : []
         })
       if (!reports.length) continue
-      const match = typeof args?.command === 'string'
-        && /(?:^|\s)--python\s+(?:"([^"\n]+)"|'([^'\n]+)'|([^\s;&|]+))/u.exec(args.command.slice(0, maxResultChars))
+      const command = typeof args?.command === 'string' ? args.command.slice(0, maxResultChars) : ''
+      const match = /(?:^|\s)--python\s+(?:"([^"\n]+)"|'([^'\n]+)'|([^\s;&|]+))/u.exec(command)
+        ?? /(?:^|[;&|]\s*)(?:"[^"\n]*(?:cad-python|python3?)[^"\n]*"|'[^'\n]*(?:cad-python|python3?)[^'\n]*'|[^\s;&|]*(?:cad-python|python3?))\s+(?:-[^\s]+\s+)*(?:"([^"\n]+\.py)"|'([^'\n]+\.py)'|([^\s;&|]+\.py))/u.exec(command)
       const script = match ? match.slice(1).find(Boolean)?.slice(0, 4096) : undefined
       commands.push({ seq, reports, script })
     } else {

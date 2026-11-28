@@ -12,7 +12,7 @@ import { readPrimaryRuntime } from '../../../packages/skill/tool-workspace-depen
 import { desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
 import { packagingStep } from './packaging-step.mjs'
 import { preparePrimaryRuntime } from './prepare-primary-runtime.ts'
-import { prepareBlenderRuntime } from './prepare-blender-runtime.ts'
+import { prepareCadRuntime } from './prepare-cad-runtime.ts'
 import { prepareBulletRuntime } from './prepare-bullet-runtime.ts'
 import { prepareDesktopCli } from './prepare-cli.ts'
 import { prepareCommandLink } from './prepare-command-link.ts'
@@ -70,7 +70,7 @@ export async function prepareDesktopRuntime(deferPrimaryRuntimeSmoke: boolean): 
     const electron = prepareElectron(target)
     const results = await Promise.allSettled([
       packagingStep(journal, 'prepare:primary-runtime', () => preparePrimaryRuntime({ deferSmoke: deferPrimaryRuntimeSmoke })),
-      packagingStep(journal, 'prepare:blender', () => prepareBlenderRuntime(targetName, RUNTIME_ROOT, BUILD_PATHS.downloads)),
+      packagingStep(journal, 'prepare:cad', () => prepareCadRuntime(targetName, RUNTIME_ROOT, BUILD_PATHS.downloads)),
       electron.then(() => packagingStep(journal, 'prepare:bullet', () => prepareBulletRuntime(
         targetName, RUNTIME_ROOT, BUILD_PATHS.downloads, target.platform === 'darwin' ? minimumMacOSVersion() : undefined,
       ))),

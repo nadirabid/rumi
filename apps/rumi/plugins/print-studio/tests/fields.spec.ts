@@ -1,7 +1,6 @@
-/** Field previews preserve saved geometry and share Blender interpolation. */
+/** Field previews preserve saved geometry and interpolate smoothly inside support bounds. */
 import { expect, it } from 'vitest'
 import * as THREE from 'three'
-import { execFileSync } from 'node:child_process'
 import { parameterValues, normalizeControls } from '../viewer/analog/control-spec.js'
 import { normalizeShape } from '../viewer/analog/spec.js'
 import { sampleField } from '../viewer/analog/fields.js'
@@ -11,11 +10,14 @@ const field = { key: 'crown', origin: [-10,-10,-10], spacing: [10,10,10], dimens
 field.offsets[41] = 10
 const input = { operation: 'fields', label: 'Crown', parts: ['Shell'], fields: [field], values: { crown: 0 }, controls: [{ kind: 'slider', label: 'Height', axes: [{ key: 'crown', min: -1, max: 1, step: .01, reset: 0 }] }] }
 
-it('matches Python interpolation at interior, boundary, and exterior points', () => {
-  const points = [[0,0,0],[5,5,5],[-10,0,0],[11,0,0],[0,-4,7]]
-  const code = 'import runpy,json; m=runpy.run_path(\'apps/rumi/plugins/print-studio/blender/fields.py\'); d=json.loads(input()); m[\'validate_fields\'](d[\'recipe\']); print(json.dumps([m[\'sample_field\'](p,d[\'recipe\'][\'fields\'][0]) for p in d[\'points\']]))'
-  const actual = JSON.parse(execFileSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', code], { input: JSON.stringify({ recipe: input, points }), encoding: 'utf8' }))
-  expect(actual).toEqual(points.map(p => sampleField(p, field)))
+it('interpolates trilinearly at interior points and stays zero on boundaries and exterior', () => {
+  const expected: Array<[number[], number]> = [[[0, 0, 0], 10], [[5, 5, 5], 1.25], [[-10, 0, 0], 0], [[11, 0, 0], 0], [[0, -4, 7], 1.8]]
+  for (const [point, z] of expected) {
+    const [dx, dy, dz] = sampleField(point, field)
+    expect(dx).toBe(0)
+    expect(dy).toBe(0)
+    expect(dz).toBeCloseTo(z, 9)
+  }
 })
 
 it('rejects discontinuities, unbound fields and unsafe ranges', () => {

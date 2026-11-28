@@ -81,11 +81,9 @@ export function apply(ctx) {
       peerDependencies: { '@deepseek-ai/cordis': cordis.version }, dsh: { bundle: { patch: './bundle.yml' } },
     }))
     const validationFixtures = join(home, 'validation-fixtures')
-    await promisify(execFile)(join(resourcesRuntime, 'blender', process.platform === 'win32' ? 'Blender/blender.exe' : 'blender'),
-      ['--background', '--factory-startup', '--disable-autoexec', '--python-exit-code', '1', '--python',
-        fileURLToPath(new URL('../tests/fixtures/validation-models.py', import.meta.url)), '--', validationFixtures,
-        join(root, 'node_modules/@rumi/print-studio/blender/rumi_blender.py').replace(/app\.asar([/\\])/u, 'app.asar.unpacked$1'),
-        fileURLToPath(new URL('../plugins/print-studio/bullet/tests/fixtures.py', import.meta.url))],
+    await promisify(execFile)(join(resourcesRuntime, 'cad', process.platform === 'win32' ? 'cad-python.cmd' : 'cad-python'),
+      [fileURLToPath(new URL('../tests/fixtures/validation-models.py', import.meta.url)), '--', validationFixtures,
+        join(root, 'node_modules/@rumi/print-studio/cad/rumi_cad.py').replace(/app\.asar([/\\])/u, 'app.asar.unpacked$1')],
       { env: { ...hostEnvironment, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' }, timeout: 120_000 })
     cpSync(fileURLToPath(new URL('../tests/fixtures/validation-smoke-plugin.mjs', import.meta.url)), join(plugin, 'validation-smoke.mjs'))
     writeFileSync(join(plugin, 'index.js'), `
@@ -152,14 +150,14 @@ export function apply(ctx) {
     if (!skills.ok) throw new Error(`Rumi profile capability check failed: ${await skills.text()}`)
     const capabilities = await skills.json() as { officeSkill: boolean; officeKit: boolean }
     if (capabilities.officeKit !== false || capabilities.officeSkill !== false) throw new Error('Rumi loaded disabled Office capabilities')
-    // Print Studio finds its bundled Blender and Bullet relative to the archive, so only an archived root can run them.
+    // Print Studio finds its bundled CAD runtime and Bullet relative to the archive, so only an archived root can run them.
     if (/app\.asar(?:\.unpacked)?[/\\]/u.test(root + '/')) {
       const validationResponse = await fetch(new URL('/desktop-smoke-validation', ready.url), {
         headers: { cookie }, signal: AbortSignal.timeout(1500000),
       })
       const validationReport = await validationResponse.text()
       if (!validationResponse.ok) throw new Error(`Rumi validation tools: ${validationReport}`)
-      console.log('Rumi validation tools: isolated production profile, real Blender/Bullet, acceptance, cache and stale-revision checks passed')
+      console.log('Rumi validation tools: isolated production profile, real build123d/Bullet, acceptance, cache and stale-revision checks passed')
       console.log(validationReport)
     }
   } finally {

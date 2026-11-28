@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util'
 import { desktopArtifactOutput, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
 import { readDesktopRuntime, verifyDesktopRuntime } from '../src/runtime-tree.ts'
 import { smokePreparedRuntime } from './smoke-prepared-runtime.ts'
-import { smokeBlenderRuntime } from './prepare-blender-runtime.ts'
+import { smokeCadRuntime } from './prepare-cad-runtime.ts'
 import { smokeBulletRuntime } from './prepare-bullet-runtime.ts'
 import { resolveDesktopPackageTarget } from './package-target.ts'
 
@@ -20,7 +20,7 @@ const executable = join(application, 'MacOS', 'Rumi')
 const descriptor = await verifyDesktopRuntime(paths.dsh, readDesktopRuntime(paths.dsh).release.version,
   resolveDesktopPackageTarget(target))
 await smokePreparedRuntime(join(resources, 'app.asar', 'dsh'), executable, join(resources, 'runtime'), descriptor)
-smokeBlenderRuntime(resources, target)
+smokeCadRuntime(resources, target)
 smokeBulletRuntime(resources, target)
 execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', join(application, '..')], { stdio: 'pipe' })
-console.log('Rumi runtime: bundled Blender editing, USD export and Bullet mechanics passed')
+console.log('Rumi runtime: bundled build123d CAD editing, USD/STEP export and Bullet mechanics passed')

@@ -50,13 +50,13 @@ export function registerPrintLayout(ctx, withSource, options) {
       const query = new URL(request.url).searchParams, sessionId = query.get('sessionId')
       if (!sessionId) return json({ error: 'session_required' }, 400)
       try {
-        return await withSource(sessionId, async ({ design, cwd, model, volume, requiresSeparatePrint }) => {
+        return await withSource(sessionId, async ({ design, cwd, model, volume, requiresSeparatePrint, validationStatus = 'unverified' }) => {
           if (requiresSeparatePrint) return json({ error: 'layoutSeparateRequired' }, 409)
           const resolved = { volume: volume ?? options.volume, gap: options.gap }
           const identity = printLayoutIdentity(design, resolved.volume)
           if (operation === 'layout' && request.method === 'GET') {
             const saved = query.get('fresh') === '1' ? null : await readPrintLayout(cwd, model)
-            return json({ options: resolved, layout: saved?.identity === identity ? saved : null, stale: Boolean(saved && saved.identity !== identity) })
+            return json({ options: resolved, layout: saved?.identity === identity ? saved : null, stale: Boolean(saved && saved.identity !== identity), validationStatus })
           }
           if (query.get('sourceHash') !== design.contentHash || design.analog) return json({ error: 'layoutChanged' }, 409)
           if (operation === 'layout') {
@@ -86,9 +86,9 @@ export function registerPrintLayout(ctx, withSource, options) {
           catch (_error) { return json({ error: 'layoutOpenFailed' }, 502) }
           try {
             await writeFileAtomic(join(await realpath(cwd), '.rumi-print-handoff.json'),
-              JSON.stringify({ model, sourceHash: design.contentHash, openedAt: new Date().toISOString() }) + '\n', { mode: 0o600 })
+              JSON.stringify({ model, sourceHash: design.contentHash, validationStatus, openedAt: new Date().toISOString() }) + '\n', { mode: 0o600 })
           } catch (_handoffReceiptError) { /* Handoff already opened in Bambu Studio; keep receipt recording best-effort. */ }
-          return json({ ok: true })
+          return json({ ok: true, validationStatus })
         })
       } catch (_error) { return json({ error: 'layoutFailed' }, 409) }
     },

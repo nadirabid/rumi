@@ -51,10 +51,10 @@ btVector3 vector(const Json& value, double scale = 1) {
 }
 Json coordinates(const btVector3& value, double scale = 1) { return {value.x()*scale, value.y()*scale, value.z()*scale}; }
 struct Settings {
-    double dt, duration, restDuration, retentionDuration, density, force, torque, linearTolerance, angularTolerance, penetration, retentionTravel, retentionTilt;
+    double dt, duration, restDuration, retentionDuration, density, force, torque, linearTolerance, angularTolerance, penetration, initialPenetration, retentionTravel, retentionTilt;
     int iterations, maxTotalSteps, retentionWorkers;
     btVector3 gravity;
-    double friction,movementDegrees,movementMm,assemblyMm;
+    double friction,movementDegrees,movementMm,assemblyMm,assemblyDegrees;
 };
 Settings settings(const Json& value) {
     Settings s;
@@ -68,6 +68,9 @@ Settings settings(const Json& value) {
     s.linearTolerance = number(value,"linearToleranceMm",.001,5)*.001;
     s.angularTolerance = number(value,"angularToleranceDegrees",.1,15)*pi/180;
     s.penetration = number(value,"maxPenetrationMm",.001,1)*.001;
+    s.initialPenetration = value.contains("initialPenetrationMm")
+        ? number(value,"initialPenetrationMm",.001,1)*.001
+        : std::min(s.penetration, .00015);
     s.retentionTravel = number(value,"retentionTravelMm",.1,10)*.001;
     s.retentionTilt = number(value,"retentionTiltDegrees",1,45)*pi/180;
     double iterations = number(value,"iterations",4,200);
@@ -84,6 +87,9 @@ Settings settings(const Json& value) {
     s.movementDegrees=number(value,"movementSampleDegrees",1,90);
     s.movementMm=number(value,"movementSampleMm",.1,10);
     s.assemblyMm=number(value,"assemblySampleMm",.01,2);
+    s.assemblyDegrees=value.contains("assemblySampleDegrees")
+        ? number(value,"assemblySampleDegrees",.5,45)
+        : 5.;
     return s;
 }
 struct Body {
@@ -192,13 +198,20 @@ Body body(const Json& value, const Settings& s, std::size_t& totalTriangles, std
     return b;
 }
 struct Connection {
-    std::string id,kind,parentId,childId;
+    std::string id,kind,parentId,childId,retainer="rigid";
+    bool hasRetainer=false;
     std::size_t parent,child;
     btVector3 axis{0,0,1},parentPivot{0,0,0},childPivot{0,0,0};
     btVector3 transverse, binormal;
     btMatrix3x3 restRotation;
     double low=0,high=0;
 };
+bool isRotationalRetainer(const Connection& c) {
+    return c.kind=="fixed" && (c.retainer=="bayonet" || c.retainer=="threaded");
+}
+bool isFrictionRetainer(const Connection& c) {
+    return c.kind=="fixed" && c.retainer=="friction";
+}
 struct State { std::vector<btTransform> transforms; std::vector<btVector3> linear,angular; std::vector<double> angles; };
 struct Penetration {
     double depth=0;
@@ -267,6 +280,41 @@ struct World {
         }
         return result;
     }
+    struct SnapPenetration {
+        Penetration mate;
+        Penetration other;
+    };
+    SnapPenetration snapPenetration(int bodyA, int bodyB, double mateLimit, double otherLimit) {
+        SnapPenetration result;
+        const btPersistentManifold *deepMate=nullptr, *deepOther=nullptr;
+        const btManifoldPoint *ptMate=nullptr, *ptOther=nullptr;
+        for(int i=0;i<dispatcher.getNumManifolds();++i) {
+            const auto* manifold=dispatcher.getManifoldByIndexInternal(i);
+            const int b0=manifold->getBody0()->getUserIndex();
+            const int b1=manifold->getBody1()->getUserIndex();
+            const bool isMate=(b0==bodyA && b1==bodyB) || (b0==bodyB && b1==bodyA);
+            for(int j=0;j<manifold->getNumContacts();++j) {
+                const auto& point=manifold->getContactPoint(j);
+                const double depth=-point.getDistance();
+                if(isMate) {
+                    if(depth>result.mate.depth) { result.mate.depth=depth; deepMate=manifold; ptMate=&point; }
+                } else {
+                    if(depth>result.other.depth) { result.other.depth=depth; deepOther=manifold; ptOther=&point; }
+                }
+            }
+        }
+        if(!std::isfinite(result.mate.depth) || !std::isfinite(result.other.depth))
+            throw std::runtime_error("Bullet returned nonfinite contact depth");
+        if(ptMate && result.mate.depth>mateLimit) {
+            result.mate.bodies={deepMate->getBody0()->getUserIndex(),deepMate->getBody1()->getUserIndex()};
+            result.mate.position=(ptMate->getPositionWorldOnA()+ptMate->getPositionWorldOnB())*.5;
+        }
+        if(ptOther && result.other.depth>otherLimit) {
+            result.other.bodies={deepOther->getBody0()->getUserIndex(),deepOther->getBody1()->getUserIndex()};
+            result.other.position=(ptOther->getPositionWorldOnA()+ptOther->getPositionWorldOnB())*.5;
+        }
+        return result;
+    }
     State snapshot(const std::vector<double>& angles) {
         State state;state.angles=angles;
         for(auto& b:bodies) {state.transforms.push_back(b->getCenterOfMassTransform());state.linear.push_back(b->getLinearVelocity());state.angular.push_back(b->getAngularVelocity());}
@@ -283,7 +331,8 @@ Measurement measure(World& w,const Connection& c,double previousAngle) {
     auto shift=parent.inverse()*(child*c.childPivot)-c.parentPivot;
     double position=shift.dot(c.axis);
     double drift=c.kind=="prismatic"?(shift-c.axis*position).length():shift.length();
-    double offAxis=c.kind=="revolute"?std::acos(std::clamp(double((rotation*c.axis).dot(c.axis)),-1.,1.)):2*std::acos(std::clamp(std::abs(double(q.w())),0.,1.));
+    // Bayonet and threaded retainers may turn about their lock axis; only axis tilt counts as escape.
+    double offAxis=(c.kind=="revolute"||isRotationalRetainer(c))?std::acos(std::clamp(double((rotation*c.axis).dot(c.axis)),-1.,1.)):2*std::acos(std::clamp(std::abs(double(q.w())),0.,1.));
     if(!std::isfinite(angle)||!std::isfinite(position)||!std::isfinite(drift)||!std::isfinite(offAxis))throw std::runtime_error("Bullet returned nonfinite state");
     return {position,angle,drift,offAxis,principal};
 }
@@ -304,10 +353,13 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
     std::map<std::size_t,double> integratedErrors;
     std::vector<double> driftMark(connections.size(),0),tiltMark(connections.size(),0),driftEnd(connections.size(),0),tiltEnd(connections.size(),0);
     const int markStep=int(std::floor(steps*(1-arrestWindow)));
+    const double startLimit=initial==nullptr?s.initialPenetration:s.penetration;
     w.world.performDiscreteCollisionDetection();
-    auto contact=w.penetration(s.penetration);
+    auto contact=w.penetration(startLimit);
     maxDepth=contact.depth;
-    if(maxDepth>s.penetration)failure="initial_interference";
+    bool collided=false;
+    Penetration collisionContact;
+    if(maxDepth>startLimit) { failure="initial_interference"; collided=true; collisionContact=contact; }
     int completed=0;
     for(int step=0;step<steps && failure.empty();++step) {
         if(loaded<connections.size()) {
@@ -346,9 +398,11 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
         w.world.stepSimulation(s.dt,0,s.dt);completed=step+1;
         contact=w.penetration(s.penetration);
         maxDepth=std::max(maxDepth,contact.depth);
-        if(contact.depth>s.penetration)failure="excessive_penetration";
+        if(contact.depth>s.penetration) { failure="excessive_penetration"; collided=true; collisionContact=contact; }
         for(std::size_t i=0;i<connections.size();++i) {
-            const auto& c=connections[i];auto m=measure(w,c,angles[i]);angles[i]=m.angle;
+            const auto& c=connections[i];
+            if(isFrictionRetainer(c))continue;
+            auto m=measure(w,c,angles[i]);angles[i]=m.angle;
             maxDrift=std::max(maxDrift,m.drift);maxOffAxis=std::max(maxOffAxis,m.offAxis);
             if(step==markStep){driftMark[i]=m.drift;tiltMark[i]=m.offAxis;}
             driftEnd[i]=m.drift;tiltEnd[i]=m.offAxis;
@@ -360,7 +414,7 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
     // A retention load must be arrested: a part still travelling outward over the probe's final window has not stopped inside the bound.
     if(kind=="retention" && failure.empty() && steps>0)
         for(std::size_t i=0;i<connections.size();++i)
-            if(driftEnd[i]-driftMark[i]>arrestFraction*s.retentionTravel || tiltEnd[i]-tiltMark[i]>arrestFraction*s.retentionTilt) {failure="unretained_part";failedConnection=connections[i].id;break;}
+            if(!isFrictionRetainer(connections[i]) && (driftEnd[i]-driftMark[i]>arrestFraction*s.retentionTravel || tiltEnd[i]-tiltMark[i]>arrestFraction*s.retentionTilt)) {failure="unretained_part";failedConnection=connections[i].id;break;}
     Json actual=Json::object();
     for(auto [index,target]:targets) {
         const auto& c=connections[index];auto m=measure(w,c,angles[index]);double value=c.kind=="revolute"?m.angle:m.position;
@@ -371,39 +425,219 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
     Json result{{"kind",kind},{"status",failure.empty()?"passed":"needs_repair"},{"code",failure.empty()?"probe_passed":failure},
       {"durationSeconds",completed*s.dt},{"actual",actual},{"maxPivotDriftMm",maxDrift*1000},{"maxOffAxisDegrees",maxOffAxis*180/pi},
       {"maxPenetrationMm",maxDepth*1000},{"retentionTravelMm",s.retentionTravel*1000},{"maxForceN",maxForce},{"maxTorqueNm",maxTorque}};
-    if(contact.depth>s.penetration)result["collision"]=contact.diagnostic(definitions);
+    if(collided)result["collision"]=collisionContact.diagnostic(definitions);
     if(!failedConnection.empty())result["connection"]=failedConnection;
     return {result,w.snapshot(angles)};
 }
-struct RouteResult {std::string status,code;Json steps,details;};
-// Sampled reverse-disassembly checks preserve the order of removed physical pieces.
-RouteResult assemblyRoute(std::vector<Body>& definitions,std::size_t fixture,const Json& manufacturing,const Settings& s,int& budget) {
+struct DisassemblyAction {
+    std::string kind;
+    btVector3 delta{0,0,0}, pivot{0,0,0}, axis{0,0,1};
+    double degrees=0, pitchM=0, limitMm=0;
+    std::size_t mate=0;
+};
+struct DisassemblyStep {
+    std::string partId;
+    std::size_t part=0;
+    bool isPath=false;
+    std::vector<btVector3> path;
+    std::vector<DisassemblyAction> actions;
+};
+std::vector<DisassemblyStep> parseDisassemblySteps(
+    const std::vector<Body>& definitions, std::size_t fixture, const std::vector<Connection>& connections,
+    const std::map<std::string,std::size_t>& names, const Json& manufacturing) {
     const auto& steps=manufacturing.at("steps");
     if(!steps.is_array() || steps.size()!=definitions.size()-1)throw Invalid("Disassembly steps must cover every nonroot part once");
-    std::map<std::string,std::size_t> names;for(std::size_t i=0;i<definitions.size();++i)names[definitions[i].id]=i;
-    std::set<std::size_t> removed;Json complete=Json::array();World world(definitions,fixture,s);
+    std::map<std::size_t,std::size_t> defaultParent;for(const auto& c:connections)defaultParent[c.child]=c.parent;
+    std::set<std::size_t> seen;
+    std::vector<DisassemblyStep> parsed;
     for(const auto& step:steps) {
-        auto id=text(step,"part");if(!names.count(id)||names.at(id)==fixture||removed.count(names.at(id)))throw Invalid("Disassembly part must be a unique nonroot part");
-        auto selected=names.at(id);const auto& path=step.at("path");
-        if(!path.is_array()||path.size()<2||path.size()>256)throw Invalid("Disassembly path needs 2 to 256 offsets");
-        btVector3 previous=vector(path[0],.001);if(previous.length2()>1e-20)throw Invalid("Disassembly offsets must start at zero");
-        auto* moving=world.bodies[selected].get();auto rest=moving->getCenterOfMassTransform();
-        for(std::size_t i=1;i<path.size();++i) {
-            auto target=vector(path[i],.001);double length=(target-previous).length();int samples=int(std::ceil(length/(s.assemblyMm*.001)));samples=std::max(1,samples);
-            if(samples>s.maxTotalSteps-budget)return {"review","probe_budget_exhausted",complete,{{"part",id},{"phase","assembly_route"}}};
-            budget+=samples;
-            for(int n=0;n<=samples;++n) {
-                const auto travel=(target-previous)*double(n)/samples;
-                auto pose=rest;pose.setOrigin(rest.getOrigin()+previous+travel);moving->setCenterOfMassTransform(pose);world.world.updateSingleAabb(moving);
-                world.world.performDiscreteCollisionDetection();
-                const auto contact=world.penetration(s.penetration);
-                if(contact.depth>s.penetration) {
-                    return {"needs_repair","assembly_path_interference",complete,{{"part",id},{"segment",i-1},
-                        {"offsetMm",coordinates(previous+travel,1000)},{"maxPenetrationMm",contact.depth*1000},{"collision",contact.diagnostic(definitions)}}};
+        if(!step.is_object())throw Invalid("Disassembly step must be an object");
+        DisassemblyStep item;
+        item.partId=text(step,"part");
+        if(!names.count(item.partId)||names.at(item.partId)==fixture||!seen.insert(names.at(item.partId)).second)
+            throw Invalid("Disassembly part must be a unique nonroot part");
+        item.part=names.at(item.partId);
+        const bool hasPath=step.contains("path"), hasActions=step.contains("actions");
+        if(hasPath==hasActions)throw Invalid("Disassembly step must declare either path or actions");
+        for(auto it=step.begin();it!=step.end();++it)
+            if(it.key()!="part" && it.key()!=(hasPath?"path":"actions"))throw Invalid("Unsupported property in disassembly step");
+        item.isPath=hasPath;
+        if(hasPath) {
+            const auto& path=step.at("path");
+            if(!path.is_array()||path.size()<2||path.size()>256)throw Invalid("Disassembly path needs 2 to 256 offsets");
+            btVector3 first=vector(path[0],.001);if(first.length2()>1e-20)throw Invalid("Disassembly offsets must start at zero");
+            for(const auto& point:path)item.path.push_back(vector(point,.001));
+        } else {
+            const auto& actions=step.at("actions");
+            if(!actions.is_array()||actions.empty()||actions.size()>64)throw Invalid("Disassembly actions need 1 to 64 items");
+            for(const auto& action:actions) {
+                if(!action.is_object())throw Invalid("Disassembly action must be an object");
+                DisassemblyAction a;a.kind=text(action,"kind");
+                if(a.kind=="translate") {
+                    for(auto it=action.begin();it!=action.end();++it)if(it.key()!="kind"&&it.key()!="delta")throw Invalid("Unsupported property in translate action");
+                    a.delta=vector(action.at("delta"),.001);
+                    for(int axis=0;axis<3;++axis)if(std::abs(a.delta[axis])>10.)throw Invalid("Translate delta exceeds 10000 mm bound");
+                } else if(a.kind=="rotate") {
+                    for(auto it=action.begin();it!=action.end();++it)
+                        if(it.key()!="kind"&&it.key()!="pivot"&&it.key()!="axis"&&it.key()!="degrees"&&it.key()!="pitchMm")
+                            throw Invalid("Unsupported property in rotate action");
+                    a.pivot=vector(action.at("pivot"),.001);
+                    a.axis=vector(action.at("axis"));
+                    if(a.axis.length()<1e-6)throw Invalid("Rotate action axis must be nonzero");
+                    a.axis.normalize();
+                    a.degrees=number(action,"degrees",-3600,3600);
+                    if(std::abs(a.degrees)<1e-6)throw Invalid("Rotate action degrees must be nonzero");
+                    a.pitchM=action.contains("pitchMm")?number(action,"pitchMm",-1000,1000)*.001:0.;
+                } else if(a.kind=="snap") {
+                    for(auto it=action.begin();it!=action.end();++it)
+                        if(it.key()!="kind"&&it.key()!="delta"&&it.key()!="maxInterferenceMm"&&it.key()!="mate")
+                            throw Invalid("Unsupported property in snap action");
+                    a.delta=vector(action.at("delta"),.001);
+                    for(int axis=0;axis<3;++axis)if(std::abs(a.delta[axis])>10.)throw Invalid("Snap delta exceeds 10000 mm bound");
+                    if(a.delta.length()<1e-9)throw Invalid("Snap delta must be nonzero");
+                    a.limitMm=number(action,"maxInterferenceMm",1e-6,2.5);
+                    if(action.contains("mate")) {
+                        auto mateId=text(action,"mate");
+                        if(!names.count(mateId)||mateId==item.partId)throw Invalid("Snap mate must name another assembly part");
+                        a.mate=names.at(mateId);
+                    } else {
+                        if(!defaultParent.count(item.part))throw Invalid("Snap action requires a mate or parent connection");
+                        a.mate=defaultParent.at(item.part);
+                    }
+                } else {
+                    throw Invalid("Unsupported disassembly action kind");
+                }
+                item.actions.push_back(std::move(a));
+            }
+        }
+        parsed.push_back(std::move(item));
+    }
+    return parsed;
+}
+struct RouteResult {std::string status,code;Json steps,details;};
+// Sampled reverse-disassembly checks preserve the order of removed physical pieces.
+RouteResult assemblyRoute(std::vector<Body>& definitions,std::size_t fixture,const std::vector<DisassemblyStep>& steps,const Settings& s,int& budget) {
+    std::set<std::size_t> removed;Json complete=Json::array();World world(definitions,fixture,s);
+    bool usedExtended=false;
+    for(const auto& step:steps) {
+        const auto& id=step.partId;
+        const auto selected=step.part;
+        auto* moving=world.bodies[selected].get();
+        auto currentPose=moving->getCenterOfMassTransform();
+        const auto restOrigin=currentPose.getOrigin();
+        const auto& partDef=definitions[selected];
+        if(step.isPath) {
+            btVector3 previous=step.path[0];
+            auto rest=currentPose;
+            for(std::size_t i=1;i<step.path.size();++i) {
+                const auto& target=step.path[i];double length=(target-previous).length();int samples=int(std::ceil(length/(s.assemblyMm*.001)));samples=std::max(1,samples);
+                if(samples>s.maxTotalSteps-budget)return {"review","probe_budget_exhausted",complete,{{"part",id},{"phase","assembly_route"}}};
+                budget+=samples;
+                for(int n=0;n<=samples;++n) {
+                    const auto travel=(target-previous)*double(n)/samples;
+                    auto pose=rest;pose.setOrigin(rest.getOrigin()+previous+travel);moving->setCenterOfMassTransform(pose);world.world.updateSingleAabb(moving);
+                    world.world.performDiscreteCollisionDetection();
+                    const auto contact=world.penetration(s.initialPenetration);
+                    if(contact.depth>s.initialPenetration) {
+                        return {"needs_repair","assembly_path_interference",complete,{{"part",id},{"segment",i-1},
+                            {"offsetMm",coordinates(previous+travel,1000)},{"maxPenetrationMm",contact.depth*1000},{"collision",contact.diagnostic(definitions)}}};
+                    }
+                }
+                previous=target;
+            }
+            currentPose=rest;currentPose.setOrigin(rest.getOrigin()+previous);
+        } else {
+            for(std::size_t aIdx=0;aIdx<step.actions.size();++aIdx) {
+                const auto& action=step.actions[aIdx];
+                if(action.kind=="translate") {
+                    int samples=std::max(1,int(std::ceil(action.delta.length()/(s.assemblyMm*.001))));
+                    if(samples>s.maxTotalSteps-budget)return {"review","probe_budget_exhausted",complete,{{"part",id},{"phase","assembly_route"}}};
+                    budget+=samples;
+                    for(int n=0;n<=samples;++n) {
+                        const double t=double(n)/samples;
+                        auto pose=currentPose;pose.setOrigin(currentPose.getOrigin()+action.delta*t);
+                        moving->setCenterOfMassTransform(pose);world.world.updateSingleAabb(moving);
+                        world.world.performDiscreteCollisionDetection();
+                        const auto contact=world.penetration(s.initialPenetration);
+                        if(contact.depth>s.initialPenetration) {
+                            return {"needs_repair","assembly_path_interference",complete,{{"part",id},{"action",aIdx},{"kind","translate"},
+                                {"offsetMm",coordinates(pose.getOrigin()-restOrigin,1000)},{"maxPenetrationMm",contact.depth*1000},{"collision",contact.diagnostic(definitions)}}};
+                        }
+                    }
+                    currentPose.setOrigin(currentPose.getOrigin()+action.delta);
+                } else if(action.kind=="rotate") {
+                    usedExtended=true;
+                    double totalRad=action.degrees*pi/180.;
+                    double axialM=(action.degrees/360.)*action.pitchM;
+                    double maxR=0;
+                    for(const auto& v:partDef.vertices) {
+                        btVector3 local=partDef.basis.transpose()*(v-partDef.com);
+                        btVector3 worldV=currentPose*local;
+                        btVector3 rel=worldV-action.pivot;
+                        double r=(rel-action.axis*rel.dot(action.axis)).length();
+                        if(r>maxR)maxR=r;
+                    }
+                    int angularSamples=int(std::ceil(std::abs(action.degrees)/s.assemblyDegrees));
+                    int axialSamples=int(std::ceil(std::abs(axialM)/(s.assemblyMm*.001)));
+                    int arcSamples=int(std::ceil(maxR*std::abs(totalRad)/(s.assemblyMm*.001)));
+                    int samples=std::max({1,angularSamples,axialSamples,arcSamples});
+                    if(samples>s.maxTotalSteps-budget)return {"review","probe_budget_exhausted",complete,{{"part",id},{"phase","assembly_route"}}};
+                    budget+=samples;
+                    for(int n=0;n<=samples;++n) {
+                        const double t=double(n)/samples;
+                        btMatrix3x3 rot(btQuaternion(action.axis,totalRad*t));
+                        btTransform pose(rot*currentPose.getBasis(),action.pivot+rot*(currentPose.getOrigin()-action.pivot)+action.axis*(axialM*t));
+                        moving->setCenterOfMassTransform(pose);world.world.updateSingleAabb(moving);
+                        world.world.performDiscreteCollisionDetection();
+                        const auto contact=world.penetration(s.initialPenetration);
+                        if(contact.depth>s.initialPenetration) {
+                            return {"needs_repair","assembly_path_interference",complete,{{"part",id},{"action",aIdx},{"kind","rotate"},
+                                {"degrees",action.degrees*t},{"offsetMm",coordinates(pose.getOrigin()-restOrigin,1000)},
+                                {"maxPenetrationMm",contact.depth*1000},{"collision",contact.diagnostic(definitions)}}};
+                        }
+                    }
+                    btMatrix3x3 finalRot(btQuaternion(action.axis,totalRad));
+                    currentPose=btTransform(finalRot*currentPose.getBasis(),action.pivot+finalRot*(currentPose.getOrigin()-action.pivot)+action.axis*axialM);
+                } else {
+                    usedExtended=true;
+                    const double limitM=action.limitMm*.001;
+                    int samples=std::max(2,int(std::ceil(action.delta.length()/(s.assemblyMm*.001))));
+                    if(samples>s.maxTotalSteps-budget)return {"review","probe_budget_exhausted",complete,{{"part",id},{"phase","assembly_route"}}};
+                    budget+=samples;
+                    for(int n=0;n<=samples;++n) {
+                        const double t=double(n)/samples;
+                        auto pose=currentPose;pose.setOrigin(currentPose.getOrigin()+action.delta*t);
+                        moving->setCenterOfMassTransform(pose);world.world.updateSingleAabb(moving);
+                        world.world.performDiscreteCollisionDetection();
+                        if(n==0||n==samples) {
+                            const auto contact=world.penetration(s.initialPenetration);
+                            if(contact.depth>s.initialPenetration) {
+                                return {"needs_repair","assembly_path_interference",complete,{{"part",id},{"action",aIdx},{"kind","snap"},
+                                    {"reason",n==0?"snap_start_interference":"snap_end_interference"},
+                                    {"offsetMm",coordinates(pose.getOrigin()-restOrigin,1000)},
+                                    {"maxPenetrationMm",contact.depth*1000},{"collision",contact.diagnostic(definitions)}}};
+                            }
+                        } else {
+                            const auto sp=world.snapPenetration(int(selected),int(action.mate),limitM,s.initialPenetration);
+                            if(sp.other.depth>s.initialPenetration) {
+                                return {"needs_repair","assembly_path_interference",complete,{{"part",id},{"action",aIdx},{"kind","snap"},
+                                    {"reason","snap_unrelated_part_interference"},{"mate",definitions[action.mate].id},
+                                    {"offsetMm",coordinates(pose.getOrigin()-restOrigin,1000)},
+                                    {"maxPenetrationMm",sp.other.depth*1000},{"collision",sp.other.diagnostic(definitions)}}};
+                            }
+                            if(sp.mate.depth>limitM) {
+                                return {"needs_repair","assembly_path_interference",complete,{{"part",id},{"action",aIdx},{"kind","snap"},
+                                    {"reason","snap_interference_exceeded"},{"mate",definitions[action.mate].id},{"limitMm",action.limitMm},
+                                    {"offsetMm",coordinates(pose.getOrigin()-restOrigin,1000)},
+                                    {"maxPenetrationMm",sp.mate.depth*1000},{"collision",sp.mate.diagnostic(definitions)}}};
+                            }
+                        }
+                    }
+                    currentPose.setOrigin(currentPose.getOrigin()+action.delta);
                 }
             }
-            previous=target;
         }
+        moving->setCenterOfMassTransform(currentPose);world.world.updateSingleAabb(moving);
         btVector3 low,high;moving->getAabb(low,high);
         for(std::size_t i=0;i<definitions.size();++i)if(i!=selected&&!removed.count(i)) {
             btVector3 otherLow,otherHigh;world.bodies[i]->getAabb(otherLow,otherHigh);bool overlaps=true;
@@ -412,7 +646,8 @@ RouteResult assemblyRoute(std::vector<Body>& definitions,std::size_t fixture,con
         }
         world.world.removeRigidBody(moving);world.removed.insert(selected);removed.insert(selected);complete.push_back(id);
     }
-    return {"passed","assembly_route_sampled",complete,{{"sampleSpacingMm",s.assemblyMm},{"scope","translation_only_reverse_disassembly"}}};
+    return {"passed","assembly_route_sampled",complete,{{"sampleSpacingMm",s.assemblyMm},{"sampleSpacingDegrees",s.assemblyDegrees},
+        {"scope",usedExtended?"rigid_and_bounded_snap_reverse_disassembly":"translation_only_reverse_disassembly"}}};
 }
 Json evaluate(const Json& request) {
     if(!request.is_object() || request.value("version",0)!=2)throw Invalid("Expected assembly protocol version 2");
@@ -442,10 +677,25 @@ Json evaluate(const Json& request) {
         btVector3 pivot=bodies[c.child].com;
         btVector3 worldAxis(0, 0, 1);
         if(c.kind!="fixed") {
+            if(input.contains("retainer"))throw Invalid("Only fixed connections may declare a retainer");
             worldAxis=vector(input.at("axis"));if(worldAxis.length()<1e-6)throw Invalid("Connection axis must be nonzero");worldAxis.normalize();
             pivot=vector(input.at("pivot"),.001);auto range=input.at("range");if(!range.is_array()||range.size()!=2)throw Invalid("Connection range needs two bounds");
             Json limits{{"low",range[0]},{"high",range[1]}};double limit=c.kind=="revolute"?180:1000,scale=c.kind=="revolute"?pi/180:.001;
             c.low=number(limits,"low",-limit,0)*scale;c.high=number(limits,"high",0,limit)*scale;if(c.low==c.high)throw Invalid("Connection range must include movement");
+        } else {
+            if(input.contains("retainer")) {
+                c.retainer=text(input,"retainer");
+                if(c.retainer!="rigid"&&c.retainer!="bayonet"&&c.retainer!="threaded"&&c.retainer!="snap"&&c.retainer!="friction")
+                    throw Invalid("Unsupported fixed connection retainer");
+                c.hasRetainer=true;
+            }
+            if(isRotationalRetainer(c)) {
+                if(!input.contains("axis"))throw Invalid("Bayonet and threaded retainers require a nonzero axis");
+                worldAxis=vector(input.at("axis"));if(worldAxis.length()<1e-6)throw Invalid("Connection axis must be nonzero");worldAxis.normalize();
+            } else if(input.contains("axis")) {
+                worldAxis=vector(input.at("axis"));if(worldAxis.length()<1e-6)throw Invalid("Connection axis must be nonzero");worldAxis.normalize();
+            }
+            if(input.contains("pivot"))pivot=vector(input.at("pivot"),.001);
         }
         // Probe directions belong to the declared rest-world frame, independent of inertia eigenvectors.
         auto inverseParent = parent.getBasis().transpose();
@@ -460,6 +710,11 @@ Json evaluate(const Json& request) {
     while(!pending.empty()) {auto i=pending.back();pending.pop_back();if(!reached.insert(i).second)continue;for(auto c:children[i])pending.push_back(c);}
     if(reached.size()!=bodies.size())throw Invalid("Every part needs a connection path from root");
     std::string mode=text(a.at("manufacturing"),"mode");if(mode!="print-in-place"&&mode!="separate")throw Invalid("Unsupported manufacturing mode");
+    std::vector<DisassemblyStep> disassemblySteps;
+    if(a.at("manufacturing").contains("steps")) {
+        if(mode!="separate")throw Invalid("Only separate assemblies may declare disassembly steps");
+        disassemblySteps=parseDisassemblySteps(bodies,fixture,connections,names,a.at("manufacturing"));
+    }
     std::vector<std::pair<std::string,std::vector<std::map<std::size_t,double>>>> sequences;
     if(a.contains("sequences")) {
         if(!a.at("sequences").is_array()||a.at("sequences").size()>32)throw Invalid("Expected at most 32 sequences");
@@ -481,14 +736,27 @@ Json evaluate(const Json& request) {
             sequences.push_back({id,points});
         }
     }
-    Json checks=Json::array(),results=Json::array(),completedSequences=Json::array();bool repair=false,review=false;int budget=0;
-    for(const auto& c:connections)results.push_back({{"id",c.id},{"parent",c.parentId},{"child",c.childId},{"kind",c.kind},{"probes",Json::array()}});
+    Json checks=Json::array(),results=Json::array(),completedSequences=Json::array();bool repair=false,review=false,hasFrictionRetainer=false;int budget=0;
+    for(const auto& c:connections) {
+        Json entry{{"id",c.id},{"parent",c.parentId},{"child",c.childId},{"kind",c.kind},{"probes",Json::array()}};
+        if(c.hasRetainer)entry["retainer"]=c.retainer;
+        results.push_back(std::move(entry));
+    }
     auto finding=[&](std::string code,std::string id,std::string severity,Json details) {checks.push_back({{"code",code},{"connection",id},{"severity",severity},{"count",1},{"details",details}});repair|=severity=="error";review|=severity=="warning";};
     for(const auto& b:bodies)if(!b.topology.empty())finding(b.topology,"",b.topology=="unsupported_body_topology"?"warning":"error",{{"body",b.id}});
     if(parents[fixture]!=0 || std::any_of(parents.begin(),parents.end(),[](int n){return n>1;}))finding("unsupported_coupled_motion","","warning",{{"reason","closed_loop_or_multiple_parent"}});
     bool simulate=!repair&&!review;
+    for(const auto& c:connections)if(isFrictionRetainer(c)) {
+        hasFrictionRetainer=true;
+        finding("retainer_unverified_friction",c.id,"warning",{{"retainer","friction"},{"reason","friction_fit_not_geometrically_retained"}});
+    }
     // Retention covers every connection at the rest pose, at range endpoints and at the last waypoint; elsewhere only the moved connections.
-    auto retentionSteps=[&](std::size_t index){return (connections[index].kind=="fixed"?12:10)*std::ceil(s.retentionDuration/s.dt);};
+    auto retentionSteps=[&](std::size_t index){
+        const auto& c=connections[index];
+        if(isFrictionRetainer(c))return 0.;
+        const int probes=(c.kind=="fixed" && !isRotationalRetainer(c))?12:10;
+        return probes*std::ceil(s.retentionDuration/s.dt);
+    };
     std::vector<std::size_t> allConnections;for(std::size_t i=0;i<connections.size();++i)allConnections.push_back(i);
     double estimated=std::ceil(s.restDuration/s.dt),retentionTotal=0;
     for(auto i:allConnections)retentionTotal+=retentionSteps(i);
@@ -551,10 +819,13 @@ Json evaluate(const Json& request) {
         return true;
     };
     auto retention=[&](std::size_t index,const State& state) {
-        const auto& c=connections[index];const auto& child=bodies[c.child];const auto& parent=bodies[c.parent];
+        const auto& c=connections[index];
+        if(isFrictionRetainer(c))return true;
+        const auto& child=bodies[c.child];const auto& parent=bodies[c.parent];
         double inverseMass=1/child.mass+(c.parent==fixture?0:1/parent.mass),mass=1/inverseMass;
         std::vector<btVector3> translations{c.transverse,c.binormal},rotations{c.transverse,c.binormal};
-        if(c.kind!="prismatic")translations.push_back(c.axis);if(c.kind!="revolute")rotations.push_back(c.axis);
+        if(c.kind!="prismatic")translations.push_back(c.axis);
+        if(c.kind!="revolute" && !isRotationalRetainer(c))rotations.push_back(c.axis);
         double force=retentionLoad*mass*s.retentionTravel/(s.retentionDuration*s.retentionDuration);
         if(force>s.force) {finding("probe_inconclusive",c.id,"warning",{{"reason","force_cap"}});return false;}
         if(!loads(index,state,translations,force,false))return false;
@@ -606,14 +877,17 @@ Json evaluate(const Json& request) {
             if(complete)completedSequences.push_back(id);
         }
     }
-    bool complete=simulate;
+    bool routeOk=true;
     Json routeSteps=Json::array();
     // Declared removal steps are checked; without them the probes alone decide verification.
-    if(mode=="separate" && complete && a.at("manufacturing").contains("steps")) {
-        auto route=assemblyRoute(bodies,fixture,a.at("manufacturing"),s,budget);routeSteps=route.steps;
-        if(route.status!="passed") {complete=false;finding(route.code,"",route.status=="needs_repair"?"error":"warning",route.details);}
+    if(mode=="separate" && simulate && !disassemblySteps.empty()) {
+        auto route=assemblyRoute(bodies,fixture,disassemblySteps,s,budget);routeSteps=route.steps;
+        if(route.status!="passed") {routeOk=false;finding(route.code,"",route.status=="needs_repair"?"error":"warning",route.details);}
     }
-    Json partIds=Json::array(),connectionIds=Json::array();for(auto& b:bodies)partIds.push_back(b.id);if(complete)for(auto& c:connections)connectionIds.push_back(c.id);
+    bool complete=simulate && routeOk && !hasFrictionRetainer;
+    Json partIds=Json::array(),connectionIds=Json::array();for(auto& b:bodies)partIds.push_back(b.id);
+    if(complete)for(auto& c:connections)connectionIds.push_back(c.id);
+    else if(simulate && routeOk && hasFrictionRetainer && !repair)for(auto& c:connections)if(!isFrictionRetainer(c))connectionIds.push_back(c.id);
     return {{"version",2},{"engine","bullet"},{"bulletVersion",btGetVersion()},{"precision","double"},{"status",repair?"needs_repair":review?"review":"passed"},
       {"printReady",false},{"assemblyVerified",complete&&!repair&&!review},{"checks",checks},{"connections",results},
       {"coverage",{{"parts",partIds},{"connections",connectionIds},{"sequences",completedSequences},{"assemblySteps",routeSteps},{"complete",complete}}},{"policy",request.at("settings")}};
@@ -624,7 +898,7 @@ Json selfTest() {
         for(auto point:std::vector<btVector3>{{-1,-1,-1},{1,-1,-1},{1,1,-1},{-1,1,-1},{-1,-1,1},{1,-1,1},{1,1,1},{-1,1,1}}) vertices.push_back(coordinates(center+half*point));
         return Json{{"id",id},{"vertices",vertices},{"triangles",{{0,2,1},{0,3,2},{4,5,6},{4,6,7},{0,1,5},{0,5,4},{1,2,6},{1,6,5},{2,3,7},{2,7,6},{3,0,4},{3,4,7}}}};
     };
-    Settings s{.0005,.2,.02,.05,1250,1,.05,.0005,3*pi/180,.00005,.002,15*pi/180,40,2000000,1,{0,0,0},0,15,2,.2};
+    Settings s{.0005,.2,.02,.05,1250,1,.05,.0005,3*pi/180,.00005,.00005,.002,15*pi/180,40,2000000,1,{0,0,0},0,15,2,.2,5};
     std::size_t triangles=0,vertices=0; std::vector<Body> definitions;
     definitions.push_back(body(box("fixed",{0,-3,0},{5,1,5}),s,triangles,vertices));
     definitions.push_back(body(box("moving",{0,0,0},{1,1,1}),s,triangles,vertices));

@@ -31,9 +31,69 @@ export function printParts(design) {
   return [...groups.values()]
 }
 
+const CANDIDATE_ROTATIONS = [
+  [0, 0, 0], [0, 0, 90],
+  [180, 0, 0], [180, 0, 90],
+  [90, 0, 0], [90, 0, 90],
+  [270, 0, 0], [270, 0, 90],
+  [0, 90, 0], [0, 90, 90],
+  [0, 270, 0], [0, 270, 90],
+]
+const BED_CONTACT_NORMAL_Z = -0.985
+const BED_CONTACT_TOLERANCE_MM = 0.15
+const OVERHANG_NORMAL_Z = -Math.SQRT1_2
+
 function dimensions(part, rotation) {
   const bounds = part.bounds.clone().applyMatrix4(rotationMatrix(rotation))
   return { bounds, size: bounds.getSize(new THREE.Vector3()), center: bounds.getCenter(new THREE.Vector3()) }
+}
+
+/** Score a candidate print orientation by flat bed-contact footprint area, overhang penalty, and Z height.
+ * @param {object} part Printable group from `printParts`.
+ * @param {number[]} rotation Axis-aligned Euler degrees `[x, y, z]`.
+ * @returns {object} Bounds, size, contact/overhang areas, and lower-is-better composite score.
+ */
+export function evaluatePartOrientation(part, rotation) {
+  const rot = rotationMatrix(rotation)
+  const measured = dimensions(part, rotation)
+  const bedZ = measured.bounds.min.z + BED_CONTACT_TOLERANCE_MM
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3()
+  const ab = new THREE.Vector3(), ac = new THREE.Vector3(), cross = new THREE.Vector3()
+  let bedContactArea = 0, overhangArea = 0, totalArea = 0
+  for (const { node, matrix } of part.meshes) {
+    const world = rot.clone().multiply(matrix)
+    const position = node.geometry.getAttribute('position'), index = node.geometry.index
+    const count = index?.count ?? position.count
+    const flipped = world.determinant() < 0
+    for (let i = 0; i + 2 < count; i += 3) {
+      const i0 = index ? index.getX(i) : i
+      const i1 = index ? index.getX(flipped ? i + 2 : i + 1) : (flipped ? i + 2 : i + 1)
+      const i2 = index ? index.getX(flipped ? i + 1 : i + 2) : (flipped ? i + 1 : i + 2)
+      a.fromBufferAttribute(position, i0).applyMatrix4(world)
+      b.fromBufferAttribute(position, i1).applyMatrix4(world)
+      c.fromBufferAttribute(position, i2).applyMatrix4(world)
+      ab.subVectors(b, a)
+      ac.subVectors(c, a)
+      cross.crossVectors(ab, ac)
+      const twiceArea = cross.length()
+      if (twiceArea <= 1e-12) continue
+      const area = twiceArea * 0.5
+      const nz = cross.z / twiceArea
+      const maxZ = Math.max(a.z, b.z, c.z)
+      totalArea += area
+      if (nz <= BED_CONTACT_NORMAL_Z && maxZ <= bedZ) {
+        bedContactArea += area
+      } else if (nz < OVERHANG_NORMAL_Z) {
+        overhangArea += area * (-nz)
+      }
+    }
+  }
+  const maxDim = Math.max(measured.size.x, measured.size.y, measured.size.z, 1)
+  const overhangRatio = totalArea > 0 ? overhangArea / totalArea : 0
+  const bedRatio = totalArea > 0 ? bedContactArea / totalArea : 0
+  const heightRatio = measured.size.z / maxDim
+  const score = 4 * overhangRatio - 2 * bedRatio + 0.5 * heightRatio
+  return { ...measured, bedContactArea, overhangArea, totalArea, score }
 }
 
 /** Pack bounding rectangles onto additional plates, preserving scale and part grouping.
@@ -42,11 +102,14 @@ function dimensions(part, rotation) {
  * @returns {object} Layout; oversized parts remain visible and fail layoutIssues.
  */
 export function arrangePrintParts(parts, { identity, volume, gap }) {
-  const rotations = [[0, 0, 0], [90, 0, 0], [0, 90, 0], [0, 0, 90], [90, 0, 90], [0, 90, 90]]
   const oriented = parts.map(part => {
-    const choices = rotations.map(rotation => ({ rotation, ...dimensions(part, rotation) }))
+    const choices = CANDIDATE_ROTATIONS.map((rotation, index) => ({ rotation, index, ...evaluatePartOrientation(part, rotation) }))
     const fits = choices.filter(item => item.size.x + 2 * gap <= volume.x && item.size.y + 2 * gap <= volume.y && item.size.z <= volume.z)
-    const choice = (fits.length ? fits : choices).sort((a, b) => a.size.z - b.size.z || a.size.y - b.size.y)[0]
+    const choice = (fits.length ? fits : choices).sort((a, b) =>
+      (Math.abs(a.score - b.score) > 1e-5 ? a.score - b.score : 0)
+      || (Math.abs(a.size.z - b.size.z) > 1e-5 ? a.size.z - b.size.z : 0)
+      || (Math.abs(a.size.y - b.size.y) > 1e-5 ? a.size.y - b.size.y : 0)
+      || a.index - b.index)[0]
     return { part, ...choice }
   }).sort((a, b) => b.size.y - a.size.y || b.size.x - a.size.x || a.part.id.localeCompare(b.part.id))
   const placements = [], plates = []

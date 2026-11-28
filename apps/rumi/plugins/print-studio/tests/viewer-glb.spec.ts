@@ -12,7 +12,11 @@ import { disposeModel } from '../viewer/viewport/model.js'
 import { analyzeMesh } from '../viewer/checks.js'
 import { createSource } from '../viewer/source.js'
 import { discoverModels } from '../viewer/catalog.js'
-import { applyBlender, blenderStatus } from '../blender/host.js'
+import { applyCad, cadStatus } from '../cad/host.js'
+import { runValidationStage } from '../cad/validation-runner.js'
+import { checkControlGeometry } from '../cad/control-geometry.js'
+import { normalizePlacement } from '../viewer/transform.js'
+import { normalizeShape, INITIAL_VALUES } from '../viewer/analog/spec.js'
 
 function glb(extra = {}) {
   const positions = new Float32Array([0, 0, 0, 0.1, 0, 0, 0, 0.3, -0.2])
@@ -90,26 +94,29 @@ it('publishes immutable USD layers, retains the previous version on a partial sa
   } finally { await owner.fiber.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-it('does not silently fall back from an invalid explicit Blender executable', async () => {
-  expect(await blenderStatus('/missing/Blender', '/missing')).toMatchObject({ status: 'invalid_executable' })
-  const status = await blenderStatus(process.execPath, '/unused')
+it('does not silently fall back from an invalid explicit CAD executable', async () => {
+  expect(await cadStatus('/missing/cad-python', '/missing')).toMatchObject({ status: 'invalid_executable' })
+  const status = await cadStatus(process.execPath, '/unused')
   expect(status.status).toBe('ready')
-  expect(await readFile(status.helper, 'utf8')).toContain('def publish(')
+  expect(status.helper).toMatch(/cad\/rumi_cad\.py$/u)
+  expect(status.joints).toMatch(/cad\/rumi_joints\.py$/u)
+  expect(status.skill).toBe('cad-modeling')
 })
 
-it('writes the project check settings only when Blender is ready', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'rumi-blender-status-'))
+it('writes the project check settings only when CAD is ready', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rumi-cad-status-'))
   try {
     const validation = { minimumThicknessMm: 1, minimumClearanceMm: 0.2 }
     const tools: Array<{ name: string, execute(args: object, exec: object): Promise<string> }> = []
     const ctx = { effect: (run: () => unknown) => run(), tools: { register: (tool: typeof tools[number]) => tools.push(tool) },
       workingDirectory: { ensure: async () => root } }
-    const status = (blenderExecutable: string) => {
+    const status = (cadExecutable: string) => {
       tools.length = 0
-      applyBlender(ctx, (tool: object) => tool, { blenderExecutable, blenderHome: '/unused', validation })
+      applyCad(ctx, (tool: object) => tool, { cadExecutable, cadHome: '/unused', validation })
+      expect(tools[0]!.name).toBe('cad_status')
       return tools[0]!.execute({}, { agent: {}, signal: new AbortController().signal }).then(JSON.parse)
     }
-    expect(await status('/missing/Blender')).toMatchObject({ status: 'invalid_executable' })
+    expect(await status('/missing/cad-python')).toMatchObject({ status: 'invalid_executable' })
     await expect(readFile(join(root, '.rumi/print-checks.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     const ready = await status(process.execPath)
     expect(ready).toMatchObject({ status: 'ready', checks: join(root, '.rumi/print-checks.json') })
@@ -117,4 +124,29 @@ it('writes the project check settings only when Blender is ready', async () => {
     expect(JSON.parse(await readFile(ready.checks, 'utf8'))).toEqual({ version: 1, settings: validation })
     expect(await readdir(join(root, '.rumi'))).toEqual(['print-checks.json'])
   } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('runs CAD validation and control-geometry checks through the local build123d runtime when available', async () => {
+  const status = await cadStatus('', '/unused')
+  if (status.status !== 'ready') return
+  const config = {
+    cadExecutable: status.executable,
+    cadHome: '/unused',
+    validationTimeoutMs: 30_000,
+    validation: { minimumThicknessMm: 1, degenerateThreshold: 0.000001, overhangDegrees: 45, sharpDegrees: 160, distortionDegrees: 45, minimumClearanceMm: 0.2 },
+  }
+  const signal = new AbortController().signal
+  const bytes = robotUsd()
+  const report = await runValidationStage(config, { format: 'usd', bytes, transform: normalizePlacement(), volume: { x: 300, y: 320, z: 320 } }, signal, 'fit')
+  expect(report.version).toBe(1)
+  expect(report.printReady).toBe(false)
+  expect(report.printerVolumeChecked).toBe(true)
+  expect(report.dimensions.x).toBeCloseTo(45, 1)
+  const spec = normalizeShape({
+    operation: 'bulge', label: 'Door', center: [25, 0, 0], radii: [15, 15, 15], direction: [1, 0, 0], limit: 4, parts: ['Door'],
+    values: INITIAL_VALUES,
+  })
+  const cases = await checkControlGeometry(config, bytes, { spec, cases: [{ id: 'amount:max', baseline: INITIAL_VALUES, values: { ...INITIAL_VALUES, amount: 1 } }] }, signal)
+  expect(cases).toHaveLength(1)
+  expect(cases[0]).toMatchObject({ id: 'amount:max', newIntersectionPairs: 0 })
 })

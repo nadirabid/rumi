@@ -1,0 +1,122 @@
+/** Bounded background CAD validation of immutable input bytes. */
+import { spawn } from 'node:child_process'
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { cadStatus } from './host.js'
+import { validateUsd } from '../viewer/usd.js'
+import { validateRobotAssembly } from '../viewer/mechanics.js'
+import { runBullet } from '../bullet/runner.js'
+
+/**
+ * Run bundled CAD geometry checks and Bullet assembly probes with explicit policy.
+ * Infrastructure failures never yield a passing report.
+ * @param {object} config Resolved plugin configuration.
+ * @param {object} input Immutable bytes, format, placement, and volume.
+ * @param {AbortSignal} signal Owner cancellation; completion awaits process close.
+ * @returns {Promise<object>} Validated structured findings.
+ */
+export async function runValidation(config, input, signal) {
+  return runValidationStage(config, input, signal, 'all')
+}
+
+/** Run one explicit check; fit retains prepared bodies for a later Bullet call.
+ * @param {object} config Resolved validation policy.
+ * @param {object} input Immutable model snapshot.
+ * @param {AbortSignal} signal Tool cancellation.
+ * @param {string} stage assembly, geometry, fit, or all for integration tests.
+ * @returns {Promise<object>} Findings and optional prepared physical geometry; subprocess failures reject.
+ */
+export async function runValidationStage(config, input, signal, stage) {
+  if (!['usd', 'stl'].includes(input.format)) throw new Error('Validation requires USD or STL')
+  if (input.format === 'usd') validateUsd(input.bytes)
+  const staticMetadata = validateRobotAssembly({ nodes: [{ name: 'model', mesh: 0 }] })
+  let metadata
+  const cad = await cadStatus(config.cadExecutable, config.cadHome)
+  if (cad.status !== 'ready') throw new Error(cad.message)
+  const directory = await mkdtemp(join(tmpdir(), 'rumi-validation-'))
+  try {
+    const path = join(directory, `model.${input.format === 'usd' ? 'usda' : input.format}`), output = join(directory, 'result.json')
+    await writeFile(path, input.bytes, { flag: 'wx', mode: 0o600 })
+    const request = join(directory, 'request.json')
+    const mechanicsOutput = join(directory, 'mechanics.json')
+    await writeFile(request, JSON.stringify({ input: path, output, transform: input.transform, volume: input.volume,
+      settings: config.validation, stage,
+      ...(['all', 'fit'].includes(stage) ? { mechanicsOutput } : {}), ...(input.format === 'stl' ? { assembly: staticMetadata.assembly } : {}),
+    }), { flag: 'wx', mode: 0o600 })
+    const script = fileURLToPath(new URL('./validate.py', import.meta.url)).replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`)
+    signal.throwIfAborted()
+    await runCadCheck(cad.executable, script, request, config.validationTimeoutMs, signal)
+    const report = JSON.parse(await readFile(output, 'utf8'))
+    if (report?.version !== 1 || !['passed', 'review', 'needs_repair'].includes(report.status)
+      || report.printReady !== false || !Array.isArray(report.checks) || report.checks.length > 32
+      || !report.checks.every(c => typeof c.code === 'string' && Number.isSafeInteger(c.count) && c.count >= 0 && ['warning', 'error'].includes(c.severity))
+      || !['x', 'y', 'z'].every(a => Number.isFinite(report.dimensions?.[a]) && report.dimensions[a] >= 0)) throw new Error('Invalid CAD validation report')
+    metadata = report.robotError
+      ? { declared: true, assembly: null, motionKeys: [], motionRanges: [], checks: [{ code: 'assembly_description_invalid', severity: 'error', count: 1, message: report.robotError }] }
+      : report.robot ? validateRobotAssembly(report.robot) : staticMetadata
+    delete report.robot
+    delete report.robotError
+    report.intent = { assembly: metadata.assembly, motionKeys: metadata.motionKeys, motionRanges: metadata.motionRanges }
+    if (stage !== 'all') {
+      if (stage === 'assembly') {
+        report.checks.push(...metadata.checks)
+        report.status = report.checks.some(check => check.count && check.severity === 'error') ? 'needs_repair' : 'passed'
+      }
+      if (stage === 'fit') report.printerVolumeChecked = input.volume !== null
+      if (stage === 'fit' && !report.checks.some(check => check.severity === 'error' && check.count) && metadata.assembly) {
+        report.preparedGeometry = JSON.parse(await readFile(mechanicsOutput, 'utf8'))
+      }
+      return report
+    }
+    if (metadata.declared || metadata.checks.length) {
+      let mechanics
+      if (metadata.checks.length) mechanics = { version: 2, engine: 'bullet', status: 'needs_repair', assemblyVerified: false,
+        checks: metadata.checks, connections: [], printReady: false }
+      else if (report.status === 'needs_repair') mechanics = { status: 'blocked_by_geometry', assemblyVerified: false,
+        checks: [], connections: [], printReady: false }
+      else if (!metadata.assembly) mechanics = { status: 'needs_repair', assemblyVerified: false,
+        checks: [{ code: 'assembly_description_required', severity: 'error', count: 1 }], connections: [], printReady: false }
+      else {
+        const geometry = JSON.parse(await readFile(mechanicsOutput, 'utf8'))
+        mechanics = await runBullet(config, geometry, signal)
+      }
+      report.mechanics = mechanics
+      report.checks.push(...mechanics.checks)
+      report.status = report.checks.some(check => check.count && check.severity === 'error') ? 'needs_repair'
+        : report.checks.some(check => check.count) || !mechanics.assemblyVerified ? 'review' : 'passed'
+    }
+    return report
+  } finally { await rm(directory, { recursive: true, force: true }) }
+}
+
+/** Run an owned CAD Python checker; cancellation and timeouts await process exit.
+ * @param {string} executable Bundled CAD Python executable.
+ * @param {string} script Owned checker script.
+ * @param {string} request Private request file.
+ * @param {number} timeoutMs Execution budget.
+ * @param {AbortSignal} signal Owner cancellation.
+ * @returns {Promise<void>} Resolves after a successful process exit.
+ */
+export async function runCadCheck(executable, script, request, timeoutMs, signal) {
+  signal.throwIfAborted()
+  await new Promise((resolve, reject) => {
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/KEY|SECRET|TOKEN|PASSWORD|^PYTHON/i.test(key)))
+    const child = spawn(executable, [script, request],
+      { env: { ...env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
+    let diagnostic = '', failure
+    const collect = chunk => { diagnostic = (diagnostic + chunk.toString()).slice(-4000) }
+    child.stdout.on('data', collect); child.stderr.on('data', collect)
+    const abort = () => { failure = new Error('CAD validation cancelled'); child.kill('SIGKILL') }
+    signal.addEventListener('abort', abort, { once: true })
+    const timer = setTimeout(() => { failure = new Error('CAD validation timed out'); child.kill('SIGKILL') }, timeoutMs)
+    child.on('error', error => { failure = error })
+    child.on('close', code => {
+      clearTimeout(timer); signal.removeEventListener('abort', abort)
+      if (failure || code !== 0) reject(failure ?? new Error(`CAD validation failed: ${diagnostic}`))
+      else resolve()
+    })
+    if (signal.aborted) abort()
+  })
+}

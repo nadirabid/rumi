@@ -85,6 +85,7 @@ export function validateRobotAssembly(description) {
     issue('Every exported mesh node must belong to exactly one assembly part.', 'assembly_mesh_unmapped')
   }
   if (!ids.has(raw.root)) issue('The assembly root must name an existing physical part.')
+  const RETAINERS = ['rigid', 'bayonet', 'threaded', 'snap', 'friction']
   const connections = [], connectionIds = new Set(), adjacent = new Map(parts.map(part => [part.id, []]))
   for (const connection of raw.connections) {
     if (!object(connection) || !name(connection.id) || connectionIds.has(connection.id)
@@ -96,8 +97,32 @@ export function validateRobotAssembly(description) {
     adjacent.get(connection.parent).push(connection.child)
     if (connection.kind === 'fixed') {
       if (connection.control !== undefined) issue(`Fixed connection ${connection.id} cannot bind a movement control.`)
-      connections.push({ id: connection.id, parent: connection.parent, child: connection.child, kind: 'fixed' })
+      const retainer = connection.retainer
+      if (retainer !== undefined && !RETAINERS.includes(retainer)) {
+        issue(`Fixed connection ${connection.id} uses unsupported retainer "${retainer}".`); continue
+      }
+      const needsAxis = retainer === 'bayonet' || retainer === 'threaded'
+      let normalizedAxis
+      if (needsAxis || connection.axis !== undefined) {
+        const length = vector(connection.axis) ? Math.hypot(...connection.axis) : NaN
+        if (!Number.isFinite(length) || length < 1e-6) {
+          issue(`Fixed connection ${connection.id} with retainer "${retainer ?? 'rigid'}" requires a nonzero finite axis.`); continue
+        }
+        normalizedAxis = connection.axis.map(value => value / length)
+      }
+      if (connection.pivot !== undefined && !vector(connection.pivot)) {
+        issue(`Fixed connection ${connection.id} pivot must be a finite three-coordinate vector.`); continue
+      }
+      connections.push({
+        id: connection.id, parent: connection.parent, child: connection.child, kind: 'fixed',
+        ...(retainer === undefined ? {} : { retainer }),
+        ...(normalizedAxis === undefined ? {} : { axis: normalizedAxis }),
+        ...(connection.pivot === undefined ? {} : { pivot: [...connection.pivot] }),
+      })
       continue
+    }
+    if (connection.retainer !== undefined) {
+      issue(`Movable connection ${connection.id} cannot declare a fixed retainer.`); continue
     }
     const length = vector(connection.axis) ? Math.hypot(...connection.axis) : NaN
     if (!Number.isFinite(length) || length < 1e-6 || !vector(connection.pivot)
@@ -157,17 +182,79 @@ export function validateRobotAssembly(description) {
     if (manufacturing.mode !== 'separate' || !Array.isArray(steps) || steps.length > 127) {
       issue('Only separate assemblies may declare at most 127 disassembly steps.')
     } else for (const step of steps) {
-      if (!object(step) || !ids.has(step.part) || step.part === raw.root || removed.has(step.part)
-        || !Array.isArray(step.path) || step.path.length < 2 || step.path.length > 64
-        || step.path.some(point => !vector(point) || point.some(value => Math.abs(value) > 10000))
-        || step.path[0].some(value => value !== 0)) {
-        issue('Each disassembly step needs a distinct nonroot part and 2–64 finite offset vectors starting at [0,0,0].'); continue
+      if (!object(step) || !ids.has(step.part) || step.part === raw.root || removed.has(step.part)) {
+        issue('Each disassembly step needs a distinct nonroot part and either a path or actions list.'); continue
       }
-      if (Object.keys(step).some(key => !['part', 'path'].includes(key))) {
-        issue('Disassembly paths support translation offsets only; other route properties are unsupported.', 'assembly_route_unsupported')
+      const hasPath = step.path !== undefined, hasActions = step.actions !== undefined
+      if (hasPath === hasActions) {
+        issue('Each disassembly step must declare either path or actions.'); continue
       }
-      removed.add(step.part); points += step.path.length
-      normalized.push({ part: step.part, path: step.path.map(point => [...point]) })
+      if (Object.keys(step).some(key => !['part', hasPath ? 'path' : 'actions'].includes(key))) {
+        issue('Disassembly steps support only part with path or actions; other route properties are unsupported.', 'assembly_route_unsupported'); continue
+      }
+      if (hasPath) {
+        if (!Array.isArray(step.path) || step.path.length < 2 || step.path.length > 64
+          || step.path.some(point => !vector(point) || point.some(value => Math.abs(value) > 10000))
+          || step.path[0].some(value => value !== 0)) {
+          issue('Each disassembly path needs 2–64 finite offset vectors starting at [0,0,0].'); continue
+        }
+        removed.add(step.part); points += step.path.length
+        normalized.push({ part: step.part, path: step.path.map(point => [...point]) })
+        continue
+      }
+      if (!Array.isArray(step.actions) || !step.actions.length || step.actions.length > 64) {
+        issue('Each disassembly actions list needs 1–64 valid actions.'); continue
+      }
+      const actions = []; let validStep = true
+      for (const action of step.actions) {
+        if (!object(action) || typeof action.kind !== 'string') {
+          issue('Each disassembly action must be an object with a supported kind.'); validStep = false; break
+        }
+        if (action.kind === 'translate') {
+          if (Object.keys(action).some(key => !['kind', 'delta'].includes(key))) {
+            issue('Translate actions support only kind and delta.', 'assembly_route_unsupported'); validStep = false; break
+          }
+          if (!vector(action.delta) || action.delta.some(value => Math.abs(value) > 10000)) {
+            issue('Translate actions require a finite delta vector within ±10000 mm.'); validStep = false; break
+          }
+          actions.push({ kind: 'translate', delta: [...action.delta] })
+        } else if (action.kind === 'rotate') {
+          if (Object.keys(action).some(key => !['kind', 'pivot', 'axis', 'degrees', 'pitchMm'].includes(key))) {
+            issue('Rotate actions support only kind, pivot, axis, degrees and optional pitchMm.', 'assembly_route_unsupported'); validStep = false; break
+          }
+          const axisLen = vector(action.axis) ? Math.hypot(...action.axis) : NaN
+          const pitchMm = action.pitchMm === undefined ? 0 : action.pitchMm
+          if (!vector(action.pivot) || action.pivot.some(value => Math.abs(value) > 1000000)
+            || !Number.isFinite(axisLen) || axisLen < 1e-6
+            || !Number.isFinite(action.degrees) || Math.abs(action.degrees) < 1e-6 || Math.abs(action.degrees) > 3600
+            || !Number.isFinite(pitchMm) || Math.abs(pitchMm) > 1000) {
+            issue('Rotate actions require finite pivot, nonzero axis, nonzero degrees within ±3600 and pitchMm within ±1000.'); validStep = false; break
+          }
+          actions.push({
+            kind: 'rotate', pivot: [...action.pivot], axis: action.axis.map(value => value / axisLen),
+            degrees: action.degrees, pitchMm,
+          })
+        } else if (action.kind === 'snap') {
+          if (Object.keys(action).some(key => !['kind', 'delta', 'maxInterferenceMm', 'mate'].includes(key))) {
+            issue('Snap actions support only kind, delta, maxInterferenceMm and optional mate.', 'assembly_route_unsupported'); validStep = false; break
+          }
+          const deltaLen = vector(action.delta) ? Math.hypot(...action.delta) : NaN
+          if (!Number.isFinite(deltaLen) || deltaLen < 1e-6 || action.delta.some(value => Math.abs(value) > 10000)
+            || !Number.isFinite(action.maxInterferenceMm) || action.maxInterferenceMm <= 0 || action.maxInterferenceMm > 2.5
+            || (action.mate !== undefined && (!ids.has(action.mate) || action.mate === step.part))) {
+            issue('Snap actions require a nonzero delta within ±10000 mm, 0 < maxInterferenceMm <= 2.5, and an optional distinct mating part.'); validStep = false; break
+          }
+          actions.push({
+            kind: 'snap', delta: [...action.delta], maxInterferenceMm: action.maxInterferenceMm,
+            ...(action.mate === undefined ? {} : { mate: action.mate }),
+          })
+        } else {
+          issue(`Unsupported disassembly action kind "${action.kind}".`, 'assembly_route_unsupported'); validStep = false; break
+        }
+      }
+      if (!validStep) continue
+      removed.add(step.part); points += actions.length
+      normalized.push({ part: step.part, actions })
     }
     if (points > 512) issue('Disassembly paths exceed the 512-point limit.')
     if (parts.some(part => part.id !== raw.root && !removed.has(part.id))) issue('Disassembly steps must remove every nonroot physical part.')

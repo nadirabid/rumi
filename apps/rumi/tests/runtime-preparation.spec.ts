@@ -13,7 +13,7 @@ const state = vi.hoisted(() => ({
   failure: undefined as 'electron' | 'primary' | 'bullet' | 'cli' | undefined,
   downloadElectron: vi.fn(),
   preparePrimary: vi.fn(),
-  prepareBlender: vi.fn(),
+  prepareCad: vi.fn(),
   prepareBullet: vi.fn(),
   commandLink: vi.fn(),
 }))
@@ -46,7 +46,7 @@ vi.mock('node:fs', async (importOriginal) => {
 vi.mock('../scripts/prepare-primary-runtime.ts', () => ({
   preparePrimaryRuntime: state.preparePrimary,
 }))
-vi.mock('../scripts/prepare-blender-runtime.ts', () => ({ prepareBlenderRuntime: state.prepareBlender }))
+vi.mock('../scripts/prepare-cad-runtime.ts', () => ({ prepareCadRuntime: state.prepareCad }))
 vi.mock('../scripts/prepare-bullet-runtime.ts', () => ({ prepareBulletRuntime: state.prepareBullet }))
 
 beforeEach(() => {
@@ -58,7 +58,7 @@ beforeEach(() => {
   state.failure = undefined
   vi.stubEnv('DSH_DESKTOP_PACKAGING_RUN_DIR', undefined)
   state.downloadElectron.mockResolvedValue('electron.zip')
-  state.prepareBlender.mockResolvedValue(undefined)
+  state.prepareCad.mockResolvedValue(undefined)
   state.prepareBullet.mockImplementation(async () => {
     if (state.failure === 'bullet') throw new Error('Bullet preparation failed')
     mkdirSync(join(state.root, 'runtime', 'bullet'), { recursive: true })
@@ -134,18 +134,18 @@ it('starts independent runtimes while Electron is downloading and drains them on
   const downloads = join(state.root, 'downloads')
   const electron = Promise.withResolvers<string>()
   const primary = Promise.withResolvers<void>()
-  const blender = Promise.withResolvers<void>()
+  const cad = Promise.withResolvers<void>()
   const bullet = Promise.withResolvers<void>()
   state.downloadElectron.mockReturnValueOnce(electron.promise)
   state.preparePrimary.mockReturnValueOnce(primary.promise)
-  state.prepareBlender.mockReturnValueOnce(blender.promise)
+  state.prepareCad.mockReturnValueOnce(cad.promise)
   state.prepareBullet.mockReturnValueOnce(bullet.promise)
   const { prepareDesktopRuntime } = await import('../scripts/prepare-runtime.ts')
   const complete = vi.fn<(outcome: unknown) => void>()
   const preparing = prepareDesktopRuntime(false).then(complete, complete)
   try {
     expect(state.preparePrimary).toHaveBeenCalledWith({ deferSmoke: false })
-    expect(state.prepareBlender).toHaveBeenCalledWith('mac-arm64', runtime, downloads)
+    expect(state.prepareCad).toHaveBeenCalledWith('mac-arm64', runtime, downloads)
     expect(state.prepareBullet).not.toHaveBeenCalled()
 
     electron.resolve('electron.zip')
@@ -161,7 +161,7 @@ it('starts independent runtimes while Electron is downloading and drains them on
   } finally {
     electron.resolve('electron.zip')
     primary.resolve()
-    blender.resolve()
+    cad.resolve()
     bullet.resolve()
     await preparing
   }

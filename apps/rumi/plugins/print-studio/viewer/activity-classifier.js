@@ -23,6 +23,7 @@ export const VIEWER_ACTIVITIES = Object.freeze([
 const VALID_STAGES = new Set(VIEWER_ACTIVITIES.filter(stage => stage !== 'idle'))
 
 const SKILL_STAGE = Object.freeze({
+  'cad-modeling': 'sculpt',
   'blender-modeling': 'sculpt',
   'name-model-regions': 'regions',
   'fdm-design': 'fdm',
@@ -111,7 +112,7 @@ export function classifyFileEdit({ name, args }) {
   return null
 }
 
-/** Classify shell commands (Blender runs, Python checks, renders) while absorbing plumbing. */
+/** Classify shell commands (CAD Python runs, validation checks, renders) while absorbing plumbing. */
 export function classifyShellCommand({ name, args }) {
   if (name !== 'bash' && name !== 'shell' && name !== 'exec_command') return null
   const cmd = String(args.command ?? args.cmd ?? '').trim()
@@ -124,25 +125,26 @@ export function classifyShellCommand({ name, args }) {
     return null
   }
 
-  const runsBlender = /(?:^|[;&|]\s*|["'])(?:[^\s"']*blender|"\$bl"|\$bl)\b/i.test(cmd)
+  const runsCad = /(?:^|[;&|]\s*|["'])(?:[^\s"']*(?:cad-python|dev-cad\/bin\/python|tools\/cad\/bin\/python|blender)|"\$(?:cad|py|bl)"|\$(?:cad|py|bl))\b/i.test(cmd)
     || /--background[\s\S]*--python/i.test(cmd)
 
-  if (runsBlender) {
+  if (runsCad) {
     const scriptMatch = cmd.match(/--python\s+["']?([^\s"']+)/)
+      ?? cmd.match(/(?:cad-python|python3?|blender)\s+(?:-[^\s]+\s+)*["']?([^\s"']+\.py)\b/i)
     const scriptName = scriptMatch ? basenameOf(scriptMatch[1].toLowerCase()) : ''
     if (/render|view|preview|snap|angle|ortho|sheet|photo|camera/.test(scriptName)
       || /bpy\.ops\.render\.render/.test(low)) return 'look'
     if (/region|label|audit|surface|segment/.test(scriptName)
       || (/regions\.json/.test(low) && !/\.publish\b/.test(low))) return 'regions'
     if (/collision|clearance|intersect|overlap|gap|bvh/.test(scriptName)
-      || (/bvhtree/.test(low) && /overlap/.test(low) && !/save_as_mainfile|\.publish\b/.test(low))) return 'collision'
+      || (/bvhtree|brepextrema/.test(low) && /overlap|dist/.test(low) && !/save_as_mainfile|\.publish\b/.test(low))) return 'collision'
     if (/validate|fdm|print3d|overhang|wall|manifold/.test(scriptName)
       && !/build|make|gen|edit|fix|update/.test(scriptName)) return 'fdm'
     if (/mech|joint_test|hinge_test|wheel_test|sweep|kinemat|motion/.test(scriptName)) return 'mechanics'
     if (/field|control|deform|shape/.test(scriptName)) return 'controls'
-    if (/--python-expr|<<\s*['"]?(?:py|eof)/i.test(cmd)) {
+    if (/--python-expr|-c\s|<<\s*['"]?(?:py|eof)/i.test(cmd)) {
       if (/render\.render|filepath.*\.png/.test(low)) return 'look'
-      if (/bvhtree|overlap|clearance|collision|intersect/.test(low) && !/save_as_mainfile|\.publish\b/.test(low)) return 'collision'
+      if (/bvhtree|brepextrema|overlap|clearance|collision|intersect/.test(low) && !/save_as_mainfile|\.publish\b/.test(low)) return 'collision'
       if (/overhang|wall_thick|manifold|validate\.py|print3d/.test(low) && !/save_as_mainfile|\.publish\b/.test(low)) return 'fdm'
       if (/regions\.json|region_map/.test(low) && !/save_as_mainfile|\.publish\b/.test(low)) return 'regions'
     }
@@ -163,6 +165,7 @@ export function classifyShellCommand({ name, args }) {
     if (/collision|clearance|intersect|overlap/.test(low) && !/write_text|\.replace\(/.test(low)) return 'collision'
     if (/overhang|manifold|validate\.py|print3d|fdm/.test(low) && !/write_text|\.replace\(/.test(low)) return 'fdm'
     if (/pillow|pil|montage|concat|contact.?sheet/.test(low)) return 'look'
+    if (/build123d|rumi_cad|rumi_joints/.test(low)) return 'sculpt'
     if (/\.py['"]/.test(low) && /(?:write_text|open\(.*['"]w['"]|\.replace\()/.test(low)) return 'sculpt'
   }
   return null

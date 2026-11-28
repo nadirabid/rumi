@@ -1,7 +1,7 @@
 /**
  * Bounds and input guards for triangle positions in millimetres, Z up.
  *
- * Geometry analysis belongs to the explicit Blender validation tools. These synchronous
+ * Geometry analysis belongs to the explicit CAD validation tools. These synchronous
  * measurements keep the viewer renderable and never establish print readiness.
  */
 
@@ -20,7 +20,7 @@ function volumeProblem(volume) {
 /**
  * Inspect non-indexed triangle positions without mutating them.
  *
- * Reports dimensions and optional envelope fit while Blender validation is pending.
+ * Reports dimensions and optional envelope fit while CAD validation is pending.
  * @param {ArrayLike<number>} positions - Flat XYZ triplets, three vertices per triangle.
  * @param {{volume?: {x: number, y: number, z: number} | null, weldToleranceMm?: number, maxTriangles?: number}} [options] - Optional build volume; optional thresholds and processing bound.
  * @returns {{status: 'ok' | 'review' | 'blocked', dimensions: {x: number, y: number, z: number}, bounds: {min: {x: number, y: number, z: number}, max: {x: number, y: number, z: number}}, triangleCount: number, volume: {x: number, y: number, z: number} | null, suggested: {scale: number | null, rotate: boolean}, checks: {code: string, severity: 'ok' | 'warning' | 'error' | 'pending', data: object}[]}} Measured geometry and stable finding codes; status never certifies print readiness.
@@ -78,7 +78,7 @@ export function analyzeMesh(positions, options = {}) {
     checks.push({ code: 'flat_mesh', severity: 'error', data: { dimensions } })
   }
 
-  checks.push({ code: 'blender_validation', severity: 'pending', data: {} })
+  checks.push({ code: 'cad_validation', severity: 'pending', data: {} })
   if (volume !== null) checks.push({ code: 'slicer_verification', severity: 'pending', data: {} })
   const status = checks.some(check => check.severity === 'error')
     ? 'blocked'

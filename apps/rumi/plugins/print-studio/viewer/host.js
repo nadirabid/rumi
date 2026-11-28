@@ -105,7 +105,7 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         const review = source?.controlReview.state()
         if (review) return `Pending mesh control review: ${JSON.stringify(review)}. Do not claim controls are ready before presenting reviewed controls. Validation renders are evidence, not an automatic quality pass. Inspect every comparison for the expected effect, unwanted movement, pinching, intersections, and part fit.`
         if (!shape) return source ? 'No temporary mesh controls are staged or presented.' : ''
-        return `Unresolved model edit: ${JSON.stringify({ id: shape.id, label: shape.label, operation: shape.operation, controls: shape.controls, values: shape.values, frozen: shape.frozen, finish: shape.finish, original: shape.original, edit: shape.edit })}. Keep controls open while the person explores. Satisfaction or moving to another task resolves the current edit first: freeze the latest visible values, then ${shape.operation === 'parameters' && shape.finish !== 'blender' ? 'call viewer_controls save with the frozen id' : 'apply the captured recipe in Blender, publish and load the revision'}. If already frozen, finish saving. Explicit cancel uses close. Read mesh-edit-controls; do not require a special phrase.`
+        return `Unresolved model edit: ${JSON.stringify({ id: shape.id, label: shape.label, operation: shape.operation, controls: shape.controls, values: shape.values, frozen: shape.frozen, finish: shape.finish, original: shape.original, edit: shape.edit })}. Keep controls open while the person explores. Satisfaction or moving to another task resolves the current edit first: freeze the latest visible values, then ${shape.operation === 'parameters' && shape.finish !== 'cad' && shape.finish !== 'blender' ? 'call viewer_controls save with the frozen id' : 'translate the frozen recipe into exact build123d CAD edits, publish and load the revision'}. If already frozen, finish saving. Explicit cancel uses close. Read mesh-edit-controls; do not require a special phrase.`
       },
     }), 'print-studio active edit context')
   })
@@ -132,12 +132,22 @@ export function applyViewer(ctx, defineTool, diagnosticsDirectory, loadTimeoutMs
         await store.discover(sessionId, record)
         const design = record.source?.state()
         if (!design || design.error?.kind === 'source') throw new Error('Load a model before arranging it')
+        const validationState = validation?.read(sessionId)
+        const validationItem = validationState?.models?.find(item => item.path === record.selectedModel)
+        const validationStatus = validationState?.error || validationItem?.error || validationItem?.status === 'unavailable' ? 'unavailable'
+          : !validationItem || validationItem.sourceHash !== design.contentHash || validationItem.status === 'changed' ? 'unverified'
+          : validationItem.status === 'needs_repair' ? 'needs_repair'
+          : validationItem.acceptedFingerprint === validationItem.fingerprint ? 'accepted'
+          : validationItem.status === 'review' ? 'review'
+          : validationItem.status === 'passed' ? 'passed'
+          : 'unverified'
         return operation({
           design,
           requiresSeparatePrint: usdRequiresSeparatePrint(record.source.snapshotBytes()),
           cwd: await store.directoryFor(sessionId, record),
           model: record.selectedModel,
           volume: record.history.current().volume,
+          validationStatus,
         })
       })
     }, validationConfig.printLayout)

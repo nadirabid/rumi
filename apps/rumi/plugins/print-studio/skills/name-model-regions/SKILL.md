@@ -5,7 +5,7 @@ description: "Name model features from rendered images, model source and mesh me
 
 # Name model regions
 
-Read the construction source when available. Use background Blender from `blender_status` to render the saved USD from two useful angles into project scratch storage. Open both PNGs with `read_image`. Render and open a close-up when details are hard to distinguish.
+Read the `build123d` construction source when available. Use `viewer_camera` and `viewer_cursor_snapshot` (or inspect saved preview captures) to view the model from two useful angles, opening close-ups when details are hard to distinguish.
 
 Name the recognizable parts first. On creation or refresh, inspect each broad region for smaller features someone could point to or change independently. Repeat inside those features wherever the geometry supports another distinction. A handle might contain a grip with a thumb rest. A lip, recess or transition can be distinct even on one smooth surface. Keep uniform areas whole unless a landmark, a functional direction such as a vehicle's front, or the person's explicit request distinguishes specific sections. Use short names in the person's language and add familiar aliases.
 

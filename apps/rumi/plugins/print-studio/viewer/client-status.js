@@ -42,6 +42,13 @@ export function printValidationLabel(scene) {
   return 'layoutChecksMissing'
 }
 
+/** Map a validation dot locale key to its visual tone (error, warn, or ok). */
+export function validationDotTone(label) {
+  if (label === 'validationRepair' || label === 'validationUnavailable') return 'error'
+  if (label === 'layoutModelChecked' || label === 'validationChecksPassed') return 'ok'
+  return 'warn'
+}
+
 /** Derive the aggregate validation dot locale key when no single design is active. */
 export function validationLabel(scene) {
   const validation = scene?.validation

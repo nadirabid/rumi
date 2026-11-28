@@ -617,7 +617,13 @@ it.each([
   expect(typeof publish).toBe('function')
   act(() => publish({ active: true, selected: 'body', plate: 0, parts: [{ id: 'body', name: 'Body' }], issues: [],
     layout: { identity: 'kart', parts: [{ id: 'body', plate: 0 }], volume: { x: 300, y: 320, z: 320 }, gap: 5 } }))
-  expect(status === 'checking' ? screen.getByRole('img', { name: en.activityChecking }) : screen.getByRole('img', { name: en[label] })).toBeTruthy()
+  const dot = status === 'checking' ? screen.getByRole('img', { name: en.activityChecking }) : screen.getByRole('img', { name: en[label] })
+  expect(dot).toBeTruthy()
+  if (status !== 'checking') {
+    const expectedTone = status === 'needs_repair' || status === 'unavailable' ? 'error'
+      : status === 'passed' || status === 'checked' ? 'ok' : 'warn'
+    expect(dot.getAttribute('data-tone')).toBe(expectedTone)
+  }
   view.setScene({ ...base, design: { ...base.design, contentHash: 'new' } })
   await settle(2000)
   expect(status === 'checking' ? screen.getByRole('img', { name: en.activityChecking }) : screen.getByRole('img', { name: en[status === 'unavailable' ? 'validationUnavailable' : 'validationChanged'] })).toBeTruthy()

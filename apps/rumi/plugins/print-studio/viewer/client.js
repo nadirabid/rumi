@@ -16,7 +16,7 @@ import { createViewport } from './viewport/index.js'
 import { placeMesh } from './transform.js'
 import { en, zh } from './locales.js'
 import { createViewerClientStore } from './client-store.js'
-import { ACTIVITY_LABELS, activityFor, printValidationLabel, validationLabel } from './client-status.js'
+import { ACTIVITY_LABELS, activityFor, printValidationLabel, validationDotTone, validationLabel } from './client-status.js'
 import stylesheet from './viewer.module.css'
 
 const NS = 'rumi.printViewer'
@@ -489,7 +489,7 @@ export function installViewer(ctx, React, primitives) {
     return h('section', { className: 'rumi-print-viewer', 'aria-label': t('title') },
       h(ModelSelector, { scene, busy: busy || activityFor(scene) !== 'idle', select, t }),
       failed || scene?.catalogFailed ? h('p', { className: 'pv-catalog-error', role: 'alert' }, t(failed ? 'selectionFailed' : 'catalogFailed')) : null,
-      status && activityFor(scene) === 'idle' && h('span', { role: 'img', className: 'pv-validation-dot', 'aria-label': t(status), title: t(status) }),
+      status && activityFor(scene) === 'idle' && h('span', { role: 'img', className: 'pv-validation-dot', 'data-tone': validationDotTone(status), 'aria-label': t(status), title: t(status) }),
       h('div', { className: 'pv-content' }, h(MeshContent, { state, t })))
   }
 

@@ -635,6 +635,8 @@ body[data-ds-dark-theme] .rumi-print-viewer {
   border-radius: 50%;
   background: var(--dsw-alias-state-error-primary);
 }
+.pv-validation-dot[data-tone='warn'] { background: var(--dsw-alias-state-warn-primary); }
+.pv-validation-dot[data-tone='ok'] { background: var(--dsw-alias-state-success-primary); }
 
 .rumi-print-viewer .pv-bottom-controls {
   position: absolute; inset: 0; z-index: 3;

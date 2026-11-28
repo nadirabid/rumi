@@ -641,7 +641,7 @@ def _strip_block_comments(text: str) -> str:
 
 def _strip_line_comment(line: str) -> str:
     """Strip inline # comments outside quotes while preserving the #usda header."""
-    if line.lstrip().startswith('#usda'):
+    if '#' not in line or line.lstrip().startswith('#usda'):
         return line
     in_str: str | None = None
     escaped = False
@@ -685,6 +685,8 @@ def _find_top_level_equals(line: str) -> int:
 
 def _count_brackets_outside_strings(text: str) -> tuple[int, int]:
     """Count net '[' minus ']' outside quoted strings."""
+    if '"' not in text and "'" not in text:
+        return text.count('['), text.count(']')
     opens = closes = 0
     in_str: str | None = None
     escaped = False

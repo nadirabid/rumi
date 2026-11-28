@@ -296,4 +296,49 @@ with tempfile.TemporaryDirectory(prefix='rumi-cad-val-') as tmp:
     assert next(c for c in rep_open_brep['checks'] if c['code'] == 'non_manifold_edges')['count'] > 0, rep_open_brep
     assert next(c for c in rep_open_brep['checks'] if c['code'] == 'invalid_brep_solid')['count'] == 1, rep_open_brep
 
-print('CAD_VALIDATION_OK: USD/STL checks, exact B-Rep curved clearances, fixed mates, transforms, and print orientations')
+    # 7. Generic 2D-layer printability pre-checks (no printer-specific slicer required):
+    #    (a) Clean flat box -> zero layer printability warnings.
+    clean_box = bd.Box(24, 24, 10)
+    clean_box.label = 'CleanBox'
+    pub_clean = CAD['publish'](work / 'layer-clean', [clean_box], check=False)
+    rep_clean = VAL['validate']({
+        'input': pub_clean['revisionUsd'], 'settings': SETTINGS,
+        'transform': IDENTITY_TRANSFORM, 'volume': None,
+    })
+    for code in ('floating_islands', 'unprintable_thin_walls', 'tip_over_risk', 'trapped_overhangs'):
+        assert not any(c['code'] == code for c in rep_clean['checks']), (code, rep_clean['checks'])
+
+    #    (b) Sub-nozzle 0.28 mm thin fin on a solid base -> flags unprintable_thin_walls.
+    base_plate = bd.Box(20, 20, 4)
+    thin_fin = bd.Pos(0, 0, 7) * bd.Box(14, 0.28, 10)
+    fin_part = base_plate + thin_fin
+    fin_part.label = 'ThinFin'
+    pub_fin = CAD['publish'](work / 'layer-thin', [fin_part], check=False)
+    rep_fin = VAL['validate']({
+        'input': pub_fin['revisionUsd'], 'settings': SETTINGS,
+        'transform': IDENTITY_TRANSFORM, 'volume': None,
+    })
+    assert any(c['code'] == 'unprintable_thin_walls' and c['count'] == 1 for c in rep_fin['checks']), rep_fin['checks']
+
+    #    (c) Part with downward-hanging arm (U-hook) -> flags floating_islands and trapped_overhangs.
+    u_base = bd.Box(30, 30, 4)
+    u_post = bd.Pos(-11, 0, 12) * bd.Box(8, 30, 20)
+    u_arm = bd.Pos(2, 0, 20) * bd.Box(26, 30, 4)
+    u_drop = bd.Pos(11, 0, 14) * bd.Box(8, 12, 10)  # hangs down into air above u_base
+    u_part = u_base + u_post + u_arm + u_drop
+    u_part.label = 'HangingArm'
+    # Verify directly in upright orientation where u_drop starts mid-air above u_base
+    u_pts, u_tris = CAD['tessellate_shape'](u_part)
+    u_layer = VAL['_analyze_part_layer_printability'](u_pts, u_tris, 45.0)
+    assert u_layer['floatingIslandCount'] >= 1, u_layer
+    assert u_layer['trappedOverhangAreaMm2'] >= 20.0, u_layer
+
+    #    (d) Off-center cantilevered block has COM outside its bed footprint -> flags tip_over_risk.
+    foot = bd.Box(6, 6, 4)
+    cantilever = bd.Pos(16, 0, 14) * bd.Box(34, 6, 16)
+    tip_part = foot + cantilever
+    tip_pts, tip_tris = CAD['tessellate_shape'](tip_part)
+    tip_layer = VAL['_analyze_part_layer_printability'](tip_pts, tip_tris, 45.0)
+    assert tip_layer['tipOverRisk'] is True and tip_layer['comInsideBed'] is False, tip_layer
+
+print('CAD_VALIDATION_OK: USD/STL checks, exact B-Rep curved clearances, fixed mates, transforms, print orientations, and 2D-layer printability')

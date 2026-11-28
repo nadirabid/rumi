@@ -218,7 +218,8 @@ def _check_part_topology(
     valid_closed_brep: bool = False,
 ) -> dict[str, int]:
     """Check manifoldness, winding, degenerates, and sharp edges on one welded mesh."""
-    if len(tris) == 0:
+    n_tris = len(tris)
+    if n_tris == 0:
         return {
             'non_manifold_edges': 0,
             'inconsistent_winding': 0,
@@ -230,49 +231,68 @@ def _check_part_topology(
     normals, areas = _triangle_normals_and_areas(pts, tris)
     degenerate_faces = int(np.count_nonzero(areas <= degenerate_threshold))
 
-    # Build edge incidence map: undirected (u, v) -> list of (tri_idx, direction +1/-1)
-    edges: dict[tuple[int, int], list[tuple[int, int]]] = {}
-    for tri_idx in range(len(tris)):
-        v0, v1, v2 = int(tris[tri_idx, 0]), int(tris[tri_idx, 1]), int(tris[tri_idx, 2])
-        for a, b in ((v0, v1), (v1, v2), (v2, v0)):
-            if a < b:
-                edges.setdefault((a, b), []).append((tri_idx, 1))
-            else:
-                edges.setdefault((b, a), []).append((tri_idx, -1))
+    # Vectorized undirected edge grouping: 3 half-edges per triangle packed into int64 keys.
+    ea = np.concatenate((tris[:, 0], tris[:, 1], tris[:, 2]))
+    eb = np.concatenate((tris[:, 1], tris[:, 2], tris[:, 0]))
+    tri_ids = np.tile(np.arange(n_tris, dtype=np.int64), 3)
+    fwd = ea < eb
+    u = np.where(fwd, ea, eb).astype(np.int64)
+    v = np.where(fwd, eb, ea).astype(np.int64)
+    dirs = np.where(fwd, 1, -1).astype(np.int8)
 
-    non_manifold = 0
+    keys = (u << 32) | v
+    order = np.argsort(keys, kind='mergesort')
+    keys_s = keys[order]
+    u_s = u[order]
+    v_s = v[order]
+    dirs_s = dirs[order]
+    tris_s = tri_ids[order]
+
+    split = np.flatnonzero(np.diff(keys_s)) + 1
+    starts = np.concatenate(([0], split))
+    ends = np.concatenate((split, [len(keys_s)]))
+    counts = ends - starts
+    n_edges = len(starts)
+
+    u_uniq = u_s[starts]
+    v_uniq = v_s[starts]
+    edge_vecs = pts[v_uniq] - pts[u_uniq]
+    edge_lens = np.linalg.norm(edge_vecs, axis=1)
+    degenerate_edges = int(np.count_nonzero(edge_lens <= degenerate_threshold))
+
+    non_manifold = 0 if valid_closed_brep else int(np.count_nonzero(counts != 2))
+
+    # Manifold interior edges (incidence == 2)
+    pair_mask = counts == 2
     inconsistent_winding = 0
-    degenerate_edges = 0
     sharp_edges = 0
-    sharp_rad = math.radians(sharp_degrees)
+    if np.any(pair_mask):
+        p_starts = starts[pair_mask]
+        d0 = dirs_s[p_starts]
+        d1 = dirs_s[p_starts + 1]
+        same_dir = d0 == d1
+        inconsistent_winding = int(np.count_nonzero(same_dir))
 
-    for (u, v), inc in edges.items():
-        edge_vec = pts[v] - pts[u]
-        edge_len = float(np.linalg.norm(edge_vec))
-        if edge_len <= degenerate_threshold:
-            degenerate_edges += 1
-        if len(inc) != 2:
-            # Valid closed B-Rep solids verified by OpenCASCADE (BRepCheck_Analyzer +
-            # closed shells + zero free boundary edges) can still emit tangent-seam or
-            # per-face tessellation edges with incidence != 2; do not false-flag those.
-            if not valid_closed_brep:
-                non_manifold += 1
-            continue
-        (t0, d0), (t1, d1) = inc
-        if d0 == d1:
-            inconsistent_winding += 1
-            continue
-        # Signed dihedral fold angle matching Blender bmesh calc_face_angle_signed()
-        n0, n1 = normals[t0], normals[t1]
-        if np.dot(n0, n0) < 0.5 or np.dot(n1, n1) < 0.5:
-            continue
-        dot = max(-1.0, min(1.0, float(np.dot(n0, n1))))
-        angle = math.acos(dot)
-        if angle > sharp_rad:
-            # Determine convex vs concave: edge direction in t0 is (u->v if d0==1 else v->u)
-            dir_vec = edge_vec if d0 == 1 else -edge_vec
-            if float(np.dot(np.cross(n0, n1), dir_vec)) > 0:
-                sharp_edges += 1
+        good = ~same_dir
+        if np.any(good):
+            g_starts = p_starts[good]
+            t0 = tris_s[g_starts]
+            t1 = tris_s[g_starts + 1]
+            n0 = normals[t0]
+            n1 = normals[t1]
+            valid_n = (np.einsum('ij,ij->i', n0, n0) >= 0.5) & (np.einsum('ij,ij->i', n1, n1) >= 0.5)
+            if np.any(valid_n):
+                n0v = n0[valid_n]
+                n1v = n1[valid_n]
+                cos_thresh = math.cos(math.radians(sharp_degrees))
+                dots = np.clip(np.einsum('ij,ij->i', n0v, n1v), -1.0, 1.0)
+                sharp_cand = dots < cos_thresh
+                if np.any(sharp_cand):
+                    g_d0 = d0[good][valid_n][sharp_cand]
+                    g_ev = edge_vecs[pair_mask][good][valid_n][sharp_cand]
+                    dir_vecs = np.where(g_d0[:, None] == 1, g_ev, -g_ev)
+                    convex = np.einsum('ij,ij->i', np.cross(n0v[sharp_cand], n1v[sharp_cand]), dir_vecs) > 0.0
+                    sharp_edges = int(np.count_nonzero(convex))
 
     # Detect completely inverted closed manifold solid (negative signed volume).
     if non_manifold == 0 and inconsistent_winding == 0:
@@ -282,7 +302,7 @@ def _check_part_topology(
         c = pts[tris[:, 2]] - ref
         signed_vol = float(np.sum(np.einsum('ij,ij->i', a, np.cross(b, c))) / 6.0)
         if signed_vol < -1e-9:
-            inconsistent_winding = len(edges)
+            inconsistent_winding = n_edges
 
     return {
         'non_manifold_edges': non_manifold,
@@ -308,11 +328,12 @@ def _check_thin_faces(
     v2 = pts[tris[:, 2]]
     centroids = (v0 + v1 + v2) / 3.0
 
-    # Build a spatial grid over triangle AABBs expanded slightly.
+    # Adaptive cell size keeps large faces inside the grid without exploding per-triangle sets.
     tri_min = np.minimum(np.minimum(v0, v1), v2)
     tri_max = np.maximum(np.maximum(v0, v1), v2)
-    cell = max(min_thickness_mm, 0.5)
     origin = tri_min.min(axis=0)
+    bbox_diag = float(np.linalg.norm(tri_max.max(axis=0) - origin))
+    cell = max(min_thickness_mm * 2.0, bbox_diag / 36.0, 1.0)
     cmin = np.floor((tri_min - origin) / cell).astype(np.int64)
     cmax = np.floor((tri_max - origin) / cell).astype(np.int64)
     span = cmax - cmin + 1
@@ -324,48 +345,62 @@ def _check_thin_faces(
         if int(counts[idx]) > 64:
             large.append(idx)
             continue
-        for cx in range(int(cmin[idx, 0]), int(cmax[idx, 0]) + 1):
-            for cy in range(int(cmin[idx, 1]), int(cmax[idx, 1]) + 1):
-                for cz in range(int(cmin[idx, 2]), int(cmax[idx, 2]) + 1):
+        x0, y0, z0 = int(cmin[idx, 0]), int(cmin[idx, 1]), int(cmin[idx, 2])
+        x1, y1, z1 = int(cmax[idx, 0]), int(cmax[idx, 1]), int(cmax[idx, 2])
+        for cx in range(x0, x1 + 1):
+            for cy in range(y0, y1 + 1):
+                for cz in range(z0, z1 + 1):
                     grid.setdefault((cx, cy, cz), []).append(idx)
 
-    # Shoot one inward ray per valid triangle from centroid - eps*normal along -normal.
+    # Pre-convert grid buckets to NumPy arrays once so lookups never allocate Python sets.
+    grid_arr: dict[tuple[int, int, int], np.ndarray] = {
+        k: np.asarray(v, dtype=np.int64) for k, v in grid.items()
+    }
+    large_arr = np.asarray(large, dtype=np.int64) if large else None
+
     e1 = v1 - v0
     e2 = v2 - v0
     thin_count = 0
     eps = 1e-4
     t_max = min_thickness_mm
-    large_arr = np.asarray(large, dtype=np.int64) if large else None
 
-    for idx in range(n_tris):
+    # Precompute ray endpoints and grid ranges vectorized for all triangles.
+    ray_dirs = -normals
+    ray_orgs = centroids + ray_dirs * eps
+    ray_ends = centroids + ray_dirs * t_max
+    rmins = np.minimum(ray_orgs, ray_ends)
+    rmaxs = np.maximum(ray_orgs, ray_ends)
+    rc0s = np.floor((rmins - origin) / cell).astype(np.int64)
+    rc1s = np.floor((rmaxs - origin) / cell).astype(np.int64)
+
+    # For very dense tessellations, sample evenly across faces while testing against all triangles.
+    stride = max(1, n_tris // 5000)
+    sample_indices = range(0, n_tris, stride)
+
+    for idx in sample_indices:
         if areas[idx] <= 1e-9:
             continue
-        n = normals[idx]
-        ray_dir = -n
-        ray_org = centroids[idx] + ray_dir * eps
-        ray_end = centroids[idx] + ray_dir * t_max
-        rmin = np.minimum(ray_org, ray_end)
-        rmax = np.maximum(ray_org, ray_end)
-        rc0 = np.floor((rmin - origin) / cell).astype(np.int64)
-        rc1 = np.floor((rmax - origin) / cell).astype(np.int64)
-
-        cand_set: set[int] = set()
-        for cx in range(int(rc0[0]), int(rc1[0]) + 1):
-            for cy in range(int(rc0[1]), int(rc1[1]) + 1):
-                for cz in range(int(rc0[2]), int(rc1[2]) + 1):
-                    bucket = grid.get((cx, cy, cz))
-                    if bucket:
-                        cand_set.update(bucket)
+        rx0, ry0, rz0 = int(rc0s[idx, 0]), int(rc0s[idx, 1]), int(rc0s[idx, 2])
+        rx1, ry1, rz1 = int(rc1s[idx, 0]), int(rc1s[idx, 1]), int(rc1s[idx, 2])
+        chunks: list[np.ndarray] = []
+        for cx in range(rx0, rx1 + 1):
+            for cy in range(ry0, ry1 + 1):
+                for cz in range(rz0, rz1 + 1):
+                    bucket = grid_arr.get((cx, cy, cz))
+                    if bucket is not None:
+                        chunks.append(bucket)
         if large_arr is not None:
-            cand_set.update(large)
-        cand_set.discard(idx)
-        if not cand_set:
+            chunks.append(large_arr)
+        if not chunks:
             continue
+        cands = chunks[0] if len(chunks) == 1 else np.concatenate(chunks)
 
-        cands = np.fromiter(cand_set, dtype=np.int64, count=len(cand_set))
-        # Filter to opposing faces whose AABB intersects the ray segment AABB.
+        n = normals[idx]
+        rmin = rmins[idx]
+        rmax = rmaxs[idx]
         mask = (
-            (normals[cands] @ n < -0.5)
+            (cands != idx)
+            & (normals[cands] @ n < -0.5)
             & (tri_max[cands, 0] >= rmin[0]) & (tri_min[cands, 0] <= rmax[0])
             & (tri_max[cands, 1] >= rmin[1]) & (tri_min[cands, 1] <= rmax[1])
             & (tri_max[cands, 2] >= rmin[2]) & (tri_min[cands, 2] <= rmax[2])
@@ -373,8 +408,9 @@ def _check_thin_faces(
         cands = cands[mask]
         if len(cands) == 0:
             continue
+        if len(chunks) > 1:
+            cands = np.unique(cands)
 
-        # Exclude triangles sharing a vertex with idx (chamfer/corner edges).
         src_verts = (int(tris[idx, 0]), int(tris[idx, 1]), int(tris[idx, 2]))
         c_tris = tris[cands]
         shared = (
@@ -386,7 +422,8 @@ def _check_thin_faces(
         if len(cands) == 0:
             continue
 
-        # Vectorized ray-triangle Möller–Trumbore
+        ray_dir = ray_dirs[idx]
+        ray_org = ray_orgs[idx]
         ce1 = e1[cands]
         ce2 = e2[cands]
         h = np.cross(ray_dir, ce2)
@@ -394,17 +431,16 @@ def _check_thin_faces(
         non_par = np.abs(a) > 1e-12
         if not np.any(non_par):
             continue
-        cands = cands[non_par]
         ce1, ce2, h, a = ce1[non_par], ce2[non_par], h[non_par], a[non_par]
+        cands = cands[non_par]
         f = 1.0 / a
         s = ray_org - v0[cands]
         u = f * np.einsum('ij,ij->i', s, h)
         q = np.cross(s, ce1)
         v = f * (q @ ray_dir)
         t = f * np.einsum('ij,ij->i', ce2, q)
-        hit = (u >= -1e-6) & (v >= -1e-6) & (u + v <= 1.0 + 1e-6) & (t > 0.0) & (t < (t_max - eps))
-        if np.any(hit):
-            thin_count += 1
+        if np.any((u >= -1e-6) & (v >= -1e-6) & (u + v <= 1.0 + 1e-6) & (t > 0.0) & (t < (t_max - eps))):
+            thin_count += stride
 
     return thin_count
 
@@ -482,11 +518,367 @@ def _brep_planar_normals(shape: Any, max_faces: int = 8) -> list[np.ndarray]:
     return unique
 
 
+def _mesh_center_of_mass(pts: np.ndarray, tris: np.ndarray) -> np.ndarray:
+    """Compute volume-weighted 3D center of mass of a closed triangle mesh."""
+    if len(tris) == 0:
+        return np.zeros(3, dtype=np.float64)
+    ref = pts[0]
+    a = pts[tris[:, 0]] - ref
+    b = pts[tris[:, 1]] - ref
+    c = pts[tris[:, 2]] - ref
+    vols = np.einsum('ij,ij->i', a, np.cross(b, c)) / 6.0
+    total_vol = float(vols.sum())
+    if abs(total_vol) < 1e-12:
+        return pts.mean(axis=0)
+    centroids = (a + b + c) * 0.25
+    return ref + (vols[:, None] * centroids).sum(axis=0) / total_vol
+
+
+def _convex_hull_2d(points: np.ndarray) -> list[tuple[float, float]]:
+    """Compute counter-clockwise 2D convex hull via Andrew's monotone chain (no scipy.spatial import)."""
+    pts = sorted({(round(float(p[0]), 4), round(float(p[1]), 4)) for p in points})
+    if len(pts) < 3:
+        return pts
+
+    def cross(o: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower: list[tuple[float, float]] = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0.0:
+            lower.pop()
+        lower.append(p)
+    upper: list[tuple[float, float]] = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0.0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def _point_in_convex_polygon_2d(px: float, py: float, hull: list[tuple[float, float]], tol: float = 0.5) -> bool:
+    """Return True iff (px, py) lies inside (or within `tol` mm of) a CCW 2D convex polygon."""
+    n = len(hull)
+    if n < 3:
+        return False
+    for i in range(n):
+        ax, ay = hull[i]
+        bx, by = hull[(i + 1) % n]
+        ex, ey = bx - ax, by - ay
+        elen = math.hypot(ex, ey)
+        if elen < 1e-9:
+            continue
+        # Signed distance to left of directed edge a->b; negative means outside CCW hull.
+        signed_dist = (ex * (py - ay) - ey * (px - ax)) / elen
+        if signed_dist < -tol:
+            return False
+    return True
+
+
+def _bed_stability_metrics(
+    pts: np.ndarray,
+    tris: np.ndarray,
+    normals: np.ndarray,
+    areas: np.ndarray,
+    bed_tolerance_mm: float = 0.1,
+) -> dict[str, Any]:
+    """Check whether the part's center of mass projects inside its bed-contact convex hull."""
+    z_min = float(pts[:, 2].min())
+    z_max = float(pts[:, 2].max())
+    height = float(z_max - z_min)
+    tri_z_max = np.maximum(np.maximum(pts[tris[:, 0], 2], pts[tris[:, 1], 2]), pts[tris[:, 2], 2])
+    on_bed = (tri_z_max <= z_min + bed_tolerance_mm) & (normals[:, 2] <= -0.99)
+    bed_area = float(areas[on_bed].sum())
+
+    com = _mesh_center_of_mass(pts, tris)
+    com_inside = False
+    min_bed_span = 0.0
+
+    if np.any(on_bed) and bed_area >= 1e-3:
+        bed_vert_ids = np.unique(tris[on_bed].ravel())
+        bed_xy = pts[bed_vert_ids, :2]
+        span_x = float(bed_xy[:, 0].max() - bed_xy[:, 0].min())
+        span_y = float(bed_xy[:, 1].max() - bed_xy[:, 1].min())
+        min_bed_span = min(span_x, span_y)
+        if len(bed_xy) >= 3 and span_x > 1e-4 and span_y > 1e-4:
+            hull = _convex_hull_2d(bed_xy)
+            com_inside = _point_in_convex_polygon_2d(float(com[0]), float(com[1]), hull, tol=0.5)
+
+    xy_bbox_area = float((pts[:, 0].max() - pts[:, 0].min()) * (pts[:, 1].max() - pts[:, 1].min()))
+    tip_over = (not com_inside) or (
+        height > 25.0 and bed_area < 80.0 and (height / max(min_bed_span, 0.5)) > 6.0
+    )
+    return {
+        'bedContactAreaMm2': bed_area,
+        'comInsideBed': com_inside,
+        'minBedSpanMm': min_bed_span,
+        'xyBboxAreaMm2': xy_bbox_area,
+        'heightMm': height,
+        'tipOverRisk': tip_over,
+    }
+
+
+def _rasterize_z_slice(
+    pts: np.ndarray,
+    tris: np.ndarray,
+    tri_z_min: np.ndarray,
+    tri_z_max: np.ndarray,
+    z: float,
+    x_min: float,
+    y_min: float,
+    px: float,
+    nx: int,
+    ny: int,
+) -> np.ndarray:
+    """Intersect a closed triangle mesh with horizontal plane Z and scanline-fill a 2D mask."""
+    mask = np.zeros((ny, nx), dtype=bool)
+    active = np.nonzero((tri_z_min < z) & (tri_z_max > z))[0]
+    if len(active) == 0:
+        return mask
+
+    t_act = tris[active]
+    p0 = pts[t_act[:, 0]]
+    p1 = pts[t_act[:, 1]]
+    p2 = pts[t_act[:, 2]]
+    z0, z1, z2 = p0[:, 2], p1[:, 2], p2[:, 2]
+
+    # Collect crossing edge intersections: each active triangle has exactly 2 edges crossing z.
+    a0, a1, a2 = z0 > z, z1 > z, z2 > z
+    c01 = a0 != a1
+    c12 = a1 != a2
+    c20 = a2 != a0
+
+    seg_x0 = np.empty(len(active), dtype=np.float64)
+    seg_y0 = np.empty(len(active), dtype=np.float64)
+    seg_x1 = np.empty(len(active), dtype=np.float64)
+    seg_y1 = np.empty(len(active), dtype=np.float64)
+
+    def _edge_pt(pa: np.ndarray, pb: np.ndarray, za: np.ndarray, zb: np.ndarray, m: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        t = (z - za[m]) / (zb[m] - za[m])
+        return pa[m, 0] + t * (pb[m, 0] - pa[m, 0]), pa[m, 1] + t * (pb[m, 1] - pa[m, 1])
+
+    # Three mutually exclusive crossing pairs: (01,12), (01,20), (12,20)
+    m_a = c01 & c12
+    if np.any(m_a):
+        seg_x0[m_a], seg_y0[m_a] = _edge_pt(p0, p1, z0, z1, m_a)
+        seg_x1[m_a], seg_y1[m_a] = _edge_pt(p1, p2, z1, z2, m_a)
+    m_b = c01 & c20 & (~m_a)
+    if np.any(m_b):
+        seg_x0[m_b], seg_y0[m_b] = _edge_pt(p0, p1, z0, z1, m_b)
+        seg_x1[m_b], seg_y1[m_b] = _edge_pt(p2, p0, z2, z0, m_b)
+    m_c = c12 & c20 & (~m_a) & (~m_b)
+    if np.any(m_c):
+        seg_x0[m_c], seg_y0[m_c] = _edge_pt(p1, p2, z1, z2, m_c)
+        seg_x1[m_c], seg_y1[m_c] = _edge_pt(p2, p0, z2, z0, m_c)
+
+    valid = m_a | m_b | m_c
+    if not np.any(valid):
+        return mask
+    seg_x0, seg_y0, seg_x1, seg_y1 = seg_x0[valid], seg_y0[valid], seg_x1[valid], seg_y1[valid]
+
+    # Order each segment so y_lo <= y_hi for fast half-open scanline parity fill.
+    swap = seg_y0 > seg_y1
+    y_lo = np.where(swap, seg_y1, seg_y0)
+    y_hi = np.where(swap, seg_y0, seg_y1)
+    x_lo = np.where(swap, seg_x1, seg_x0)
+    x_hi = np.where(swap, seg_x0, seg_x1)
+
+    non_horiz = (y_hi - y_lo) > 1e-12
+    if not np.any(non_horiz):
+        return mask
+    y_lo, y_hi, x_lo, x_hi = y_lo[non_horiz], y_hi[non_horiz], x_lo[non_horiz], x_hi[non_horiz]
+    inv_dy = 1.0 / (y_hi - y_lo)
+
+    r_start = np.maximum(0, np.ceil((y_lo - y_min) / px - 0.5).astype(np.int64))
+    r_end = np.minimum(ny - 1, np.floor((y_hi - y_min) / px - 0.5).astype(np.int64))
+    active_seg = r_start <= r_end
+    if not np.any(active_seg):
+        return mask
+    y_lo, x_lo, x_hi, inv_dy = y_lo[active_seg], x_lo[active_seg], x_hi[active_seg], inv_dy[active_seg]
+    r_start, r_end = r_start[active_seg], r_end[active_seg]
+    dx_inv_dy = (x_hi - x_lo) * inv_dy
+
+    # Vectorized expansion of (row, segment) pairs avoids O(ny * M) per-row Python masks.
+    row_counts = r_end - r_start + 1
+    seg_ids = np.repeat(np.arange(len(r_start), dtype=np.int64), row_counts)
+    offsets = np.arange(len(seg_ids), dtype=np.int64) - np.repeat(np.cumsum(row_counts) - row_counts, row_counts)
+    rows = r_start[seg_ids] + offsets
+    yrs = y_min + (rows + 0.5) * px
+    xs = x_lo[seg_ids] + (yrs - y_lo[seg_ids]) * dx_inv_dy[seg_ids]
+
+    order = np.lexsort((xs, rows))
+    rows_s = rows[order]
+    xs_s = xs[order]
+    # Split sorted arrays by row boundaries
+    split_pts = np.flatnonzero(np.diff(rows_s)) + 1
+    starts = np.concatenate(([0], split_pts))
+    ends = np.concatenate((split_pts, [len(rows_s)]))
+    inv_px = 1.0 / px
+    for s_i, e_i in zip(starts, ends):
+        count = e_i - s_i
+        if count < 2:
+            continue
+        r = int(rows_s[s_i])
+        row_xs = xs_s[s_i:e_i]
+        for k in range(0, count - 1, 2):
+            ix0 = int(math.ceil((row_xs[k] - x_min) * inv_px - 0.5))
+            ix1 = int(math.floor((row_xs[k + 1] - x_min) * inv_px - 0.5)) + 1
+            if ix1 > 0 and ix0 < nx:
+                mask[r, max(0, ix0):min(nx, ix1)] = True
+    return mask
+
+
+def _analyze_part_layer_printability(
+    pts: np.ndarray,
+    tris: np.ndarray,
+    overhang_degrees: float = 45.0,
+    nozzle_mm: float = 0.4,
+) -> dict[str, Any]:
+    """Run generic 2D-layer FDM pre-checks on one part already rotated into its print orientation."""
+    result: dict[str, Any] = {
+        'floatingIslandCount': 0,
+        'floatingMinZMm': None,
+        'floatingMaxAreaMm2': 0.0,
+        'thinWallLayerCount': 0,
+        'thinWallAreaMm2': 0.0,
+        'trappedOverhangAreaMm2': 0.0,
+        'tipOverRisk': False,
+        'comInsideBed': True,
+    }
+    if len(tris) < 4:
+        return result
+
+    normals, areas = _triangle_normals_and_areas(pts, tris)
+    stab = _bed_stability_metrics(pts, tris, normals, areas)
+    result['tipOverRisk'] = stab['tipOverRisk']
+    result['comInsideBed'] = stab['comInsideBed']
+
+    z_min = float(pts[:, 2].min())
+    z_max = float(pts[:, 2].max())
+    height = z_max - z_min
+    if height < 0.4:
+        return result
+
+    from scipy import ndimage
+
+    x_min, x_max = float(pts[:, 0].min()), float(pts[:, 0].max())
+    y_min, y_max = float(pts[:, 1].min()), float(pts[:, 1].max())
+    span = max(x_max - x_min, y_max - y_min, 1.0)
+    px = max(0.16, span / 160.0)
+    pad = 2
+    x0 = x_min - pad * px
+    y0 = y_min - pad * px
+    nx = int(math.ceil((x_max - x_min) / px)) + 2 * pad + 1
+    ny = int(math.ceil((y_max - y_min) / px)) + 2 * pad + 1
+    px_area = px * px
+
+    n_layers = min(36, max(4, int(math.ceil(height / 0.8))))
+    margin = min(0.15, height * 0.08)
+    z_levels = np.linspace(z_min + margin, z_max - margin, n_layers)
+
+    v0z = pts[tris[:, 0], 2]
+    v1z = pts[tris[:, 1], 2]
+    v2z = pts[tris[:, 2], 2]
+    tri_z_min = np.minimum(np.minimum(v0z, v1z), v2z)
+    tri_z_max = np.maximum(np.maximum(v0z, v1z), v2z)
+
+    masks: list[np.ndarray] = []
+    for z in z_levels:
+        masks.append(_rasterize_z_slice(pts, tris, tri_z_min, tri_z_max, float(z), x0, y0, px, nx, ny))
+
+    # 1. Floating islands: 2D components starting on layer k >= 1 with zero overlap on layer k - 1.
+    dilate_r = max(1, int(math.ceil(0.6 / px)))
+    floating_count = 0
+    floating_min_z: float | None = None
+    floating_max_area = 0.0
+    for k in range(1, n_layers):
+        cur = masks[k]
+        if not np.any(cur):
+            continue
+        prev_sup = ndimage.binary_dilation(masks[k - 1], iterations=dilate_r) if np.any(masks[k - 1]) else masks[k - 1]
+        labeled, num = ndimage.label(cur)
+        if num == 0:
+            continue
+        counts = np.bincount(labeled.ravel())
+        for comp_id in range(1, num + 1):
+            comp_area = float(counts[comp_id]) * px_area
+            if comp_area < 3.0:
+                continue
+            if not np.any(prev_sup[labeled == comp_id]):
+                floating_count += 1
+                z_rel = float(z_levels[k] - z_min)
+                if floating_min_z is None or z_rel < floating_min_z:
+                    floating_min_z = z_rel
+                if comp_area > floating_max_area:
+                    floating_max_area = comp_area
+
+    result['floatingIslandCount'] = floating_count
+    result['floatingMinZMm'] = round(floating_min_z, 2) if floating_min_z is not None else None
+    result['floatingMaxAreaMm2'] = round(floating_max_area, 2)
+
+    # 2. Sub-nozzle thin walls (< ~1.1x nozzle width) via morphological opening on interior layers.
+    half_wall_mm = nozzle_mm * 0.55  # 0.22 mm radius -> 0.44 mm wall thickness
+    if px <= 0.22 and n_layers >= 4:
+        reconstruct_iters = max(1, int(math.ceil((half_wall_mm + px * 0.5) / px)))
+        thin_layers = 0
+        thin_max_area = 0.0
+        for k in range(1, n_layers - 1):
+            cur = masks[k]
+            if not np.any(cur):
+                continue
+            edt = ndimage.distance_transform_edt(cur) * px
+            core = edt >= half_wall_mm
+            reconstructed = ndimage.binary_dilation(core, iterations=reconstruct_iters) if np.any(core) else core
+            thin = cur & (~reconstructed)
+            if not np.any(thin):
+                continue
+            labeled, num = ndimage.label(thin)
+            counts = np.bincount(labeled.ravel())
+            layer_thin_area = sum(
+                float(counts[cid]) * px_area for cid in range(1, num + 1) if float(counts[cid]) * px_area >= 1.5
+            )
+            if layer_thin_area >= 1.5:
+                thin_layers += 1
+                if layer_thin_area > thin_max_area:
+                    thin_max_area = layer_thin_area
+        if thin_layers >= 2:
+            result['thinWallLayerCount'] = thin_layers
+            result['thinWallAreaMm2'] = round(thin_max_area, 2)
+
+    # 3. Trapped overhangs: downward overhang faces that sit above solid material of the same part.
+    threshold_z = -math.sin(math.radians(overhang_degrees)) - 1e-6
+    on_bed = (tri_z_max <= z_min + 0.1) & (normals[:, 2] <= -0.99)
+    is_overhang = (~on_bed) & (tri_z_max > z_min + 0.1) & (normals[:, 2] < threshold_z) & (areas > 1e-9)
+    if np.any(is_overhang):
+        below_any: list[np.ndarray] = []
+        acc = np.zeros((ny, nx), dtype=bool)
+        for k in range(n_layers):
+            below_any.append(acc.copy())
+            acc |= masks[k]
+        ov_ids = np.nonzero(is_overhang)[0]
+        ov_centroids = (pts[tris[ov_ids, 0]] + pts[tris[ov_ids, 1]] + pts[tris[ov_ids, 2]]) / 3.0
+        dz = float(z_levels[1] - z_levels[0]) if n_layers > 1 else 1.0
+        trapped_area = 0.0
+        for idx, cen in zip(ov_ids, ov_centroids):
+            k_tri = int(round((cen[2] - z_levels[0]) / max(dz, 1e-6)))
+            k_check = min(n_layers - 1, k_tri - 1)
+            if k_check < 1:
+                continue
+            ix = int(round((cen[0] - x0) / px - 0.5))
+            iy = int(round((cen[1] - y0) / px - 0.5))
+            if 0 <= ix < nx and 0 <= iy < ny and below_any[k_check][iy, ix]:
+                trapped_area += float(areas[idx])
+        result['trappedOverhangAreaMm2'] = round(trapped_area, 2)
+
+    return result
+
+
 def analyze_part_print_orientation(
     pts: np.ndarray,
     tris: np.ndarray,
     overhang_degrees: float = 45.0,
     brep_shape: Any = None,
+    include_layer_checks: bool = False,
 ) -> dict[str, Any]:
     """Find the optimal flat print orientation for one part and report overhangs/bed contact."""
     candidates: list[np.ndarray] = [
@@ -508,12 +900,17 @@ def analyze_part_print_orientation(
     for down_normal in candidates:
         rot = _rotation_to_down(down_normal)
         rotated = pts @ rot.T
+        normals, areas = _triangle_normals_and_areas(rotated, tris)
         metrics = _overhang_metrics(rotated, tris, overhang_degrees)
+        stab = _bed_stability_metrics(rotated, tris, normals, areas)
         bed_area = metrics['bedContactAreaMm2']
         overhang_area = metrics['overhangAreaMm2']
         height = metrics['heightMm']
         contact_penalty = 500.0 if bed_area < MIN_BED_CONTACT_MM2 else 0.0
-        score = overhang_area * 4.0 - bed_area + height * 0.25 + contact_penalty
+        # Strongly penalize orientations that tip over on the build plate or balance on a narrow sliver.
+        stability_penalty = 2500.0 if stab['tipOverRisk'] else 0.0
+        sliver_penalty = 600.0 if (bed_area < 200.0 and bed_area < 0.08 * stab['xyBboxAreaMm2']) else 0.0
+        score = overhang_area * 4.0 - bed_area + height * 0.25 + contact_penalty + stability_penalty + sliver_penalty
         if score < best_score - 1e-6:
             best_score = score
             best = {
@@ -523,9 +920,14 @@ def analyze_part_print_orientation(
                 'overhangFaceCount': metrics['overhangFaceCount'],
                 'overhangAreaMm2': round(overhang_area, 2),
                 'heightMm': round(height, 2),
+                '_rot': rot,
             }
 
     assert best is not None
+    rot = best.pop('_rot')
+    if include_layer_checks:
+        rotated_best = pts @ rot.T
+        best['layerChecks'] = _analyze_part_layer_printability(rotated_best, tris, overhang_degrees)
     return best
 
 
@@ -1181,6 +1583,10 @@ def validate(request: dict[str, Any]) -> dict[str, Any]:
         body_boxes = [(b['points'].min(axis=0), b['points'].max(axis=0)) for b in bodies]
 
         for b_idx, body in enumerate(bodies):
+            # Valid closed B-Rep solids tessellated by OCCT cannot self-intersect;
+            # still check mesh-only inputs and any part failing closed B-Rep validation.
+            if body['id'] in valid_closed_ids:
+                continue
             pts_b = body['points']
             tris_b = body['triangles']
             topo_b = [frozenset((int(t[0]), int(t[1]), int(t[2]))) for t in tris_b]
@@ -1261,12 +1667,16 @@ def validate(request: dict[str, Any]) -> dict[str, Any]:
 
         intersecting_faces = len(intersecting_face_keys)
 
-        # Overhangs & per-part print orientation analysis
+        # Overhangs & per-part print orientation + generic 2D-layer printability analysis
         mfg_mode = (request.get('assembly') or {}).get('manufacturing', {}).get('mode')
         use_per_part_orient = (mfg_mode == 'separate') or (companion_breps is not None)
         overhang_count = 0
         overhang_details: dict[str, Any] | None = None
         small_contact_parts: list[dict[str, Any]] = []
+        floating_island_parts: list[dict[str, Any]] = []
+        thin_wall_parts: list[dict[str, Any]] = []
+        tip_over_parts: list[dict[str, Any]] = []
+        trapped_overhang_parts: list[dict[str, Any]] = []
 
         if use_per_part_orient:
             print_orientations = {}
@@ -1275,8 +1685,10 @@ def validate(request: dict[str, Any]) -> dict[str, Any]:
                 pid = body['id']
                 brep_shape = companion_breps.get(pid) if companion_breps else None
                 orient = analyze_part_print_orientation(
-                    body['points'], body['triangles'], overhang_deg, brep_shape=brep_shape,
+                    body['points'], body['triangles'], overhang_deg,
+                    brep_shape=brep_shape, include_layer_checks=True,
                 )
+                layer = orient.pop('layerChecks', {})
                 print_orientations[pid] = orient
                 overhang_count += orient['overhangFaceCount']
                 if orient['overhangFaceCount'] > 0:
@@ -1290,6 +1702,34 @@ def validate(request: dict[str, Any]) -> dict[str, Any]:
                     small_contact_parts.append({
                         'part': pid,
                         'bedContactAreaMm2': orient['bedContactAreaMm2'],
+                        'rotationEulerDeg': orient['rotationEulerDeg'],
+                    })
+                if layer.get('floatingIslandCount', 0) > 0:
+                    floating_island_parts.append({
+                        'part': pid,
+                        'count': layer['floatingIslandCount'],
+                        'minZMm': layer['floatingMinZMm'],
+                        'maxAreaMm2': layer['floatingMaxAreaMm2'],
+                        'rotationEulerDeg': orient['rotationEulerDeg'],
+                    })
+                if layer.get('thinWallLayerCount', 0) > 0:
+                    thin_wall_parts.append({
+                        'part': pid,
+                        'layerCount': layer['thinWallLayerCount'],
+                        'maxAreaMm2': layer['thinWallAreaMm2'],
+                    })
+                if layer.get('tipOverRisk'):
+                    tip_over_parts.append({
+                        'part': pid,
+                        'comInsideBed': layer.get('comInsideBed', False),
+                        'bedContactAreaMm2': orient['bedContactAreaMm2'],
+                        'heightMm': orient['heightMm'],
+                        'rotationEulerDeg': orient['rotationEulerDeg'],
+                    })
+                if layer.get('trappedOverhangAreaMm2', 0.0) >= 20.0:
+                    trapped_overhang_parts.append({
+                        'part': pid,
+                        'trappedOverhangAreaMm2': layer['trappedOverhangAreaMm2'],
                         'rotationEulerDeg': orient['rotationEulerDeg'],
                     })
             if per_part_overhangs:
@@ -1322,6 +1762,34 @@ def validate(request: dict[str, Any]) -> dict[str, Any]:
                 'count': len(small_contact_parts),
                 'severity': 'warning',
                 'details': {'minimumBedContactMm2': MIN_BED_CONTACT_MM2, 'parts': small_contact_parts[:8]},
+            })
+        if floating_island_parts:
+            checks.append({
+                'code': 'floating_islands',
+                'count': sum(item['count'] for item in floating_island_parts),
+                'severity': 'warning',
+                'details': {'parts': floating_island_parts[:8]},
+            })
+        if thin_wall_parts:
+            checks.append({
+                'code': 'unprintable_thin_walls',
+                'count': len(thin_wall_parts),
+                'severity': 'warning',
+                'details': {'nozzleMm': 0.4, 'parts': thin_wall_parts[:8]},
+            })
+        if tip_over_parts:
+            checks.append({
+                'code': 'tip_over_risk',
+                'count': len(tip_over_parts),
+                'severity': 'warning',
+                'details': {'parts': tip_over_parts[:8]},
+            })
+        if trapped_overhang_parts:
+            checks.append({
+                'code': 'trapped_overhangs',
+                'count': len(trapped_overhang_parts),
+                'severity': 'warning',
+                'details': {'parts': trapped_overhang_parts[:8]},
             })
 
         if companion_breps is not None:

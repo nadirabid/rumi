@@ -1090,14 +1090,43 @@ def validate(request: dict[str, Any]) -> dict[str, Any]:
                     transformed_actions.append(act)
                 step['actions'] = transformed_actions
 
-        mechanics_bodies = [
-            {
+        def _collision_mesh(body_entry: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+            if companion_breps is None or total_triangles <= 25000:
+                return body_entry['points'], body_entry['triangles']
+            shape = companion_breps.get(body_entry['id'])
+            if shape is None or len(body_entry['triangles']) <= 4000:
+                return body_entry['points'], body_entry['triangles']
+            try:
+                import build123d as bd
+                from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
+                from OCP.BRepTools import BRepTools
+
+                copied = BRepBuilderAPI_Copy(shape, True).Shape()
+                BRepTools.Clean_s(copied)
+                verts, tris = bd.Shape(copied).tessellate(0.15, 0.40)
+                if not verts or not tris:
+                    return body_entry['points'], body_entry['triangles']
+                c_pts = np.array([(v.X, v.Y, v.Z) for v in verts], dtype=np.float64)
+                c_tris = np.asarray(tris, dtype=np.int64)
+                c_pts, c_tris = weld_mesh(c_pts, c_tris, dist=0.001)
+                if len(c_tris) >= len(body_entry['triangles']) or len(c_tris) < 4:
+                    return body_entry['points'], body_entry['triangles']
+                topo = _check_part_topology(c_pts, c_tris, 1e-12, 160.0, valid_closed_brep=False)
+                if topo['non_manifold_edges'] == 0 and topo['inconsistent_winding'] == 0 and topo['degenerate_faces'] == 0:
+                    return c_pts, c_tris
+            except Exception as _collision_tess_err:
+                # Fall back to the preview mesh if collision re-tessellation fails.
+                pass
+            return body_entry['points'], body_entry['triangles']
+
+        mechanics_bodies = []
+        for body in bodies:
+            m_pts, m_tris = _collision_mesh(body)
+            mechanics_bodies.append({
                 'id': body['id'],
-                'vertices': body['points'].tolist(),
-                'triangles': body['triangles'].tolist(),
-            }
-            for body in bodies
-        ]
+                'vertices': m_pts.tolist(),
+                'triangles': m_tris.tolist(),
+            })
         Path(request['mechanicsOutput']).write_text(
             json.dumps({'bodies': mechanics_bodies, 'assembly': assembly_out}, allow_nan=False) + '\n',
             encoding='utf-8',

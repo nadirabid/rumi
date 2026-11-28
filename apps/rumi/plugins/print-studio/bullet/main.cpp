@@ -94,33 +94,60 @@ Settings settings(const Json& value) {
 }
 struct Body {
     std::string id, topology;
+    bool isStatic = false;
     std::vector<btVector3> vertices;
     std::vector<std::array<int,3>> triangles;
     btVector3 com, moments;
+    btVector3 localMin{0,0,0}, localMax{0,0,0};
     btMatrix3x3 basis, inertia;
     double mass = 0;
-    std::unique_ptr<btTriangleMesh> mesh;
-    std::unique_ptr<btGImpactMeshShape> shape;
+    std::shared_ptr<btTriangleMesh> mesh;
+    std::shared_ptr<btCollisionShape> shape;
 };
-// GImpact updates shape caches during collision detection; workers never share them.
+// GImpact updates shape caches during collision detection; clone per worker for thread safety.
+// All meshes use btGImpactMeshShape so every pair uses GImpact's exact SAT triangle-triangle collider
+// (btGImpactCollisionAlgorithm::gimpact_vs_concave falls back to zero-margin GJK/EPA which drops contacts).
 void buildShape(Body& b) {
-    b.mesh=std::make_unique<btTriangleMesh>(true,false);
+    b.mesh=std::make_shared<btTriangleMesh>(true,false);
+    btVector3 lo(1e30,1e30,1e30), hi(-1e30,-1e30,-1e30);
     for(auto triangle:b.triangles) {
-        btVector3 points[3]; for(int i=0;i<3;++i) points[i]=b.basis.transpose()*(b.vertices[triangle[i]]-b.com);
+        btVector3 points[3];
+        for(int i=0;i<3;++i) {
+            points[i]=b.basis.transpose()*(b.vertices[triangle[i]]-b.com);
+            lo.setMin(points[i]); hi.setMax(points[i]);
+        }
         b.mesh->addTriangle(points[0],points[1],points[2],false);
     }
-    b.shape=std::make_unique<btGImpactMeshShape>(b.mesh.get()); b.shape->setMargin(0); b.shape->updateBound();
+    b.localMin=lo; b.localMax=hi;
+    auto gimpact=std::make_shared<btGImpactMeshShape>(b.mesh.get());
+    gimpact->setMargin(0); gimpact->updateBound();
+    b.shape=std::move(gimpact);
 }
 std::vector<Body> cloneBodies(const std::vector<Body>& source) {
     std::vector<Body> result;
+    result.reserve(source.size());
     for (const auto& b : source) {
         Body copy;
-        copy.id=b.id; copy.vertices=b.vertices; copy.triangles=b.triangles;
-        copy.com=b.com; copy.moments=b.moments; copy.basis=b.basis; copy.inertia=b.inertia; copy.mass=b.mass;
+        copy.id=b.id; copy.isStatic=b.isStatic; copy.vertices=b.vertices; copy.triangles=b.triangles;
+        copy.com=b.com; copy.moments=b.moments; copy.localMin=b.localMin; copy.localMax=b.localMax;
+        copy.basis=b.basis; copy.inertia=b.inertia; copy.mass=b.mass;
         buildShape(copy);
         result.push_back(std::move(copy));
     }
     return result;
+}
+std::pair<btVector3,btVector3> worldAabb(const Body& b, const btTransform& tr, double pad = 0) {
+    const btVector3 half=(b.localMax-b.localMin)*0.5;
+    const btVector3 center=(b.localMin+b.localMax)*0.5;
+    const btMatrix3x3 absBasis=tr.getBasis().absolute();
+    const btVector3 worldCenter=tr*center;
+    const btVector3 extent(absBasis[0].dot(half)+pad, absBasis[1].dot(half)+pad, absBasis[2].dot(half)+pad);
+    return {worldCenter-extent, worldCenter+extent};
+}
+bool aabbOverlap(const std::pair<btVector3,btVector3>& a, const std::pair<btVector3,btVector3>& b) {
+    return a.first.x()<=b.second.x() && a.second.x()>=b.first.x()
+        && a.first.y()<=b.second.y() && a.second.y()>=b.first.y()
+        && a.first.z()<=b.second.z() && a.second.z()>=b.first.z();
 }
 int root(std::vector<int>& groups, int i) {
     while (groups[i] != i) { groups[i] = groups[groups[i]]; i = groups[i]; }
@@ -193,7 +220,7 @@ Body body(const Json& value, const Settings& s, std::size_t& totalTriangles, std
     for(int i=0;i<3;++i) if(!std::isfinite(b.moments[i]) || b.moments[i]<=1e-18) b.topology="invalid_body_inertia";
     if(!b.topology.empty()) return b;
     // The fixed root needs no inertia frame; keep its contact tree aligned with the exported geometry.
-    if (fixed) b.basis.setIdentity();
+    if (fixed) { b.basis.setIdentity(); b.isStatic=true; }
     buildShape(b);
     return b;
 }
@@ -236,7 +263,7 @@ struct World {
     btDiscreteDynamicsWorld world{&dispatcher,&broadphase,&solver,&configuration};
     std::vector<std::unique_ptr<btRigidBody>> bodies;
     std::set<std::size_t> removed;
-    World(std::vector<Body>& definitions,std::size_t fixture,const Settings& s,const State* initial=nullptr) {
+    World(std::vector<Body>& definitions,std::size_t fixture,const Settings& s,const State* initial=nullptr,const std::vector<bool>* active=nullptr) {
         btGImpactCollisionAlgorithm::registerAlgorithm(&dispatcher);
         world.setGravity(s.gravity);
         world.getSolverInfo().m_numIterations=s.iterations;
@@ -253,7 +280,9 @@ struct World {
             object->setCenterOfMassTransform(initial?initial->transforms[i]:btTransform(part.basis,part.com));
             if(initial && !fixed) {object->setLinearVelocity(initial->linear[i]);object->setAngularVelocity(initial->angular[i]);}
             object->setActivationState(DISABLE_DEACTIVATION); object->setSleepingThresholds(0,0);
-            world.addRigidBody(object.get()); bodies.push_back(std::move(object));
+            if (!active || (*active)[i]) world.addRigidBody(object.get());
+            else removed.insert(i);
+            bodies.push_back(std::move(object));
         }
     }
     ~World() {for(std::size_t i=0;i<bodies.size();++i)if(!removed.count(i))world.removeRigidBody(bodies[i].get());}
@@ -342,12 +371,17 @@ constexpr double retentionLoad=4,arrestWindow=.25,arrestFraction=.25;
 // Loads exercise contacts. The declared connections are observed, never added to Bullet as constraints.
 Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector<Connection>& connections,const Settings& s,
             const State* initial,const std::map<std::size_t,double>& targets,std::size_t loaded,btVector3 force,btVector3 torque,
-            const std::string& kind,double duration,int& budget) {
+            const std::string& kind,double duration,int& budget,const std::vector<bool>* active=nullptr) {
     int steps=int(std::ceil(duration/s.dt));
     if(budget+steps>s.maxTotalSteps)return {{{"kind",kind},{"status","review"},{"code","probe_budget_exhausted"}},State{}};
     budget+=steps;
-    World w(definitions,fixture,s,initial);
+    World w(definitions,fixture,s,initial,active);
     std::vector<double> angles=initial?initial->angles:std::vector<double>(connections.size(),0);
+    std::vector<std::size_t> activeConnections;
+    for(std::size_t i=0;i<connections.size();++i) {
+        if(!active || ((*active)[connections[i].parent] && (*active)[connections[i].child]))
+            activeConnections.push_back(i);
+    }
     double maxDrift=0,maxOffAxis=0,maxDepth=0,maxForce=force.length(),maxTorque=torque.length();
     std::string failure,failedConnection;
     std::map<std::size_t,double> integratedErrors;
@@ -399,7 +433,7 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
         contact=w.penetration(s.penetration);
         maxDepth=std::max(maxDepth,contact.depth);
         if(contact.depth>s.penetration) { failure="excessive_penetration"; collided=true; collisionContact=contact; }
-        for(std::size_t i=0;i<connections.size();++i) {
+        for(std::size_t i : activeConnections) {
             const auto& c=connections[i];
             if(isFrictionRetainer(c))continue;
             auto m=measure(w,c,angles[i]);angles[i]=m.angle;
@@ -413,7 +447,7 @@ Trial trial(std::vector<Body>& definitions,std::size_t fixture,const std::vector
     }
     // A retention load must be arrested: a part still travelling outward over the probe's final window has not stopped inside the bound.
     if(kind=="retention" && failure.empty() && steps>0)
-        for(std::size_t i=0;i<connections.size();++i)
+        for(std::size_t i : activeConnections)
             if(!isFrictionRetainer(connections[i]) && (driftEnd[i]-driftMark[i]>arrestFraction*s.retentionTravel || tiltEnd[i]-tiltMark[i]>arrestFraction*s.retentionTilt)) {failure="unretained_part";failedConnection=connections[i].id;break;}
     Json actual=Json::object();
     for(auto [index,target]:targets) {
@@ -789,19 +823,38 @@ Json evaluate(const Json& request) {
         return true;
     };
     std::vector<std::vector<Body>> workerBodies;
-    bool parallelRetention=false;
-    auto loads=[&](std::size_t index,const State& state,const std::vector<btVector3>& axes,double amount,bool rotation) {
-        const int workers=parallelRetention?s.retentionWorkers:1;
+    auto localCluster=[&](std::size_t index,const State& state) {
+        std::vector<bool> active(bodies.size(),false);
+        active[fixture]=true;
+        const double pad=s.retentionTravel+.005;
+        std::vector<std::pair<btVector3,btVector3>> boxes(bodies.size());
+        for(std::size_t k=0;k<bodies.size();++k) boxes[k]=worldAabb(bodies[k],state.transforms[k],pad);
+        std::vector<std::size_t> queue;
+        auto push=[&](std::size_t idx){ if(idx!=fixture && !active[idx]) { active[idx]=true; queue.push_back(idx); } };
+        push(connections[index].child);
+        push(connections[index].parent);
+        for(std::size_t head=0;head<queue.size();++head) {
+            const std::size_t cur=queue[head];
+            for(std::size_t j=0;j<bodies.size();++j) {
+                if(j!=fixture && !active[j] && aabbOverlap(boxes[cur],boxes[j])) push(j);
+            }
+        }
+        return active;
+    };
+    struct ProbeLoad { btVector3 force, torque; };
+    auto runProbeBatch=[&](std::size_t index,const State& state,const std::vector<ProbeLoad>& batch) {
+        const int workers=s.retentionWorkers;
         if(workers>1 && workerBodies.empty())
             for(int i=0;i<workers;++i)workerBodies.push_back(cloneBodies(bodies));
+        const auto active=localCluster(index,state);
         const int steps=int(std::ceil(s.retentionDuration/s.dt));
-        for(std::size_t start=0;start<axes.size()*2;start+=workers) {
-            const int count=std::min(workers,int(axes.size()*2-start));
+        for(std::size_t start=0;start<batch.size();start+=workers) {
+            const int count=std::min(workers,int(batch.size()-start));
             auto probe=[&](int offset,std::vector<Body>& geometry) {
-                const auto load=axes[(start+offset)/2]*((start+offset)%2?amount:-amount);
+                const auto& item=batch[start+offset];
                 int reserved=budget+offset*steps;
                 return trial(geometry,fixture,connections,s,&state,{},index,
-                    rotation?btVector3(0,0,0):load,rotation?load:btVector3(0,0,0),"retention",s.retentionDuration,reserved);
+                    item.force,item.torque,"retention",s.retentionDuration,reserved,&active);
             };
             std::vector<Trial> trials;
             if(workers==1)trials.push_back(probe(0,bodies));
@@ -828,7 +881,12 @@ Json evaluate(const Json& request) {
         if(c.kind!="revolute" && !isRotationalRetainer(c))rotations.push_back(c.axis);
         double force=retentionLoad*mass*s.retentionTravel/(s.retentionDuration*s.retentionDuration);
         if(force>s.force) {finding("probe_inconclusive",c.id,"warning",{{"reason","force_cap"}});return false;}
-        if(!loads(index,state,translations,force,false))return false;
+        std::vector<ProbeLoad> batch;
+        batch.reserve((translations.size()+rotations.size())*2);
+        for(auto axis:translations) {
+            batch.push_back({axis*-force,btVector3(0,0,0)});
+            batch.push_back({axis*force,btVector3(0,0,0)});
+        }
         for(auto axis:rotations) {
             auto worldAxis=state.transforms[c.parent].getBasis()*axis;
             auto childBasis=state.transforms[c.child].getBasis(),parentBasis=state.transforms[c.parent].getBasis();
@@ -836,31 +894,152 @@ Json evaluate(const Json& request) {
             if(c.parent!=fixture)inverse+=worldAxis.dot(parentBasis*btMatrix3x3(1/parent.moments.x(),0,0,0,1/parent.moments.y(),0,0,0,1/parent.moments.z())*parentBasis.transpose()*worldAxis);
             double torque=retentionLoad/inverse*s.retentionTilt/(s.retentionDuration*s.retentionDuration);
             if(torque>s.torque) {finding("probe_inconclusive",c.id,"warning",{{"reason","torque_cap"}});return false;}
-            if(!loads(index,state,{axis},torque,true))return false;
+            batch.push_back({btVector3(0,0,0),axis*-torque});
+            batch.push_back({btVector3(0,0,0),axis*torque});
         }
-        return true;
+        return runProbeBatch(index,state,batch);
     };
+    auto subtreeOf=[&](std::size_t rootBody) {
+        std::vector<std::size_t> order;
+        std::vector<bool> mask(bodies.size(),false);
+        order.push_back(rootBody); mask[rootBody]=true;
+        for(std::size_t h=0;h<order.size();++h) {
+            for(auto ch:children[order[h]]) if(!mask[ch]) { mask[ch]=true; order.push_back(ch); }
+        }
+        return std::pair{order,mask};
+    };
+    std::vector<bool> isMovingChild(bodies.size(),false);
+    for(const auto& c:connections) if(c.kind!="fixed") isMovingChild[c.child]=true;
+    State nominalState;
+    nominalState.angles.assign(connections.size(),0);
+    for(const auto& b:bodies) {
+        nominalState.transforms.push_back(btTransform(b.basis,b.com));
+        nominalState.linear.push_back(btVector3(0,0,0));
+        nominalState.angular.push_back(btVector3(0,0,0));
+    }
     if(simulate) {
         auto rest=trial(bodies,fixture,connections,s,nullptr,{},connections.size(),{0,0,0},{0,0,0},"rest",s.restDuration,budget);
         simulate=accept(rest,connections.size());
         for(std::size_t i=0;i<connections.size()&&simulate;++i)simulate=retention(i,rest.finalState);
         if(!fullBudget)simulate=false;
-        parallelRetention=true;
         for(std::size_t i=0;i<connections.size()&&simulate;++i) {
             const auto& c=connections[i];if(c.kind=="fixed")continue;
+            const auto [sub,subMask]=subtreeOf(c.child);
+            const auto parentTr=nominalState.transforms[c.parent];
+            const btVector3 worldPivot=parentTr*c.parentPivot;
+            const btVector3 worldAxis=(parentTr.getBasis()*c.axis).normalized();
+            auto deltaTransform=[&](double q) {
+                if(c.kind=="revolute") {
+                    btMatrix3x3 rot(btQuaternion(worldAxis,q));
+                    return btTransform(rot,worldPivot-rot*worldPivot);
+                }
+                return btTransform(btMatrix3x3::getIdentity(),worldAxis*q);
+            };
             for(double endpoint:{c.low,c.high})if(endpoint!=0&&simulate) {
                 double tolerance=c.kind=="revolute"?s.angularTolerance:s.linearTolerance;
                 if(std::abs(endpoint)<=tolerance) {finding("probe_inconclusive",c.id,"warning",{{"reason","movement_below_tolerance"}});simulate=false;break;}
-                State state=rest.finalState;
-                int samples=int(std::ceil(std::abs(endpoint)/(c.kind=="revolute"?s.movementDegrees*pi/180:s.movementMm*.001)));
+                const int samples=int(std::ceil(std::abs(endpoint)/(c.kind=="revolute"?s.movementDegrees*pi/180:s.movementMm*.001)));
                 std::vector<double> targets;for(int n=1;n<=samples;++n)targets.push_back(endpoint*n/samples);targets.push_back(0);
-                for(std::size_t step=0;step<targets.size();++step) {const double target=targets[step];
-                    auto movement=trial(bodies,fixture,connections,s,&state,{{i,target}},connections.size(),{0,0,0},{0,0,0},"movement",s.duration,budget);
-                    if(!accept(movement,i)){simulate=false;break;}state=movement.finalState;
-                    // The endpoint pose retains every connection; intermediate samples and the return retain only the moved one.
-                    const bool endpointPose=int(step)==samples-1;
-                    for(std::size_t other=0;other<connections.size();++other)if((endpointPose||other==i)&&!retention(other,state)){simulate=false;break;}
-                    if(!simulate)break;
+                // Try fast kinematic collision sweep along the declared joint range first.
+                // Fall back to dynamic Bullet only if the swept subtree contacts another free moving part (e.g. meshing gears).
+                const double fineStep=c.kind=="revolute"?std::min(5.0,s.movementDegrees)*pi/180:std::min(1.0,s.movementMm)*.001;
+                const int fineSamples=std::max(samples,int(std::ceil(std::abs(endpoint)/fineStep)));
+                World kinWorld(bodies,fixture,s,&nominalState);
+                double sweepMaxDepth=0;
+                bool needsDynamic=false, kinBlocked=false;
+                Penetration kinCollision;
+                double blockedValue=0;
+                btVector3 sweptMin(1e30,1e30,1e30), sweptMax(-1e30,-1e30,-1e30);
+                for(int n=0;n<=fineSamples;++n) {
+                    const double q=endpoint*double(n)/fineSamples;
+                    const btTransform dT=deltaTransform(q);
+                    for(std::size_t idx:sub) {
+                        const btTransform pose=dT*nominalState.transforms[idx];
+                        kinWorld.bodies[idx]->setCenterOfMassTransform(pose);
+                        kinWorld.world.updateSingleAabb(kinWorld.bodies[idx].get());
+                        const auto box=worldAabb(bodies[idx],pose,s.retentionTravel+.005);
+                        sweptMin.setMin(box.first); sweptMax.setMax(box.second);
+                    }
+                    kinWorld.world.performDiscreteCollisionDetection();
+                    double stepDepth=0;
+                    const btPersistentManifold* deepest=nullptr;
+                    const btManifoldPoint* deepestPt=nullptr;
+                    for(int mIdx=0;mIdx<kinWorld.dispatcher.getNumManifolds();++mIdx) {
+                        const auto* manifold=kinWorld.dispatcher.getManifoldByIndexInternal(mIdx);
+                        const int b0=manifold->getBody0()->getUserIndex(), b1=manifold->getBody1()->getUserIndex();
+                        if(subMask[b0]==subMask[b1]) continue;
+                        for(int ptIdx=0;ptIdx<manifold->getNumContacts();++ptIdx) {
+                            const auto& pt=manifold->getContactPoint(ptIdx);
+                            const double depth=-pt.getDistance();
+                            if(depth>stepDepth) { stepDepth=depth; deepest=manifold; deepestPt=&pt; }
+                        }
+                    }
+                    sweepMaxDepth=std::max(sweepMaxDepth,stepDepth);
+                    if(deepest && stepDepth>s.penetration) {
+                        const int b0=deepest->getBody0()->getUserIndex(), b1=deepest->getBody1()->getUserIndex();
+                        const int otherBody=subMask[b0]?b1:b0;
+                        if(isMovingChild[otherBody]) {
+                            needsDynamic=true;
+                            break;
+                        }
+                        kinBlocked=true;
+                        blockedValue=q;
+                        kinCollision.depth=stepDepth;
+                        kinCollision.bodies={b0,b1};
+                        kinCollision.position=(deepestPt->getPositionWorldOnA()+deepestPt->getPositionWorldOnB())*.5;
+                        break;
+                    }
+                }
+                if(needsDynamic) {
+                    State state=rest.finalState;
+                    for(std::size_t step=0;step<targets.size();++step) {
+                        const double target=targets[step];
+                        auto movement=trial(bodies,fixture,connections,s,&state,{{i,target}},connections.size(),{0,0,0},{0,0,0},"movement",s.duration,budget);
+                        if(!accept(movement,i)){simulate=false;break;}
+                        state=movement.finalState;
+                        const bool endpointPose=int(step)==samples-1;
+                        if(endpointPose) {
+                            for(std::size_t other=0;other<connections.size();++other)
+                                if(!retention(other,state)){simulate=false;break;}
+                        }
+                        if(!simulate)break;
+                    }
+                } else if(kinBlocked) {
+                    const double scale=c.kind=="revolute"?180/pi:1000;
+                    Trial fail{{{"kind","movement"},{"status","needs_repair"},{"code","excessive_penetration"},
+                        {"durationSeconds",0.0},{"actual",Json{{c.id,blockedValue*scale}}},
+                        {"maxPivotDriftMm",0.0},{"maxOffAxisDegrees",0.0},{"maxPenetrationMm",kinCollision.depth*1000},
+                        {"retentionTravelMm",s.retentionTravel*1000},{"maxForceN",0.0},{"maxTorqueNm",0.0},
+                        {"collision",kinCollision.diagnostic(bodies)},{"connection",c.id}},State{}};
+                    accept(fail,i);
+                    simulate=false;
+                } else {
+                    const double scale=c.kind=="revolute"?180/pi:1000;
+                    for(const double target:targets) {
+                        Trial passed{{{"kind","movement"},{"status","passed"},{"code","probe_passed"},
+                            {"durationSeconds",0.0},{"actual",Json{{c.id,target*scale}}},
+                            {"maxPivotDriftMm",0.0},{"maxOffAxisDegrees",0.0},{"maxPenetrationMm",sweepMaxDepth*1000},
+                            {"retentionTravelMm",s.retentionTravel*1000},{"maxForceN",0.0},{"maxTorqueNm",0.0}},State{}};
+                        accept(passed,i);
+                    }
+                    // Verify retention at the endpoint pose for the moved connection and any spatially affected neighbor.
+                    // For a full-turn revolute joint (e.g. [-180, +180]), c.high is physically identical to c.low.
+                    const bool duplicateFullTurnPose=c.kind=="revolute" && endpoint==c.high && c.low!=0
+                        && std::abs((c.high-c.low)-2*pi)<1e-6;
+                    if(!duplicateFullTurnPose) {
+                        State endpointState=nominalState;
+                        const btTransform endT=deltaTransform(endpoint);
+                        for(std::size_t idx:sub) endpointState.transforms[idx]=endT*nominalState.transforms[idx];
+                        endpointState.angles[i]=endpoint;
+                        const std::pair<btVector3,btVector3> sweptBox{sweptMin,sweptMax};
+                        for(std::size_t other=0;other<connections.size()&&simulate;++other) {
+                            if(other==i) { simulate=retention(other,endpointState); continue; }
+                            const auto& oc=connections[other];
+                            const bool childNear=aabbOverlap(sweptBox,worldAabb(bodies[oc.child],endpointState.transforms[oc.child],0));
+                            const bool parentNear=oc.parent!=fixture && aabbOverlap(sweptBox,worldAabb(bodies[oc.parent],endpointState.transforms[oc.parent],0));
+                            if(childNear||parentNear) simulate=retention(other,endpointState);
+                        }
+                    }
                 }
             }
         }

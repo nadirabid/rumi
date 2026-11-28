@@ -96,98 +96,8 @@ it('draws one object per scene entry and applies the matrix the host measured wi
   const [mesh] = meshes()
   expect(mesh.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([5, 6, 7])
   expect(mesh.geometry.getAttribute('position').count).toBe(3)
-  viewport.dispose()
-})
-
-it('centers the dotted shell after a pan and keeps the camera and mesh inside', async () => {
-  const viewport = createViewport(container(), vi.fn())
-  await viewport.apply({ volume: null, objects: [object('mesh')] })
-  state.resize()
-  const grid = rendered().getObjectByName('Rumi sphere grid')
-  const camera = state.renderer.render.mock.calls.at(-1)[1]
-  const center = grid.getWorldPosition(new THREE.Vector3())
-  const distance = camera.position.distanceTo(center)
-  expect(grid.isPoints).toBe(true)
-  expect(center.equals(state.controls.target)).toBe(true)
-  expect(grid.worldToLocal(camera.position.clone()).length()).toBeLessThan(1)
-
-  state.renderer.render.mockImplementation((_scene, current) => expect(current.layers.test(grid.layers)).toBe(true))
-  camera.position.copy(center).add(new THREE.Vector3(distance * 4, 0, 0))
-  camera.lookAt(state.controls.target)
-  viewport.setHighlightVisible(true)
-  expect(grid.worldToLocal(camera.position.clone()).length()).toBeLessThan(1)
-  expect(camera.layers.test(grid.layers)).toBe(false)
-
-  const pan = new THREE.Vector3(2, -1, 3).multiplyScalar(distance)
-  state.controls.target.add(pan)
-  camera.position.add(pan)
-  camera.lookAt(state.controls.target)
-  camera.updateMatrixWorld()
-  viewport.setHighlightVisible(true)
-  const projected = grid.getWorldPosition(new THREE.Vector3()).project(camera)
-  expect(projected.x).toBeCloseTo(0)
-  expect(projected.y).toBeCloseTo(0)
-  function expectMeshInside() {
-    const mesh = meshes()[0], vertices = mesh.geometry.getAttribute('position')
-    for (let i = 0; i < vertices.count; i++) {
-      const worldPoint = mesh.localToWorld(new THREE.Vector3().fromBufferAttribute(vertices, i))
-      expect(grid.worldToLocal(worldPoint).length()).toBeLessThan(1)
-    }
-  }
-  expectMeshInside()
-
-  const placement = [...identity]
-  placement[12] = distance * 12
-  await viewport.apply({ volume: null, objects: [object('mesh', 'd1', placement)] })
-  expect(grid.getWorldPosition(new THREE.Vector3()).equals(state.controls.target)).toBe(true)
-  expectMeshInside()
-  viewport.dispose()
-})
-
-it('keeps the long axis along the view while orbiting moves the dots across the shell', async () => {
-  const viewport = createViewport(container(), vi.fn())
-  await viewport.apply({ volume: null, objects: [object('mesh')] })
-  state.resize()
-  const grid = rendered().getObjectByName('Rumi sphere grid')
-  const camera = state.renderer.render.mock.calls.at(-1)[1]
-  const { target, addEventListener } = state.controls
-  const change = addEventListener.mock.calls.find(([name]) => name === 'change')[1]
-  const distance = camera.position.distanceTo(target)
-
-  function orbit(direction: THREE.Vector3) {
-    camera.position.copy(target).add(direction.setLength(distance))
-    camera.lookAt(target)
-    camera.updateMatrixWorld()
-    change()
-    grid.updateWorldMatrix(true, false)
-    const viewFromGrid = new THREE.Matrix4().multiplyMatrices(camera.matrixWorldInverse, grid.matrixWorld)
-    const right = new THREE.Vector3(), up = new THREE.Vector3(), depth = new THREE.Vector3()
-    viewFromGrid.clone().transpose().extractBasis(right, up, depth)
-    expect(right.length()).toBeCloseTo(up.length())
-    expect(depth.length() / right.length()).toBeCloseTo(5)
-    right.normalize()
-    up.normalize()
-    depth.normalize()
-    expect(right.dot(up)).toBeCloseTo(0)
-    expect(right.dot(depth)).toBeCloseTo(0)
-    expect(up.dot(depth)).toBeCloseTo(0)
-    return viewFromGrid
-  }
-
-  const start = orbit(new THREE.Vector3(0, -1, 0.25))
-  const dots = grid.geometry.getAttribute('position')
-  const point = new THREE.Vector3(), dot = new THREE.Vector3()
-  let farthest = Infinity
-  for (let i = 0; i < dots.count; i++) {
-    const z = point.fromBufferAttribute(dots, i).applyMatrix4(start).z
-    if (z < farthest) { farthest = z; dot.fromBufferAttribute(dots, i) }
-  }
-  const before = grid.localToWorld(dot.clone()).project(camera)
-  expect(Math.hypot(before.x, before.y)).toBeLessThan(0.1)
-  orbit(new THREE.Vector3(0.3, -1, 0.4))
-  const after = grid.localToWorld(dot.clone()).project(camera)
-  expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeGreaterThan(0.1)
-  expect(Math.max(Math.abs(after.x), Math.abs(after.y))).toBeLessThan(1)
+  expect(rendered().background).toBeNull()
+  rendered().traverse((node: THREE.Object3D) => expect(node).not.toBeInstanceOf(THREE.Points))
   viewport.dispose()
 })
 
@@ -317,7 +227,6 @@ it('captures loaded geometry at cover size and restores the viewport even when e
   await viewport.apply({ volume: { x: 200, y: 200, z: 200 }, objects: [object('cover')] })
   state.resize()
   const scene = rendered()
-  const grid = scene.getObjectByName('Rumi sphere grid')
   const geometry = meshes()[0].geometry
   const camera = state.renderer.render.mock.calls.at(-1)[1]
   const position = camera.position.clone()
@@ -327,7 +236,6 @@ it('captures loaded geometry at cover size and restores the viewport even when e
     expect(scene.children.filter(node => node.isLineSegments).every(node => !node.visible)).toBe(true)
     const coverCamera = state.renderer.render.mock.calls.at(-1)[1]
     expect(coverCamera.isOrthographicCamera).toBe(true)
-    expect(coverCamera.layers.test(grid.layers)).toBe(false)
     expect(coverCamera.right / coverCamera.top).toBeCloseTo(1.5)
     expect(camera.children.find((node: THREE.Object3D) => node instanceof THREE.DirectionalLight)?.visible).toBe(false)
     throw new Error('encoding failed')
@@ -486,7 +394,6 @@ it('captures the same displayed Gaussian in model coordinates and restores scree
     state.renderer.domElement.toDataURL.mockImplementationOnce(() => {
       expect(state.renderer.domElement.width).toBe(800)
       expect(state.renderer.domElement.height).toBe(600)
-      expect(camera.layers.test(rendered().getObjectByName('Rumi sphere grid').layers)).toBe(false)
       return 'data:image/png;base64,cG5n'
     })
     const capture = viewport.captureCursor()

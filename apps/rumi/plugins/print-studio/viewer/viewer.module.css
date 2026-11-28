@@ -8,7 +8,6 @@
   min-width: 0;
   overflow: hidden;
   color: var(--dsw-alias-label-primary);
-  --pv-grid-opacity: .28;
   background: var(--dsw-alias-bg-layer-1);
 
   /* Liquid Glass optical tokens (light theme). */
@@ -62,7 +61,6 @@
     0 1px 3px color-mix(in srgb, var(--dsw-alias-label-primary) 12%, transparent);
 }
 body[data-ds-dark-theme] .rumi-print-viewer {
-  --pv-grid-opacity: .18;
   --pv-lg-accent-soft: color-mix(in srgb, var(--pv-lg-accent) 20%, transparent);
   --pv-lg-accent-hover: color-mix(in srgb, var(--pv-lg-accent) 28%, transparent);
   --pv-lg-accent-glow: color-mix(in srgb, var(--pv-lg-accent) 34%, transparent);

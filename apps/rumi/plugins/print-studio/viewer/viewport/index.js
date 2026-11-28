@@ -19,7 +19,6 @@ import { placeMesh } from '../transform.js'
 import { analyzeMesh } from '../checks.js'
 import { parseUsdModel } from './usd.js'
 import { createActivity } from './activity.js'
-import { createSphereGrid } from './sphere-grid.js'
 import { createHover } from './hover.js'
 import { createHighlight } from './highlight.js'
 import { cursorMeshSnapshot } from './cursor-geometry.js'
@@ -81,7 +80,6 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   let sceneRevision = 0, sceneGeneration = 0
   let designSpec = null, designVolume = null, designPending = null, requestedRenderRequest = null
   let measurement = null
-  const gridBounds = new THREE.Sphere()
   const ink = token(element, '--dsw-alias-label-tertiary', FALLBACK_INK)
   const solidMaterial = new THREE.MeshStandardMaterial({
     color: token(element, '--dsw-alias-brand-primary', FALLBACK_ACCENT),
@@ -190,11 +188,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     if (closed) return
     if (motionFrame !== null) { cancelAnimationFrame(motionFrame); motionFrame = null }
     updateNamedVisuals()
-    grid.update(camera, controls.target, gridBounds)
-    const modelLayers = camera.layers.mask
-    camera.layers.mask |= grid.shell.layers.mask
-    try { renderer.render(scene, camera) }
-    finally { camera.layers.mask = modelLayers }
+    renderer.render(scene, camera)
     drawMotionOverlay()
     const highlight = marker && surfaceOverlay.visible ? marker.hit ?? (regionFocused ? marker.anchor : null) : null
     const named = namedAgent?.entry.region
@@ -224,8 +218,6 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
   element.appendChild(renderer.domElement)
   const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 10000)
   camera.up.set(0, 0, 1)
-  const grid = createSphereGrid(element, ink, renderer.getPixelRatio(), render)
-  scene.add(grid.shell)
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = false
   const activity = createActivity(element, render)
@@ -309,14 +301,10 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     return bounds
   }
 
-  function updateGridBounds() {
-    previewBounds().getBoundingSphere(gridBounds)
-  }
-
   function frame() {
-    updateGridBounds()
-    if (gridBounds.isEmpty()) return
-    const { center, radius } = gridBounds
+    const bounds = previewBounds().getBoundingSphere(new THREE.Sphere())
+    if (bounds.isEmpty()) return
+    const { center, radius } = bounds
     // The pane is usually taller than wide, so clear the narrower of the two fields.
     const vertical = camera.fov * Math.PI / 180
     const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect)
@@ -324,7 +312,6 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     camera.position.copy(center).add(new THREE.Vector3(1, -1, 0.8).setLength(distance))
     controls.target.copy(center)
     controls.update()
-    grid.frame(camera)
   }
 
   function clearSurfaceOverlay() {
@@ -413,7 +400,6 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       designRoot.matrix.fromArray(placed.matrix)
       designRoot.updateMatrixWorld(true)
       measurement = { design, key, report: analyzeMesh(placed.positions, { volume: designVolume }) }
-      if (framed) updateGridBounds()
       if (design.motionIssue) {
         measurement.report.checks.push({ code: 'assembly_motion_unavailable', severity: 'warning', message: design.motionIssue })
         if (measurement.report.status === 'ok') measurement.report.status = 'review'
@@ -496,7 +482,7 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
     },
     /** Enter a print-only preview; an absent saved layout creates deterministic placement. */
     openPrintLayout: (saved, options) => printController.open(saved, options),
-    closePrintLayout() { printController.clear(); showMotion(); updateGridBounds(); syncHighlight(); render() },
+    closePrintLayout() { printController.clear(); showMotion(); syncHighlight(); render() },
     printLayoutState: printController.snapshot,
     selectPrintPart: printController.selectPart,
     selectPrintPlate: printController.selectPlate,
@@ -535,7 +521,6 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         ?? { node: pin.object, point: designRoot.worldToLocal(pin.point.clone()) })
       motion.values = next
       try { showMotion() } catch (error) { motion.values = previous; throw error }
-      updateGridBounds()
       poses.delete(designSpec.path); poses.set(designSpec.path, { values: { ...next }, identity: design.poseIdentity ?? null })
       if (poses.size > 32) poses.delete(poses.keys().next().value)
       const relocated = saved && (motionPreview
@@ -671,7 +656,6 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
         shapeController.clear(); clearMotion(); clearHighlight()
         if (design) { designRoot.remove(design.root); shapeController.clear(); disposeDesign(design) }
         measurement = null; design = null; motion = null; designUrl = null; requestedUrl = null; requestedRenderRequest = null
-        updateGridBounds()
         updateNamedIndex()
         render()
         return null
@@ -772,7 +756,6 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
             volumeKey = key
           }
           if (!framed && (objects.size > 0 || design !== null) && renderer.domElement.width > 0) { framed = true; frame() }
-          else updateGridBounds()
           render()
         } finally { for (const model of loaded.values()) disposeModel(model.root) }
       })())
@@ -804,7 +787,6 @@ export function createViewport(element, onFailure, onCursorMode = () => {}, shar
       clearVolume()
       solidMaterial.dispose()
       blockedMaterial.dispose()
-      grid.dispose()
       environment.dispose()
       renderer.dispose()
       renderer.forceContextLoss()

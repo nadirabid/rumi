@@ -35,7 +35,6 @@
 .rumi-badges-groups {
   display: flex;
   flex-direction: column;
-  max-width: 1160px;
 }
 .rumi-badges-grid {
   display: grid;
